@@ -1,0 +1,8 @@
+# Changes here will be overwritten by Copier; NEVER EDIT MANUALLY
+_commit: v0.16.0
+_src_path: https://github.com/mbercx/python-copier
+coverage: codecov
+doc_deploy: nowhere
+docs: myst
+package_name: aiida-agents
+type_check: strict

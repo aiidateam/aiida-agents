@@ -1,0 +1,5 @@
+# mdformat does NOT read pyproject.toml (verified, v0.7.22) — this standalone
+# file is unavoidable; it is the only mdformat config source, shared by the
+# pre-commit hook and any editor/manual `mdformat` run. Only non-default,
+# project-critical settings are pinned here.
+wrap = "keep"   # never hard-wrap prose; pinned so an upstream default change can't start wrapping

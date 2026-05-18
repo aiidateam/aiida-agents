@@ -1,0 +1,97 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "aiida-agents"
+dynamic = ["version"]
+description = 'Natural-language, multi-agent interface to AiiDA (alpha, work in progress).'
+readme = "README.md"
+requires-python = ">=3.10"
+license = {file = "LICENSE"}
+keywords = ["aiida", "agents", "llm", "mcp", "rag", "workflows", "natural-language"]
+authors = [{ name = "Jaweria Batool" }, { name = "The AiiDA Team" }]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Programming Language :: Python",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+]
+
+[project.optional-dependencies]
+docs = [
+"mystmd"
+]
+tests = [
+  "pytest",
+  "pytest-cov"
+]
+pre-commit = [
+  "pre-commit",
+  "mypy"
+]
+
+[dependency-groups]
+dev = [
+  "aiida-agents[docs,tests,pre-commit]",
+]
+
+[tool.hatch.version]
+path = "src/aiida_agents/__about__.py"
+
+[tool.hatch.envs.default]
+installer = 'uv'
+scripts.bump = [
+  "hatch version {args}",
+  "python dev/update_changelog.py",
+]
+
+[tool.hatch.envs.docs]
+features = ["docs"]
+scripts.build = "cd docs && myst build"
+scripts.serve = "cd docs && myst start"
+
+[tool.hatch.envs.pre-commit]
+features = ["pre-commit"]
+scripts.install = "pre-commit install"
+scripts.run = "pre-commit run {args}"
+
+[tool.hatch.envs.hatch-test]
+features = ["tests"]
+randomize = false
+parallel = false
+
+[[tool.hatch.envs.hatch-test.matrix]]
+python = ["3.10", "3.11", "3.12", "3.13", "3.14"]
+
+[tool.coverage.run]
+source = ["aiida_agents"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+# Floor only. The deterministic, safety-critical core (validator, HITL, query
+# construction) targets ~100%; LLM/agent IO boundaries use `# pragma: no cover`
+# and are validated by the eval harness, not by mock-to-hit-lines tests.
+fail_under = 80
+
+[tool.ruff]
+lint.ignore = [
+    "TRY003",  # https://docs.astral.sh/ruff/rules/raise-vanilla-args/
+    "EM101",   # https://docs.astral.sh/ruff/rules/raw-string-in-exception/
+    "EM102",   # https://docs.astral.sh/ruff/rules/f-string-in-exception/
+    "PLR2004", # https://docs.astral.sh/ruff/rules/magic-value-comparison/
+    "FBT002",  # https://docs.astral.sh/ruff/rules/boolean-default-value-positional-argument/
+    "TID252",  # https://docs.astral.sh/ruff/rules/relative-imports/
+]
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["INP001", "S101"]
+"dev/**/*.py" = ["INP001", "T201"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["src"]
+strict = true

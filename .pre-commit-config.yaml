@@ -1,0 +1,50 @@
+default_install_hook_types: [pre-commit, commit-msg]
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.13.2
+    hooks:
+      - id: ruff-check
+        name: Lint with Ruff
+        types_or: [ python, pyi ]
+        args: [ --fix ]
+      - id: ruff-format
+        name: Format with Ruff
+        types_or: [ python, pyi ]
+
+  - repo: local
+    hooks:
+      - id: mypy
+        name: Type-check with mypy
+        entry: mypy
+        language: system
+        types: [ python ]
+        require_serial: true
+        files: ^src/
+
+  - repo: local
+    hooks:
+      - id: check-commit-msg
+        name: Check commit message format
+        entry: python dev/check_commit_msg.py
+        language: system
+        stages: [commit-msg]
+
+  - repo: https://github.com/astral-sh/uv-pre-commit
+    rev: 0.9.8
+    hooks:
+      # Check and update the uv lockfile (replicates the aiida-core workflow)
+      - id: uv-lock
+
+  - repo: https://github.com/hukkin/mdformat
+    rev: 0.7.22
+    hooks:
+      # Format authored Markdown (docs/adr/, docs/gsoc/). MyST-aware; leaves
+      # fenced code (Mermaid) verbatim. Scoped to authored docs so
+      # copier-managed template Markdown is left untouched and `copier update`
+      # stays conflict-free.
+      - id: mdformat
+        additional_dependencies:
+          - mdformat-myst
+          - mdformat-tables
+        files: ^docs/(adr|gsoc)/.*\.md$
