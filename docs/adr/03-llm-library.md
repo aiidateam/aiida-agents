@@ -1,6 +1,6 @@
 # ADR-03: Adopt an existing provider-agnostic LLM library (don't hand-roll)
 
-> Bare-bones seed — the concrete library is chosen during implementation; this records the decision *not* to build our own abstraction.
+> Seed — the decision *not* to hand-roll is firm; the library lean was confirmed 2026-05-22 (below), final pick during implementation.
 
 ## Context
 
@@ -22,6 +22,17 @@ The concrete choice is made during implementation; candidates:
 - **`llm`** (Simon Willison) — pluggable models, simple.
 
 The local-model requirement still applies regardless of the library chosen.
+
+**Current lean (confirmed 2026-05-22):** Pydantic AI for the agent/tool layer (typed agents, structured tool calls), optionally over LiteLLM for the raw model abstraction.
+LiteLLM alone only swaps the model call — it does not provide the agent/tool structure.
+
+### Model strategy: local + cloud, dual-path
+
+- Two tracks are tested in parallel through the first months:
+  - **flagship cloud models** — already capable and trained on public AiiDA docs; reach common tasks with no extra infra.
+  - **small local models** — naturally weaker, so they lean on extra tooling (RAG over AiiDA docs, ADR-05) to close the gap.
+- Larger / more expensive models can be run locally on PSI hardware where the infra is available.
+- Models differ in output *format* (e.g. JSON vs. free text), not only answer quality — relevant when chaining one model's output into another's tools.
 
 ## Consequences
 

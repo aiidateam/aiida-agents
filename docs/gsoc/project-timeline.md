@@ -161,6 +161,8 @@ gantt
 - ADRs are written continuously, as each decision is finalized (`/docs/adr/`) — architecture documentation is never deferred to a late phase.
   The closeout "documentation" is only the consumer-facing synthesis (overview, quickstart, extension guide) plus the research writeup.
 - Critical-path dependency: a public, reproducible `.aiida` archive must be handed over before/at the start of bonding.
+- Local and cloud models are exercised as two parallel tracks through the first months (cloud: capable, no extra infra; local: leans on RAG and tooling) — see [ADR-03](/docs/adr/03-llm-library.md).
+- Mentor check-in in early August.
 
 ## Why not adopt the proposal's timeline as-is
 
