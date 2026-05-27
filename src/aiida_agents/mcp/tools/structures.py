@@ -10,6 +10,9 @@ def search_structures(
     limit: int = 10,
 ) -> list[dict[str, str | int | None]]:
     """Search for crystal structures in the AiiDA database."""
+    print(
+        f"\n🔍 [Agent invoking tool] search_structures(formula='{formula}', limit={limit})..."
+    )
     qb = orm.QueryBuilder()
     qb.append(orm.StructureData, project=["id", "uuid", "ctime"])
     qb.order_by({orm.StructureData: {"ctime": "desc"}})
@@ -34,6 +37,7 @@ def search_structures(
                 break
         except Exception:
             continue
+    print(f"✅ Tool output: Found {len(results)} matching structures.")
     return results
 
 
