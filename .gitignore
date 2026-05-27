@@ -213,3 +213,9 @@ docs/_build
 # Jupytext sync is a tool for writing notebooks in `.ipynb` format, and syncing them to a `.md` file
 # https://marketplace.visualstudio.com/items?itemName=caenrigen.jupytext-sync
 .jupytext-sync-ipynb
+
+D:\projects\gsoc\aiida\aiida-agents\commands.txt
+
+/resource
+commands.txt
+all_processes.txt
