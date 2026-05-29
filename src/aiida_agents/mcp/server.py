@@ -5,7 +5,10 @@ from aiida import load_profile
 from fastmcp import FastMCP
 from aiida_agents.mcp.tools import register_all
 
-load_profile()
+try:
+    load_profile()
+except Exception:
+    pass
 
 mcp = FastMCP(
     "aiida-agents",
