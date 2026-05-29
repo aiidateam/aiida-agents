@@ -14,13 +14,29 @@ def test_mcp_registration() -> None:
     import asyncio
     import inspect
 
-    tools_val = mcp.get_tools()
-    if inspect.iscoroutine(tools_val):
-        tools_dict = asyncio.run(tools_val)
-    else:
-        tools_dict = tools_val
+    registered_tools = set()
 
-    registered_tools = set(tools_dict.keys())
+    # 1. Try public get_tools() method (newer versions)
+    if hasattr(mcp, "get_tools"):
+        tools_val = mcp.get_tools()
+        if inspect.iscoroutine(tools_val):
+            tools_dict = asyncio.run(tools_val)
+        else:
+            tools_dict = tools_val
+        registered_tools = set(tools_dict.keys())
+
+    # 2. Try private _tool_manager (older versions)
+    elif hasattr(mcp, "_tool_manager"):
+        manager = getattr(mcp, "_tool_manager")
+        if hasattr(manager, "_tools"):
+            registered_tools = set(getattr(manager, "_tools").keys())
+        elif hasattr(manager, "tools"):
+            registered_tools = set(getattr(manager, "tools").keys())
+
+    # 3. Direct _tools fallback
+    elif hasattr(mcp, "_tools"):
+        registered_tools = set(getattr(mcp, "_tools").keys())
+
     expected_tools = {
         "get_process_status",
         "list_processes",
