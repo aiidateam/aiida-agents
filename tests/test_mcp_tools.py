@@ -11,7 +11,16 @@ from aiida_agents.mcp.tools.structures import search_structures
 
 def test_mcp_registration() -> None:
     """Verify that all tools are successfully registered on the FastMCP instance."""
-    registered_tools = set(mcp._tool_manager._tools.keys())
+    import asyncio
+    import inspect
+
+    tools_val = mcp.get_tools()
+    if inspect.iscoroutine(tools_val):
+        tools_dict = asyncio.run(tools_val)
+    else:
+        tools_dict = tools_val
+
+    registered_tools = set(tools_dict.keys())
     expected_tools = {
         "get_process_status",
         "list_processes",
