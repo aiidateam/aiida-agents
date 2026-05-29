@@ -3,11 +3,12 @@
 from __future__ import annotations
 from aiida import load_profile
 from fastmcp import FastMCP
-from aiida_agents.mcp._uvicorn_ws import register as register_ws
 from aiida_agents.mcp.tools import register_all
 
-register_ws()
-load_profile()
+try:
+    load_profile()
+except Exception:
+    pass
 
 mcp = FastMCP(
     "aiida-agents",
