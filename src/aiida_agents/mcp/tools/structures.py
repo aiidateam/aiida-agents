@@ -3,33 +3,17 @@
 from __future__ import annotations
 import re
 from aiida import orm
+from aiida.common.constants import elements
 from fastmcp import FastMCP
 
 
-# Map common element names to chemical symbols
-ELEMENT_NAME_TO_SYMBOL = {
-    "silicon": "Si",
-    "oxygen": "O",
-    "iron": "Fe",
-    "hydrogen": "H",
-    "carbon": "C",
-    "nitrogen": "N",
-    "gold": "Au",
-    "copper": "Cu",
-    "silver": "Ag",
-    "platinum": "Pt",
-    "calcium": "Ca",
-    "sodium": "Na",
-    "chlorine": "Cl",
-    "sulfur": "S",
-    "aluminium": "Al",
-    "aluminum": "Al",
-    "magnesium": "Mg",
-    "titanium": "Ti",
-    "zinc": "Zn",
-    "nickel": "Ni",
-    "potassium": "K",
+# Element name -> symbol, derived from aiida-core's periodic table (all 115
+# elements) rather than hand-maintained. aiida uses the IUPAC spellings
+# (aluminium, sulfur, caesium), so add the common alternates it doesn't carry.
+ELEMENT_NAME_TO_SYMBOL: dict[str, str] = {
+    str(data["name"]).lower(): str(data["symbol"]) for data in elements.values()
 }
+ELEMENT_NAME_TO_SYMBOL.update({"aluminum": "Al", "sulphur": "S", "cesium": "Cs"})
 
 
 def search_structures(
