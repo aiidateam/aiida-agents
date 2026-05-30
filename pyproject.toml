@@ -23,7 +23,7 @@ classifiers = [
 dependencies = [
     "aiida-core @ git+https://github.com/aiidateam/aiida-core@main",
     "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
-    "fastmcp>=2.13",
+    "fastmcp>=3.0.0",
     "uvicorn>=0.33",
 ]
 
