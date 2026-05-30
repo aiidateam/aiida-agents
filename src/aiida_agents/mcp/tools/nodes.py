@@ -6,6 +6,7 @@ from aiida import orm
 from fastmcp import FastMCP
 from aiida_restapi.services.node import NodeService
 from aiida_restapi.common.query import QueryBuilderParams
+from .._types import Identifier
 
 
 def query_nodes(
@@ -62,46 +63,22 @@ def query_nodes(
         return [{"error": str(e)}]
 
 
-def get_node_inputs(pk: int) -> list[dict[str, t.Any]]:
-    """Get all input nodes of an AiiDA node by its primary key."""
-    print(f"\n🔍 [Agent invoking tool] get_node_inputs(pk={pk})...")
+def get_node_inputs(identifier: Identifier) -> list[dict[str, t.Any]]:
+    """Get all input nodes of an AiiDA node by its pk or uuid."""
+    print(f"\n🔍 [Agent invoking tool] get_node_inputs(identifier={identifier})...")
     try:
-        node_service: NodeService[orm.Node, t.Any] = NodeService(orm.Node)
-        # Resolve PK to UUID for NodeService compatibility
-        node_info = node_service.get_one(pk)
-        uuid = node_info.get("uuid")
-        if not uuid:
-            raise ValueError(f"Could not resolve UUID for PK {pk}")
-
-        # Load incoming links using REST api NodeService
-        params = QueryBuilderParams(page_size=100)
-        res = node_service.get_links(
-            uuid=uuid, direction="incoming", query_params=params
-        )
-
-        results = []
-        for entry in res.data:
-            # Resolve the source node details to get its PK and node_type
-            source_uuid = entry.get("source")
-            if not source_uuid:
-                continue
-            try:
-                source_info = node_service.get_one(source_uuid)
-                source_pk = source_info.get("pk")
-                source_type = source_info.get("node_type")
-            except Exception:
-                source_pk = None
-                source_type = "Unknown"
-
-            results.append(
-                {
-                    "pk": source_pk,
-                    "uuid": source_uuid,
-                    "node_type": source_type,
-                    "link_label": entry.get("link_label"),
-                    "link_type": entry.get("link_type"),
-                }
-            )
+        # Single-node traversal: plain ORM gives the linked nodes directly.
+        node = orm.load_node(identifier)
+        results = [
+            {
+                "pk": entry.node.pk,
+                "uuid": entry.node.uuid,
+                "node_type": entry.node.node_type,
+                "link_label": entry.link_label,
+                "link_type": entry.link_type.value,
+            }
+            for entry in node.base.links.get_incoming().all()
+        ]
         print(f"✅ Tool output: Found {len(results)} incoming links.")
         return results
     except Exception as e:
@@ -109,46 +86,22 @@ def get_node_inputs(pk: int) -> list[dict[str, t.Any]]:
         return [{"error": str(e)}]
 
 
-def get_node_outputs(pk: int) -> list[dict[str, t.Any]]:
-    """Get all output nodes of an AiiDA node by its primary key."""
-    print(f"\n🔍 [Agent invoking tool] get_node_outputs(pk={pk})...")
+def get_node_outputs(identifier: Identifier) -> list[dict[str, t.Any]]:
+    """Get all output nodes of an AiiDA node by its pk or uuid."""
+    print(f"\n🔍 [Agent invoking tool] get_node_outputs(identifier={identifier})...")
     try:
-        node_service: NodeService[orm.Node, t.Any] = NodeService(orm.Node)
-        # Resolve PK to UUID
-        node_info = node_service.get_one(pk)
-        uuid = node_info.get("uuid")
-        if not uuid:
-            raise ValueError(f"Could not resolve UUID for PK {pk}")
-
-        # Load outgoing links using REST api NodeService
-        params = QueryBuilderParams(page_size=100)
-        res = node_service.get_links(
-            uuid=uuid, direction="outgoing", query_params=params
-        )
-
-        results = []
-        for entry in res.data:
-            # Resolve the target node details to get its PK and node_type
-            target_uuid = entry.get("target")
-            if not target_uuid:
-                continue
-            try:
-                target_info = node_service.get_one(target_uuid)
-                target_pk = target_info.get("pk")
-                target_type = target_info.get("node_type")
-            except Exception:
-                target_pk = None
-                target_type = "Unknown"
-
-            results.append(
-                {
-                    "pk": target_pk,
-                    "uuid": target_uuid,
-                    "node_type": target_type,
-                    "link_label": entry.get("link_label"),
-                    "link_type": entry.get("link_type"),
-                }
-            )
+        # Single-node traversal: plain ORM gives the linked nodes directly.
+        node = orm.load_node(identifier)
+        results = [
+            {
+                "pk": entry.node.pk,
+                "uuid": entry.node.uuid,
+                "node_type": entry.node.node_type,
+                "link_label": entry.link_label,
+                "link_type": entry.link_type.value,
+            }
+            for entry in node.base.links.get_outgoing().all()
+        ]
         print(f"✅ Tool output: Found {len(results)} outgoing links.")
         return results
     except Exception as e:
