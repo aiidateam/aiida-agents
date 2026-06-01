@@ -38,10 +38,10 @@ Then make the profile you want the default: `verdi profile setdefault <name>` (c
 One command launches the server and the MCP Inspector together, over stdio:
 
 ```bash
-fastmcp dev src/aiida_agents/mcp/server.py:mcp     # needs node/npx on PATH
+fastmcp dev inspector src/aiida_agents/mcp/server.py:mcp   # needs node/npx on PATH
 ```
 
-If the Inspector shows `ECONNREFUSED 127.0.0.1:8000`, it's reusing a cached "Streamable HTTP → :8000" connection from an earlier run instead of the stdio server `fastmcp dev` just started: switch the Inspector's transport to **STDIO** (or clear its stored connection).
+If the Inspector shows `ECONNREFUSED 127.0.0.1:8000`, it's reusing a cached "Streamable HTTP → :8000" connection from an earlier run instead of the stdio server `fastmcp dev inspector` just started: switch the Inspector's transport to **STDIO** (or clear its stored connection).
 
 To use streamable-http instead (e.g. a long-lived server), run the server and the Inspector in two terminals:
 
