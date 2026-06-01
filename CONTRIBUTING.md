@@ -26,6 +26,36 @@ uv run pre-commit install     # install git hooks (pre-commit + commit-msg)
 Hooks also run automatically on `git commit`.
 `uv run pre-commit run --all-files` is the manual full pass.
 
+## Running the MCP server locally
+
+These commands assume the project venv is active (`.venv`); otherwise prefix each with `uv run`.
+
+Importing the server loads your **default** AiiDA profile (`load_profile()` runs at import time), so it always talks to whichever profile is default in whichever config directory AiiDA resolves to.
+That directory is `~/.aiida` unless `AIIDA_PATH` is set, in which case AiiDA uses the first `AIIDA_PATH` entry that contains a `.aiida` folder (appending `.aiida` for you): for a setup at `/path/to/project/.aiida`, `export AIIDA_PATH=/path/to/project`.
+Set it in the same shell that launches the server.
+Then make the profile you want the default: `verdi profile setdefault <name>` (check with `verdi profile list`, the default is marked `*`).
+
+One command launches the server and the MCP Inspector together, over stdio:
+
+```bash
+fastmcp dev src/aiida_agents/mcp/server.py:mcp     # needs node/npx on PATH
+```
+
+If the Inspector shows `ECONNREFUSED 127.0.0.1:8000`, it's reusing a cached "Streamable HTTP → :8000" connection from an earlier run instead of the stdio server `fastmcp dev` just started: switch the Inspector's transport to **STDIO** (or clear its stored connection).
+
+To use streamable-http instead (e.g. a long-lived server), run the server and the Inspector in two terminals:
+
+```bash
+# terminal 1 — serve over streamable-http
+python -m aiida_agents.mcp.server          # serves http://127.0.0.1:8000/mcp/
+
+# terminal 2 — launch the Inspector, then set Transport = "Streamable HTTP",
+#              URL = http://127.0.0.1:8000/mcp/, and Connect
+npx @modelcontextprotocol/inspector
+```
+
+For tool metadata without a GUI: `fastmcp inspect src/aiida_agents/mcp/server.py:mcp`.
+
 ## Lockfile (`uv.lock`)
 
 `uv.lock` is committed.
