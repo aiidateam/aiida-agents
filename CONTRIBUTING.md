@@ -30,7 +30,7 @@ Hooks also run automatically on `git commit`.
 
 These commands assume the project venv is active (`.venv`); otherwise prefix each with `uv run`.
 
-Importing the server loads your **default** AiiDA profile (`load_profile()` runs at import time), so it always talks to whichever profile is default in whichever config directory AiiDA resolves to.
+The server loads your **default** AiiDA profile on startup (a FastMCP lifespan calls `load_profile()`), so it always talks to whichever profile is default in whichever config directory AiiDA resolves to.
 That directory is `~/.aiida` unless `AIIDA_PATH` is set, in which case AiiDA uses the first `AIIDA_PATH` entry that contains a `.aiida` folder (appending `.aiida` for you): for a setup at `/path/to/project/.aiida`, `export AIIDA_PATH=/path/to/project`.
 Set it in the same shell that launches the server.
 Then make the profile you want the default: `verdi profile setdefault <name>` (check with `verdi profile list`, the default is marked `*`).

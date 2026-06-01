@@ -14,6 +14,7 @@ dependencies = [
     { name = "aiida-core" },
     { name = "aiida-restapi" },
     { name = "fastmcp" },
+    { name = "typing-extensions" },
     { name = "uvicorn" },
 ]
 
@@ -53,6 +54,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'tests'" },
     { name = "ruff", marker = "extra == 'lint'" },
     { name = "ruff", marker = "extra == 'pre-commit'" },
+    { name = "typing-extensions", specifier = ">=4.12" },
     { name = "uvicorn", specifier = ">=0.33" },
 ]
 provides-extras = ["docs", "lint", "pre-commit", "tests"]

@@ -24,6 +24,7 @@ dependencies = [
     "aiida-core @ git+https://github.com/aiidateam/aiida-core.git",
     "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
     "fastmcp>=3.0.0",
+    "typing-extensions>=4.12",
     "uvicorn>=0.33",
 ]
 
@@ -68,7 +69,9 @@ scripts.build = "cd docs && myst build"
 scripts.serve = "cd docs && myst start"
 
 [tool.hatch.envs.pre-commit]
-features = ["pre-commit"]
+# `tests` is included so the mypy hook (which now type-checks `tests/`) has
+# pytest and the test deps available.
+features = ["pre-commit", "tests"]
 scripts.install = "pre-commit install"
 scripts.run = "pre-commit run {args}"
 

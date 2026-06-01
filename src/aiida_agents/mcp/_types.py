@@ -11,6 +11,11 @@ import typing as t
 
 from pydantic import Field
 
+# Pydantic requires ``typing_extensions.TypedDict`` (not ``typing.TypedDict``)
+# on Python < 3.12 to build a schema from these, so FastMCP can derive the
+# tools' ``outputSchema``.
+from typing_extensions import TypedDict
+
 __all__ = [
     "Identifier",
     "NodeLink",
@@ -29,7 +34,7 @@ Identifier = t.Annotated[
 ]
 
 
-class ProcessStatus(t.TypedDict):
+class ProcessStatus(TypedDict):
     """Return shape of ``get_process_status``."""
 
     pk: int
@@ -40,7 +45,7 @@ class ProcessStatus(t.TypedDict):
     exit_message: str | None
 
 
-class ProcessRecord(t.TypedDict):
+class ProcessRecord(TypedDict):
     """A row returned by ``list_processes``."""
 
     pk: int
@@ -51,7 +56,7 @@ class ProcessRecord(t.TypedDict):
     exit_status: int | None
 
 
-class NodeRecord(t.TypedDict):
+class NodeRecord(TypedDict):
     """A row returned by ``query_nodes``."""
 
     pk: int
@@ -60,7 +65,7 @@ class NodeRecord(t.TypedDict):
     ctime: str
 
 
-class NodeLink(t.TypedDict):
+class NodeLink(TypedDict):
     """A link returned by ``get_node_inputs`` / ``get_node_outputs``."""
 
     pk: int
@@ -70,7 +75,7 @@ class NodeLink(t.TypedDict):
     link_type: str
 
 
-class StructureRecord(t.TypedDict):
+class StructureRecord(TypedDict):
     """A row returned by ``search_structures``."""
 
     pk: int
