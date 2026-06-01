@@ -21,7 +21,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "aiida-core @ git+https://github.com/aiidateam/aiida-core@main",
+    "aiida-core @ git+https://github.com/aiidateam/aiida-core.git",
     "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
     "fastmcp>=3.0.0",
     "uvicorn>=0.33",
