@@ -22,7 +22,7 @@ def test_get_process_status(add_calc: orm.CalcJobNode, by: str) -> None:
     The pk/uuid axis is the regression guard for the identifier handling; the
     rest pins the output-dict contract the tool exposes to the agent.
     """
-    identifier = add_calc.pk if by == "pk" else add_calc.uuid
+    identifier = str(add_calc.pk) if by == "pk" else add_calc.uuid
 
     assert get_process_status(identifier) == {
         "pk": add_calc.pk,
@@ -38,7 +38,7 @@ def test_get_process_status(add_calc: orm.CalcJobNode, by: str) -> None:
 def test_get_process_status_not_found() -> None:
     """An unknown identifier raises a ``ToolError`` naming the identifier."""
     with pytest.raises(ToolError, match="987654321"):
-        get_process_status(987654321)
+        get_process_status("987654321")
 
 
 def test_list_processes(add_calc: orm.CalcJobNode) -> None:

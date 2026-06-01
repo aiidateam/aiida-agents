@@ -7,6 +7,7 @@ import re
 
 from aiida import orm
 from aiida.common.constants import elements
+from aiida.common.exceptions import NotExistent
 from fastmcp import FastMCP
 
 logger = logging.getLogger(__name__)
@@ -73,7 +74,7 @@ def search_structures(
                     "ctime": str(ctime),
                 }
             )
-        except Exception:
+        except NotExistent:
             continue
 
         if len(results) >= limit:

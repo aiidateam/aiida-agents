@@ -7,13 +7,12 @@ import typing as t
 from functools import lru_cache
 
 from aiida import orm
-from aiida.common.exceptions import NotExistent
 from aiida.plugins.entry_point import get_entry_point_names, load_entry_point
 from fastmcp import FastMCP
-from fastmcp.exceptions import ToolError
 from aiida_restapi.services.node import NodeService
 from aiida_restapi.common.query import QueryBuilderParams
 
+from .._orm import load_node
 from .._types import Identifier
 
 logger = logging.getLogger(__name__)
@@ -99,15 +98,17 @@ def query_nodes(
     return records
 
 
-def get_node_inputs(identifier: Identifier) -> list[dict[str, t.Any]]:
-    """Get all input nodes of an AiiDA node by its pk or uuid."""
-    logger.debug("get_node_inputs(identifier=%r)", identifier)
-    try:
-        node = orm.load_node(identifier)
-    except NotExistent as exc:
-        raise ToolError(f"No node found with identifier={identifier}.") from exc
-
-    results = [
+def _node_links(
+    identifier: Identifier, direction: t.Literal["incoming", "outgoing"]
+) -> list[dict[str, t.Any]]:
+    """Return a node's incoming or outgoing links as serialisable dicts."""
+    node = load_node(identifier)
+    links = (
+        node.base.links.get_incoming()
+        if direction == "incoming"
+        else node.base.links.get_outgoing()
+    )
+    return [
         {
             "pk": entry.node.pk,
             "uuid": entry.node.uuid,
@@ -115,8 +116,14 @@ def get_node_inputs(identifier: Identifier) -> list[dict[str, t.Any]]:
             "link_label": entry.link_label,
             "link_type": entry.link_type.value,
         }
-        for entry in node.base.links.get_incoming().all()
+        for entry in links.all()
     ]
+
+
+def get_node_inputs(identifier: Identifier) -> list[dict[str, t.Any]]:
+    """Get all input nodes of an AiiDA node by its pk or uuid."""
+    logger.debug("get_node_inputs(identifier=%r)", identifier)
+    results = _node_links(identifier, "incoming")
     logger.debug("get_node_inputs: found %d incoming links", len(results))
     return results
 
@@ -124,21 +131,7 @@ def get_node_inputs(identifier: Identifier) -> list[dict[str, t.Any]]:
 def get_node_outputs(identifier: Identifier) -> list[dict[str, t.Any]]:
     """Get all output nodes of an AiiDA node by its pk or uuid."""
     logger.debug("get_node_outputs(identifier=%r)", identifier)
-    try:
-        node = orm.load_node(identifier)
-    except NotExistent as exc:
-        raise ToolError(f"No node found with identifier={identifier}.") from exc
-
-    results = [
-        {
-            "pk": entry.node.pk,
-            "uuid": entry.node.uuid,
-            "node_type": entry.node.node_type,
-            "link_label": entry.link_label,
-            "link_type": entry.link_type.value,
-        }
-        for entry in node.base.links.get_outgoing().all()
-    ]
+    results = _node_links(identifier, "outgoing")
     logger.debug("get_node_outputs: found %d outgoing links", len(results))
     return results
 

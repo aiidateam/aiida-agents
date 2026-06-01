@@ -47,7 +47,8 @@ mcp = get_mcp()
 
 def main() -> None:  # pragma: no cover
     """Run the MCP server (the profile is loaded by the lifespan on startup)."""
-    mcp.run(transport="streamable-http", port=8000)
+    port = int(os.getenv("AIIDA_AGENTS_PORT", "8000"))
+    mcp.run(transport="streamable-http", port=port)
 
 
 if __name__ == "__main__":  # pragma: no cover

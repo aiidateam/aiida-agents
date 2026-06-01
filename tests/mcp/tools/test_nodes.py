@@ -64,7 +64,9 @@ def test_query_nodes_substring_fallback(add_calc: orm.CalcJobNode) -> None:
 
 def test_get_node_inputs(add_calc: orm.CalcJobNode) -> None:
     """Incoming links are returned with their labels and stringified link types."""
-    links = {(r["link_label"], r["link_type"]) for r in get_node_inputs(add_calc.pk)}
+    links = {
+        (r["link_label"], r["link_type"]) for r in get_node_inputs(str(add_calc.pk))
+    }
     assert links == {
         ("x", "input_calc"),
         ("y", "input_calc"),
@@ -74,7 +76,9 @@ def test_get_node_inputs(add_calc: orm.CalcJobNode) -> None:
 
 def test_get_node_outputs(add_calc: orm.CalcJobNode) -> None:
     """A calculation's outgoing links are its created data nodes."""
-    links = {(r["link_label"], r["link_type"]) for r in get_node_outputs(add_calc.pk)}
+    links = {
+        (r["link_label"], r["link_type"]) for r in get_node_outputs(str(add_calc.pk))
+    }
     assert links == {
         ("sum", "create"),
         ("remote_folder", "create"),
@@ -89,7 +93,7 @@ def test_get_node_outputs_workchain(multiply_add_workchain: orm.WorkChainNode) -
     ``call_calc`` links to the sub-processes alongside the ``return`` outputs.
     If that ever changes (e.g. filtering to returns only), this fails loudly.
     """
-    outputs = get_node_outputs(multiply_add_workchain.pk)
+    outputs = get_node_outputs(str(multiply_add_workchain.pk))
     calls = [r for r in outputs if r["link_type"] == "call_calc"]
     returns = [r for r in outputs if r["link_type"] == "return"]
 

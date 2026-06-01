@@ -112,9 +112,13 @@ mypy_path = "src"
 explicit_package_bases = true
 
 [tool.pytest.ini_options]
-addopts = "--disable-warnings"
+# Warnings from our own code are errors; known third-party noise is scoped out
+# (AiiDA's sqlite test backend, SQLAlchemy, the config-folder notice).
 filterwarnings = [
-    "ignore::DeprecationWarning",
-    "ignore::UserWarning",
+    "error",
+    "ignore::ResourceWarning",
+    "ignore::sqlalchemy.exc.SAWarning",
+    "ignore:Creating AiiDA configuration folder:UserWarning",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
 ]
 
