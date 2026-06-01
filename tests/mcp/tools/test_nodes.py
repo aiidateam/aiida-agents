@@ -14,9 +14,8 @@ from aiida import orm
 from aiida_agents.mcp.tools.nodes import get_node_inputs, get_node_outputs, query_nodes
 
 
-def test_query_nodes_abstract_subtree(
-    add_calc: orm.CalcJobNode, multiply_add_workchain: orm.WorkChainNode
-) -> None:
+@pytest.mark.usefixtures("add_calc", "multiply_add_workchain")
+def test_query_nodes_abstract_subtree() -> None:
     """An abstract level matches the whole node_type subtree, not a single leaf.
 
     This is the fix for the old ``ProcessNode`` mislabeling: ``"process"`` now
@@ -25,12 +24,15 @@ def test_query_nodes_abstract_subtree(
     types = {
         record["node_type"] for record in query_nodes(node_type="process", limit=50)
     }
+    # The filter has no false positives: every match is a process node...
     assert types
     assert all(nt.startswith("process.") for nt in types)
-    assert any("calcjob" in nt.lower() for nt in types)
-    assert any("workchain" in nt.lower() for nt in types)
+    # ...and the subtree spans calculations and workflows, not just calcjobs.
+    assert "process.calculation.calcjob.CalcJobNode." in types  # from add_calc
+    assert "process.workflow.workchain.WorkChainNode." in types  # multiply_add
 
 
+@pytest.mark.usefixtures("add_calc")
 @pytest.mark.parametrize(
     "node_type,expected",
     [
@@ -42,9 +44,7 @@ def test_query_nodes_abstract_subtree(
         pytest.param("Int", "data.core.int.Int.", id="data-class"),
     ],
 )
-def test_query_nodes_concrete_class(
-    add_calc: orm.CalcJobNode, node_type: str, expected: str
-) -> None:
+def test_query_nodes_concrete_class(node_type: str, expected: str) -> None:
     """A concrete class name resolves to an exact node_type via the registry.
 
     Asserting every result has that exact type proves the resolved filter has no
@@ -55,7 +55,8 @@ def test_query_nodes_concrete_class(
     assert all(record["node_type"] == expected for record in results)
 
 
-def test_query_nodes_substring_fallback(add_calc: orm.CalcJobNode) -> None:
+@pytest.mark.usefixtures("add_calc")
+def test_query_nodes_substring_fallback() -> None:
     """An unresolvable name falls back to a ``node_type`` substring match."""
     results = query_nodes(node_type="calcjob", limit=50)
     assert results

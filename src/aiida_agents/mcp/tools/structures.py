@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import logging
 import re
+import typing as t
 
 from aiida import orm
 from aiida.common.constants import elements
-from aiida.common.exceptions import NotExistent
 from fastmcp import FastMCP
+
+from .._types import StructureRecord
 
 logger = logging.getLogger(__name__)
 
@@ -23,7 +25,7 @@ ELEMENT_NAME_TO_SYMBOL.update({"aluminum": "Al", "sulphur": "S", "cesium": "Cs"}
 def search_structures(
     formula: str | None = None,
     limit: int = 10,
-) -> list[dict[str, str | int | None]]:
+) -> list[StructureRecord]:
     """Search for crystal structures in the AiiDA database.
 
     Supports chemical formulas (e.g. 'SiO2'), element symbols (e.g. 'Si'),
@@ -48,37 +50,37 @@ def search_structures(
 
         logger.debug("search_structures: parsed elements %s", target_elements)
 
+    # Element-set matching pushed to the database: each target element must
+    # appear in some kind's ``symbols``, AND-combined across elements. The
+    # QueryBuilder ``contains`` operator works on both sqlite and psql backends.
+    filters: dict[str, t.Any] = {}
+    if target_elements:
+        filters = {
+            "and": [
+                {"attributes.kinds": {"contains": [{"symbols": [element]}]}}
+                for element in target_elements
+            ]
+        }
+
     qb = orm.QueryBuilder()
-    qb.append(orm.StructureData, project=["id", "uuid", "ctime", "attributes.kinds"])
+    qb.append(orm.StructureData, filters=filters, project=["id", "uuid", "ctime"])
     qb.order_by({orm.StructureData: {"ctime": "desc"}})
+    qb.limit(limit)
 
-    # Fetch kinds in one query and filter in Python to avoid slow SQL joins.
-    results = []
-    for pk, uuid, ctime, kinds in qb.all():
-        if not kinds:
-            continue
-
-        symbols = {s for kind in kinds for s in kind.get("symbols", [])}
-
-        if target_elements and not all(e in symbols for e in target_elements):
-            continue
-
-        try:
-            node = orm.load_node(pk=pk)
-            results.append(
-                {
-                    "pk": pk,
-                    "uuid": uuid,
-                    "formula": node.get_formula(),
-                    "num_sites": len(node.sites),
-                    "ctime": str(ctime),
-                }
-            )
-        except NotExistent:
-            continue
-
-        if len(results) >= limit:
-            break
+    # The node is loaded only for the matched, limited rows (for formula and
+    # site count, which aren't plain projectable attributes).
+    results: list[StructureRecord] = []
+    for pk, uuid, ctime in qb.iterall():
+        node = orm.load_node(pk=pk)
+        results.append(
+            {
+                "pk": pk,
+                "uuid": uuid,
+                "formula": node.get_formula(),
+                "num_sites": len(node.sites),
+                "ctime": str(ctime),
+            }
+        )
 
     logger.debug("search_structures: found %d matching structures", len(results))
     return results

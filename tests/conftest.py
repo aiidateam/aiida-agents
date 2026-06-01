@@ -1,7 +1,5 @@
 """Project-wide pytest fixtures & hooks.
 
-Docs: https://docs.pytest.org/en/stable/how-to/fixtures.html#conftest-py-sharing-fixtures-across-multiple-files
-
 The process fixtures below run real AiiDA calculations/workflows in-process (no
 daemon or broker needed). They are **session-scoped**: each is executed once for
 the whole test run, not per test, since spinning up the engine is expensive.
@@ -22,7 +20,9 @@ pytest_plugins = ["aiida.tools.pytest_fixtures"]
 
 
 @pytest.fixture(scope="session")
-def arithmetic_add_code(aiida_profile, tmp_path_factory) -> orm.InstalledCode:
+def arithmetic_add_code(
+    tmp_path_factory: pytest.TempPathFactory,
+) -> orm.InstalledCode:
     """A configured localhost computer with a ``core.arithmetic.add`` code.
 
     Built directly (rather than via the function-scoped ``aiida_localhost`` /
@@ -50,7 +50,7 @@ def arithmetic_add_code(aiida_profile, tmp_path_factory) -> orm.InstalledCode:
 
 
 @pytest.fixture(scope="session")
-def add_calc(arithmetic_add_code) -> orm.CalcJobNode:
+def add_calc(arithmetic_add_code: orm.InstalledCode) -> orm.CalcJobNode:
     """A real, finished ``ArithmeticAddCalculation`` run (session-scoped).
 
     Runs ``core.arithmetic.add`` with ``x=2``, ``y=3`` in-process, producing a
@@ -59,20 +59,23 @@ def add_calc(arithmetic_add_code) -> orm.CalcJobNode:
 
     :return: The stored ``CalcJobNode`` for the completed calculation.
     """
+    from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
     from aiida.engine import run_get_node
-    from aiida.plugins import CalculationFactory
 
     _, node = run_get_node(
-        CalculationFactory("core.arithmetic.add"),
+        ArithmeticAddCalculation,
         x=orm.Int(2),
         y=orm.Int(3),
         code=arithmetic_add_code,
     )
+    assert isinstance(node, orm.CalcJobNode)
     return node
 
 
 @pytest.fixture(scope="session")
-def multiply_add_workchain(arithmetic_add_code) -> orm.WorkChainNode:
+def multiply_add_workchain(
+    arithmetic_add_code: orm.InstalledCode,
+) -> orm.WorkChainNode:
     """A real, finished ``MultiplyAddWorkChain`` run (session-scoped).
 
     Runs ``core.arithmetic.multiply_add`` with ``x=2``, ``y=3``, ``z=4``
@@ -84,20 +87,21 @@ def multiply_add_workchain(arithmetic_add_code) -> orm.WorkChainNode:
     :return: The stored top-level ``WorkChainNode`` for the completed run.
     """
     from aiida.engine import run_get_node
-    from aiida.plugins import WorkflowFactory
+    from aiida.workflows.arithmetic.multiply_add import MultiplyAddWorkChain
 
     _, node = run_get_node(
-        WorkflowFactory("core.arithmetic.multiply_add"),
+        MultiplyAddWorkChain,
         x=orm.Int(2),
         y=orm.Int(3),
         z=orm.Int(4),
         code=arithmetic_add_code,
     )
+    assert isinstance(node, orm.WorkChainNode)
     return node
 
 
 @pytest.fixture(scope="session")
-def silicon_structure(aiida_profile) -> orm.StructureData:
+def silicon_structure() -> orm.StructureData:
     """A stored two-atom silicon ``StructureData`` (session-scoped).
 
     The only ``StructureData`` created in the test session, so structure

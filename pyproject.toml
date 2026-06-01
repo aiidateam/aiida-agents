@@ -106,10 +106,24 @@ lint.ignore = [
 
 [tool.mypy]
 python_version = "3.10"
-files = ["src"]
+files = ["src", "tests"]
 strict = true
 mypy_path = "src"
 explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+# AiiDA's ORM is only partially typed (``orm.Int()``, ``append_atom()``, ...),
+# so strict mypy flags every ORM call in the tests as ``no-untyped-call``. That
+# is AiiDA's gap, not ours, and a per-call ``# type: ignore`` is unsustainable.
+# Disable just that check for the tests; everything else stays strict.
+module = "tests.*"
+disallow_untyped_calls = false
+
+[tool.basedpyright]
+# Not run in CI (mypy is the type checker); this just keeps local basedpyright
+# (e.g. in-editor) aligned with the mypy baseline. Its default "recommended"
+# mode floods on `Any` from AiiDA's untyped ORM, which mypy does not flag.
+typeCheckingMode = "standard"
 
 [tool.pytest.ini_options]
 # Warnings raised by our own code are errors; third-party warnings only show.

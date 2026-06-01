@@ -1,3 +1,7 @@
 # Normalise line endings: store text files with LF in the repository,
 # regardless of the contributor's OS. Prevents CRLF creeping in from Windows.
 * text=auto eol=lf
+
+# Mark the uv lockfile as generated: GitHub collapses it in diffs and excludes
+# it from language stats, so it doesn't drown out the real changes in a PR.
+uv.lock linguist-generated=true

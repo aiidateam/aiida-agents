@@ -1,4 +1,4 @@
-"""MCP tools for AiiDA generic node queries."""
+"""MCP tools for generic AiiDA node queries."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from aiida_restapi.services.node import NodeService
 from aiida_restapi.common.query import QueryBuilderParams
 
 from .._orm import load_node
-from .._types import Identifier
+from .._types import Identifier, NodeLink, NodeRecord
 
 logger = logging.getLogger(__name__)
 
@@ -36,7 +36,7 @@ _node_service: NodeService[orm.Node, t.Any] = NodeService(orm.Node)
 
 @lru_cache(maxsize=1)
 def _node_type_index() -> dict[str, str]:
-    """Lowercased class name and entry-point name -> node_type, from the registry."""
+    """Lowercased class name and entry-point name -> node_type, from the entry points."""
     index: dict[str, str] = {}
     for group in ("aiida.data", "aiida.node"):
         for name in get_entry_point_names(group):
@@ -60,14 +60,14 @@ def _node_type_for(name: str) -> str | None:
 def query_nodes(
     node_type: str = "process",
     limit: int = 10,
-) -> list[dict[str, t.Any]]:
+) -> list[NodeRecord]:
     """Query AiiDA nodes by type.
 
     ``node_type`` accepts an abstract hierarchy level (``node``, ``data``,
     ``process``, ``calculation``, ``workflow``, or their ``...Node`` class
     names) which matches the whole subtree, a concrete class or entry-point name
     (``StructureData``, ``Int``, ``CalcJobNode``, ...) resolved to an exact
-    ``node_type`` via the plugin registry, or, as a last resort, an arbitrary
+    ``node_type`` via AiiDA's entry points, or, as a last resort, an arbitrary
     substring of the ``node_type``.
     """
     logger.debug("query_nodes(node_type=%r, limit=%d)", node_type, limit)
@@ -85,11 +85,11 @@ def query_nodes(
         page_size=limit, filters=filters, order_by={"ctime": "desc"}
     )
     res = _node_service.get_many(params)
-    records = [
+    records: list[NodeRecord] = [
         {
-            "pk": item.get("pk"),
-            "uuid": item.get("uuid"),
-            "node_type": item.get("node_type"),
+            "pk": item["pk"],
+            "uuid": item["uuid"],
+            "node_type": item["node_type"],
             "ctime": str(item.get("ctime")),
         }
         for item in res.data
@@ -100,7 +100,7 @@ def query_nodes(
 
 def _node_links(
     identifier: Identifier, direction: t.Literal["incoming", "outgoing"]
-) -> list[dict[str, t.Any]]:
+) -> list[NodeLink]:
     """Return a node's incoming or outgoing links as serialisable dicts."""
     node = load_node(identifier)
     links = (
@@ -110,7 +110,7 @@ def _node_links(
     )
     return [
         {
-            "pk": entry.node.pk,
+            "pk": t.cast(int, entry.node.pk),  # a linked node is always stored
             "uuid": entry.node.uuid,
             "node_type": entry.node.node_type,
             "link_label": entry.link_label,
@@ -120,16 +120,25 @@ def _node_links(
     ]
 
 
-def get_node_inputs(identifier: Identifier) -> list[dict[str, t.Any]]:
-    """Get all input nodes of an AiiDA node by its pk or uuid."""
+def get_node_inputs(identifier: Identifier) -> list[NodeLink]:
+    """Get the incoming links of any AiiDA node by its pk or uuid.
+
+    Works for data and processes alike: a data node's incoming link is the
+    process that created it; a process's incoming links are its input data.
+    """
     logger.debug("get_node_inputs(identifier=%r)", identifier)
     results = _node_links(identifier, "incoming")
     logger.debug("get_node_inputs: found %d incoming links", len(results))
     return results
 
 
-def get_node_outputs(identifier: Identifier) -> list[dict[str, t.Any]]:
-    """Get all output nodes of an AiiDA node by its pk or uuid."""
+def get_node_outputs(identifier: Identifier) -> list[NodeLink]:
+    """Get the outgoing links of any AiiDA node by its pk or uuid.
+
+    Works for data and processes alike: a data node's outgoing links are the
+    processes that consumed it; a process's outgoing links are the data it
+    produced (and any sub-processes it called).
+    """
     logger.debug("get_node_outputs(identifier=%r)", identifier)
     results = _node_links(identifier, "outgoing")
     logger.debug("get_node_outputs: found %d outgoing links", len(results))

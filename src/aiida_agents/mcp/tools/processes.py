@@ -3,31 +3,32 @@
 from __future__ import annotations
 
 import logging
+import typing as t
 
 from aiida import orm
 from fastmcp import FastMCP
 
 from .._orm import load_node
-from .._types import Identifier
+from .._types import Identifier, ProcessRecord, ProcessStatus
 
 logger = logging.getLogger(__name__)
 
 
-def get_process_status(identifier: Identifier) -> dict[str, str | int | None]:
+def get_process_status(identifier: Identifier) -> ProcessStatus:
     """Get the status and exit code of an AiiDA process by its pk or uuid."""
     logger.debug("get_process_status(identifier=%r)", identifier)
     node = load_node(identifier)
     return {
-        "pk": node.pk,
+        "pk": t.cast(int, node.pk),  # a loaded node is always stored
         "process_label": node.process_label,
-        "process_type": node.process_type,
+        "process_type": t.cast(str, node.process_type),  # a process always has one
         "state": node.process_state.value if node.process_state else None,
         "exit_status": node.exit_status,
         "exit_message": node.exit_message,
     }
 
 
-def list_processes(limit: int = 10) -> list[dict[str, str | int | None]]:
+def list_processes(limit: int = 10) -> list[ProcessRecord]:
     """List recent AiiDA processes, newest first."""
     logger.debug("list_processes(limit=%d)", limit)
 
@@ -49,7 +50,7 @@ def list_processes(limit: int = 10) -> list[dict[str, str | int | None]]:
     qb.order_by({"process": {"ctime": "desc"}})
     qb.limit(limit)
 
-    records: list[dict[str, str | int | None]] = [
+    records: list[ProcessRecord] = [
         {
             "pk": pk,
             "uuid": uuid,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 import os
 import sys
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from aiida import load_profile
@@ -19,7 +19,7 @@ logging.basicConfig(
 
 
 @asynccontextmanager
-async def _lifespan(_: FastMCP) -> AsyncIterator[None]:
+async def _lifespan(_: FastMCP) -> AsyncGenerator[None]:
     """Load the default AiiDA profile when the server starts.
 
     Runs on every launch path (``main()``, ``fastmcp run``, ``fastmcp dev``),
@@ -34,7 +34,7 @@ async def _lifespan(_: FastMCP) -> AsyncIterator[None]:
 def get_mcp() -> FastMCP:
     """Build the MCP server and register its tools. No profile needed here."""
     mcp = FastMCP(
-        "aiida-agents",
+        name="aiida-agents",
         instructions="Tools for exploring an AiiDA database using natural language.",
         lifespan=_lifespan,
     )
