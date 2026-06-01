@@ -112,10 +112,14 @@ mypy_path = "src"
 explicit_package_bases = true
 
 [tool.pytest.ini_options]
-# Warnings from our own code are errors; known third-party noise is scoped out
-# (AiiDA's sqlite test backend, SQLAlchemy, the config-folder notice).
+# Warnings raised by our own code are errors; third-party warnings only show.
+# A blanket `error` is unworkable here: AiiDA's dependency tree emits
+# version-specific deprecations across the 3.10-3.14 matrix (aiida-core itself
+# curates ~30 ignores and never errors), so scoping `error` to our package
+# avoids that treadmill while still failing on warnings we introduce. The
+# ignores below just quiet the loudest known third-party noise.
 filterwarnings = [
-    "error",
+    "error:::aiida_agents",
     "ignore::ResourceWarning",
     "ignore::sqlalchemy.exc.SAWarning",
     "ignore:Creating AiiDA configuration folder:UserWarning",
