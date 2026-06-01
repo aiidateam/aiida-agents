@@ -20,7 +20,8 @@ repos:
         language: system
         types: [ python ]
         require_serial: true
-        files: ^src/
+        pass_filenames: false
+        files: ^(src|tests)/
 
   - repo: local
     hooks:

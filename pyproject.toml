@@ -20,24 +20,38 @@ classifiers = [
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
 ]
+dependencies = [
+    "aiida-core @ git+https://github.com/aiidateam/aiida-core.git",
+    "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
+    "fastmcp>=3.0.0",
+    "typing-extensions>=4.12",
+    "uvicorn>=0.33",
+]
 
 [project.optional-dependencies]
 docs = [
-"mystmd"
+  "mystmd"
 ]
 tests = [
   "pytest",
   "pytest-cov"
 ]
+lint = [
+  "mypy",
+  "ruff"
+]
 pre-commit = [
   "pre-commit",
-  "mypy"
+  "aiida-agents[lint]"
 ]
 
 [dependency-groups]
 dev = [
-  "aiida-agents[docs,tests,pre-commit]",
+  "aiida-agents[docs,tests,pre-commit]"
 ]
+
+[tool.hatch.metadata]
+allow-direct-references = true
 
 [tool.hatch.version]
 path = "src/aiida_agents/__about__.py"
@@ -55,7 +69,9 @@ scripts.build = "cd docs && myst build"
 scripts.serve = "cd docs && myst start"
 
 [tool.hatch.envs.pre-commit]
-features = ["pre-commit"]
+# `tests` is included so the mypy hook (which now type-checks `tests/`) has
+# pytest and the test deps available.
+features = ["pre-commit", "tests"]
 scripts.install = "pre-commit install"
 scripts.run = "pre-commit run {args}"
 
@@ -93,5 +109,37 @@ lint.ignore = [
 
 [tool.mypy]
 python_version = "3.10"
-files = ["src"]
+files = ["src", "tests"]
 strict = true
+mypy_path = "src"
+explicit_package_bases = true
+
+[[tool.mypy.overrides]]
+# AiiDA's ORM is only partially typed (``orm.Int()``, ``append_atom()``, ...),
+# so strict mypy flags every ORM call in the tests as ``no-untyped-call``. That
+# is AiiDA's gap, not ours, and a per-call ``# type: ignore`` is unsustainable.
+# Disable just that check for the tests; everything else stays strict.
+module = "tests.*"
+disallow_untyped_calls = false
+
+[tool.basedpyright]
+# Not run in CI (mypy is the type checker); this just keeps local basedpyright
+# (e.g. in-editor) aligned with the mypy baseline. Its default "recommended"
+# mode floods on `Any` from AiiDA's untyped ORM, which mypy does not flag.
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+# Warnings raised by our own code are errors; third-party warnings only show.
+# A blanket `error` is unworkable here: AiiDA's dependency tree emits
+# version-specific deprecations across the 3.10-3.14 matrix (aiida-core itself
+# curates ~30 ignores and never errors), so scoping `error` to our package
+# avoids that treadmill while still failing on warnings we introduce. The
+# ignores below just quiet the loudest known third-party noise.
+filterwarnings = [
+    "error:::aiida_agents",
+    "ignore::ResourceWarning",
+    "ignore::sqlalchemy.exc.SAWarning",
+    "ignore:Creating AiiDA configuration folder:UserWarning",
+    "ignore::pydantic.warnings.PydanticDeprecatedSince20",
+]
+
