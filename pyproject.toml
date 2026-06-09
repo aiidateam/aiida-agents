@@ -24,7 +24,8 @@ dependencies = [
     "aiida-core @ git+https://github.com/aiidateam/aiida-core.git",
     "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
     "fastmcp>=3.0.0",
-    "pydantic-ai>=1.44.0",
+    "pydantic-ai>=0.1",
+    "python-dotenv>=1.0",
     "typing-extensions>=4.12",
     "uvicorn>=0.33",
 ]

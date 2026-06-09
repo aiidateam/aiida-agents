@@ -16,7 +16,9 @@ import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 from aiida import orm
 
-from aiida_agents.agent import agent
+from aiida_agents.agent import get_agent
+
+agent = get_agent()
 
 
 # ---------------------------------------------------------------------------
