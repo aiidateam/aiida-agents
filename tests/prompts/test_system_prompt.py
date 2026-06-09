@@ -8,7 +8,7 @@ prompt file, not semantic correctness (which is evaluated manually).
 
 from __future__ import annotations
 
-from aiida_agents.prompts import SYSTEM_PROMPT
+from aiida_agents.agents.analysis import _SYSTEM_PROMPT as SYSTEM_PROMPT
 
 
 class TestSystemPrompt:
