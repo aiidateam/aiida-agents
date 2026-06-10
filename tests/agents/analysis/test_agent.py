@@ -19,7 +19,8 @@ from pydantic_ai.models.function import FunctionModel
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.models.test import TestModel
 
-from aiida_agents.agent import get_agent, get_model
+from aiida_agents.agents import get_agent
+from aiida_agents.agents._models import get_model
 
 # Fail loudly if a test would hit a real endpoint (TestModel/FunctionModel are exempt).
 models.ALLOW_MODEL_REQUESTS = False

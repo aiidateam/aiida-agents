@@ -39,8 +39,7 @@ docs = [
 ]
 tests = [
   "pytest",
-  "pytest-cov",
-  "pytest-asyncio"
+  "pytest-cov"
 ]
 lint = [
   "mypy",
@@ -95,9 +94,9 @@ branch = true
 
 [tool.coverage.report]
 show_missing = true
-# Floor only. The deterministic, safety-critical core (validator, HITL, query
-# construction) targets ~100%; LLM/agent IO boundaries use `# pragma: no cover`
-# and are validated by the eval harness, not by mock-to-hit-lines tests.
+# Floor, not a target: a gate against big regressions. Aim high on the
+# deterministic logic; the LLM/agent IO boundaries are `# pragma: no cover`
+# rather than chased with mock-to-hit-lines tests.
 fail_under = 80
 
 [tool.ruff]
