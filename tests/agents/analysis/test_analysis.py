@@ -9,7 +9,7 @@ What can't be unit-tested, and isn't here: whether the model picks the *right* t
 for a phrasing, or answer quality. That is a real-model evaluation, not a mock.
 """
 
-from __future__ import annotations
+from typing import Any
 
 import pytest
 from aiida import orm
@@ -46,12 +46,20 @@ EXPECTED_TOOLS = {
         ("anthropic", {"ANTHROPIC_API_KEY": "x"}, AnthropicModel),
         (
             "openai-compatible",
-            {"AIIDA_AGENT_BASE_URL": "https://api.deepseek.com/v1", "AIIDA_AGENT_API_KEY": "x"},
+            {
+                "AIIDA_AGENT_BASE_URL": "https://api.deepseek.com/v1",
+                "AIIDA_AGENT_API_KEY": "x",
+            },
             OpenAIChatModel,
         ),
     ],
 )
-def test_get_model_builds_expected_model(provider, env, model_cls, monkeypatch):
+def test_get_model_builds_expected_model(
+    provider: str,
+    env: dict[str, str],
+    model_cls: type,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setenv("AIIDA_AGENT_PROVIDER", provider)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -62,21 +70,37 @@ def test_get_model_builds_expected_model(provider, env, model_cls, monkeypatch):
     ("provider", "env", "expected_base_url"),
     [
         ("ollama", {}, "http://localhost:11434/v1"),
-        ("ollama", {"OLLAMA_BASE_URL": "http://remote:11434/v1"}, "http://remote:11434/v1"),
+        (
+            "ollama",
+            {"OLLAMA_BASE_URL": "http://remote:11434/v1"},
+            "http://remote:11434/v1",
+        ),
         (
             "openai-compatible",
-            {"AIIDA_AGENT_BASE_URL": "https://api.deepseek.com/v1", "AIIDA_AGENT_API_KEY": "x"},
+            {
+                "AIIDA_AGENT_BASE_URL": "https://api.deepseek.com/v1",
+                "AIIDA_AGENT_API_KEY": "x",
+            },
             "https://api.deepseek.com/v1",
         ),
     ],
 )
-def test_get_model_resolves_base_url(provider, env, expected_base_url, monkeypatch):
+def test_get_model_resolves_base_url(
+    provider: str,
+    env: dict[str, str],
+    expected_base_url: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     monkeypatch.delenv("AIIDA_AGENT_BASE_URL", raising=False)
     monkeypatch.setenv("AIIDA_AGENT_PROVIDER", provider)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
-    assert str(get_model().provider.base_url).rstrip("/") == expected_base_url
+    model = get_model()
+    assert isinstance(model, OpenAIChatModel)
+    provider_obj = model.provider
+    assert provider_obj is not None
+    assert str(getattr(provider_obj, "base_url")).rstrip("/") == expected_base_url
 
 
 @pytest.mark.parametrize(
@@ -86,7 +110,11 @@ def test_get_model_resolves_base_url(provider, env, expected_base_url, monkeypat
         ({"AIIDA_AGENT_PROVIDER": "openai-compatible"}, "AIIDA_AGENT_BASE_URL"),
     ],
 )
-def test_get_model_rejects_bad_config(env, match, monkeypatch):
+def test_get_model_rejects_bad_config(
+    env: dict[str, str],
+    match: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("AIIDA_AGENT_BASE_URL", raising=False)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
@@ -97,18 +125,23 @@ def test_get_model_rejects_bad_config(env, match, monkeypatch):
 # agent wiring (no real LLM)
 
 
-def test_agent_exposes_expected_tools(monkeypatch):
+def test_agent_exposes_expected_tools(monkeypatch: pytest.MonkeyPatch) -> None:
     """get_agent wires exactly our tools onto the agent (no more, no fewer)."""
     monkeypatch.setenv("AIIDA_AGENT_PROVIDER", "ollama")
     agent = get_agent()
     fake = TestModel(call_tools=[])  # don't invoke tools; just inspect registration
     with agent.override(model=fake):
         agent.run_sync("ping")
-    registered = {t.name for t in fake.last_model_request_parameters.function_tools}
+    params = fake.last_model_request_parameters
+    assert params is not None
+    registered = {t.name for t in params.function_tools}
     assert registered == EXPECTED_TOOLS
 
 
-def test_tool_runs_through_agent_against_real_node(add_calc: orm.CalcJobNode, monkeypatch):
+def test_tool_runs_through_agent_against_real_node(
+    add_calc: orm.CalcJobNode,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """A tool dispatched through the agent executes against the real fixture node.
 
     The model is scripted (FunctionModel), so this tests the agent -> tool -> DB
@@ -118,12 +151,14 @@ def test_tool_runs_through_agent_against_real_node(add_calc: orm.CalcJobNode, mo
     """
     pk = add_calc.pk
 
-    def script(messages, info):
+    def script(messages: list[Any], info: Any) -> ModelResponse:
         if len(messages) == 1:  # drive the tool with the real pk
             return ModelResponse(
                 parts=[ToolCallPart("get_process_status", {"identifier": str(pk)})]
             )
-        tool_return = next(p for p in messages[-1].parts if p.part_kind == "tool-return")
+        tool_return = next(
+            p for p in messages[-1].parts if p.part_kind == "tool-return"
+        )
         return ModelResponse(parts=[TextPart(str(tool_return.content))])
 
     monkeypatch.setenv("AIIDA_AGENT_PROVIDER", "ollama")
