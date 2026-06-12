@@ -1,46 +1,81 @@
-# ADR-03: Adopt an existing provider-agnostic LLM library (don't hand-roll)
+# ADR-03: Adopt Pydantic AI as the provider-agnostic LLM library
 
-> Seed — the decision *not* to hand-roll is firm; the library lean was confirmed 2026-05-22 (below), final pick during implementation.
+> Status: accepted — Pydantic AI adopted and implemented as of Weeks 1–2 (May 2026).
 
 ## Context
 
-Agents need to turn natural language into tool calls, and the project targets both local and cloud models (local is a hard gate; see the timeline).
-A unified way to talk to OpenAI, Anthropic, and local models is required.
+Agents need to turn natural language into tool calls, and the project targets
+both local and cloud models — local is a hard gate given HPC cluster constraints.
 
-Ollama is **not** that layer: it is a local-model runner that serves models and exposes its own API plus an OpenAI-compatible `/v1` endpoint.
-It covers local serving (and an OpenAI-shaped shim), not Anthropic or arbitrary providers.
+A unified way to talk to OpenAI, Anthropic, and local Ollama models is required.
+Ollama is not that layer: it is a local-model runner with an OpenAI-compatible
+`/v1` endpoint, not a multi-provider abstraction.
 
-Provider-agnostic LLM libraries already exist and are mature; building our own abstraction would be reinventing a solved problem (and contradicts the project's reuse ethos — cf. ADR-01, ADR-02).
+Provider-agnostic LLM libraries already exist and are mature; hand-rolling
+an abstraction would reinvent a solved problem.
 
 ## Decision
 
-Adopt an existing provider-agnostic LLM library rather than hand-rolling an abstraction.
-The concrete choice is made during implementation; candidates:
+**Adopt Pydantic AI** (`pydantic-ai-slim[openai,anthropic]`) as the agent and
+tool layer. The slim variant pulls only the OpenAI and Anthropic extras,
+avoiding unnecessary SDK bloat.
 
-- **LiteLLM** — one `completion()` over OpenAI, Anthropic, Ollama, 100+.
-- **Pydantic AI** — typed, model-agnostic, by the Pydantic team; fits the project's Pydantic-heavy stack (`aiida-restapi` models, the validator).
-- **`llm`** (Simon Willison) — pluggable models, simple.
+### Why Pydantic AI over the alternatives
 
-The local-model requirement still applies regardless of the library chosen.
+- **LiteLLM** — swaps the model call but provides no agent or tool structure.
+  We need both; LiteLLM alone is half a solution.
+- **`llm` (Simon Willison)** — simple and pluggable but no typed tool schema,
+  no structured output, no native HITL support. Too minimal for this use case.
+- **Pydantic AI** — typed agents, structured tool calls, native
+  `requires_approval` HITL support (ADR-08), and fits the project's
+  Pydantic-heavy stack. The team behind it actively maintains it.
 
-**Current lean (confirmed 2026-05-22):** Pydantic AI for the agent/tool layer (typed agents, structured tool calls), optionally over LiteLLM for the raw model abstraction.
-LiteLLM alone only swaps the model call — it does not provide the agent/tool structure.
+### Provider support
+
+Four providers are supported via `agents/_models.py`, selected at runtime
+from `AIIDA_AGENT_PROVIDER`:
+
+| Provider            | Model class                          | Notes                                                                                            |
+| ------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `ollama` (default)  | `OpenAIChatModel` + `OllamaProvider` | Local; `OLLAMA_BASE_URL` sets endpoint                                                           |
+| `openai`            | `OpenAIChatModel`                    | Reads `OPENAI_API_KEY`                                                                           |
+| `anthropic`         | `AnthropicModel`                     | Reads `ANTHROPIC_API_KEY`                                                                        |
+| `openai-compatible` | `OpenAIChatModel` + `OpenAIProvider` | Any OpenAI-compatible endpoint (DeepSeek, Together, vLLM, etc.); requires `AIIDA_AGENT_BASE_URL` |
 
 ### Model strategy: local + cloud, dual-path
 
-- Two tracks are tested in parallel through the first months:
-  - **flagship cloud models** — already capable and trained on public AiiDA docs; reach common tasks with no extra infra.
-  - **small local models** — naturally weaker, so they lean on extra tooling (RAG over AiiDA docs, ADR-05) to close the gap.
-- Larger / more expensive models can be run locally on PSI hardware where the infra is available.
-- Models differ in output *format* (e.g. JSON vs. free text), not only answer quality — relevant when chaining one model's output into another's tools.
+Two tracks run in parallel:
+
+- **Local models via Ollama** — offline-capable, runs on HPC clusters with no
+  outbound internet. Default dev model is `qwen3.5:2b` (placeholder only —
+  too small for reliable tool calling). For real use, `qwen3.6:27b` or
+  `gemma3:12b` are recommended.
+- **Cloud models** — capable out of the box, no extra infra. Useful for
+  evaluating answer quality against local models.
+
+The provider abstraction means switching between tracks is a `.env` change,
+not a code change.
+
+### No module-level side effects
+
+The model is constructed in a `get_model()` factory called from `get_agent()`,
+which is called from `cli.main()` after `load_dotenv()`. Importing the agents
+package is inert — no filesystem access, no environment mutation, no model
+construction at import time.
 
 ## Consequences
 
-- No bespoke LLM abstraction to build or maintain; provider/model swaps come from the library.
-- A library dependency is added; the local-model gate must be verified against whichever library is selected.
+- No bespoke LLM abstraction to build or maintain.
+- Provider and model swaps are `.env` changes; no code changes required.
+- `pydantic-ai-slim[openai,anthropic]` keeps the dependency surface minimal.
+- The local-model gate is verified: the agent runs end-to-end against
+  `qwen3.5:2b` via Ollama with no cloud dependency.
 
 ## Alternatives considered
 
-- **Hand-roll a `LLMClient` abstraction.** Rejected: reinvents a solved problem.
-- **Ollama only.** Rejected: local serving + OpenAI shim only; no Anthropic / multi-provider.
-- **Raw per-provider SDKs side by side.** Rejected: duplicates the normalization a single library already provides.
+- **LiteLLM.** Rejected: model-call abstraction only, no agent/tool structure.
+- **`llm` (Simon Willison).** Rejected: no typed tool schema or HITL support.
+- **Hand-roll a `LLMClient`.** Rejected: reinvents a solved problem.
+- **Ollama only.** Rejected: local serving + OpenAI shim only, no Anthropic.
+- **Raw per-provider SDKs side by side.** Rejected: duplicates what Pydantic AI
+  already provides.

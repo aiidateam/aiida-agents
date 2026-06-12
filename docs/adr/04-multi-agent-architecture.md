@@ -1,66 +1,115 @@
-# ADR-04: Multi-agent architecture with a routing Orchestrator
+# ADR-04: Package-by-feature agents subpackage; single Analysis Agent first
 
-<!-- > Seed — direction confirmed 2026-05-25; agent boundaries and inter-agent protocol still to be specified during implementation. -->
+> Status: accepted — Analysis Agent implemented as of Weeks 3–4 (June 2026).
+> Orchestrator and specialist agents deferred to Weeks 7–8.
 
 ## Context
 
-The project targets a range of user intents that differ in risk, domain knowledge, and AiiDA access pattern.
-A single monolithic agent would need to handle all of these at once: read-only provenance queries, workflow parameter construction, failure diagnosis, and write/submit operations.
-That conflates concerns that have very different risk profiles (ADR-08) and makes the system prompt unmanageable as the tool surface grows.
+The project targets a range of user intents with very different risk profiles:
+read-only provenance queries, workflow submission, failure diagnosis. A single
+monolithic agent conflates these concerns and makes the system prompt
+unmanageable as the tool surface grows.
 
-Breaking the work into specialised agents is the standard pattern for multi-step, multi-domain agentic systems.
-The question is how to route between them and what the boundaries should be.
+Breaking work into specialised agents is the standard pattern. The question is
+what the package structure, agent boundaries, and inter-agent protocol should
+be — and critically, when to introduce that complexity.
 
 ## Decision
 
-Adopt a **routed multi-agent architecture** with a lightweight Orchestrator agent at the entry point and a set of specialised sub-agents, each owning a bounded slice of the tool surface and domain knowledge.
+### Build one agent first; earn complexity before adding it
 
-### Orchestrator
+The Analysis Agent is the first and only agent in the first milestone. It is
+a read-only provenance-exploration agent over the MCP tools and RAG pipeline.
+The Orchestrator and specialist agents (Diagnostic, Config, Workflow) are
+post-midterm work. Adding multi-agent routing before a single agent works
+end-to-end would be complexity without a working concretion to validate it.
 
-Receives every user message.
-Classifies intent and delegates to exactly one sub-agent per turn.
-Holds no domain tools itself — its only job is routing and context hand-off.
-Runs on the same model as the sub-agents; no separate model is required.
+### Package-by-feature: `agents/` subpackage
 
-### Sub-agents (first milestone scope)
+Each agent is its own subpackage under `src/aiida_agents/agents/`:
 
-| Agent                | Responsibility                                           | AiiDA access                        |
-| -------------------- | -------------------------------------------------------- | ----------------------------------- |
-| **Analysis Agent**   | Provenance queries, process status, structure search     | Read-only MCP tools                 |
-| **Diagnostic Agent** | Interpret calculation failures, map exit codes to causes | Read-only MCP tools + RAG (ADR-05)  |
-| **Config Agent**     | Build and validate workflow input parameters             | Validator (ADR-07), no DB writes    |
-| **Workflow Agent**   | Submit workflows to AiiDA                                | Write tools, gated by HITL (ADR-08) |
+```
+src/aiida_agents/agents/
+    __init__.py          # public API: get_agent()
+    _models.py           # shared get_model() factory (all agents share one model)
+    analysis/
+        __init__.py      # Analysis agent: get_agent(), _TOOLS, system prompt
+        prompt.md        # agent's system prompt — co-located, plain Markdown
+    validator/           # ADR-07: deterministic validation before any write
+        __init__.py
+        _schema.py
+        _ranges.py
+```
 
-The Analysis Agent is the first-milestone deliverable.
-The remaining agents are introduced in later milestones once the read-only foundation is stable.
+Key design decisions:
 
-### Inter-agent protocol
+- **Prompt co-location**: each agent's `prompt.md` lives with its agent, not
+  in a shared `prompts/` directory. One prompt per agent, no shared prompts yet.
+- **Shared model factory**: `_models.py` provides `get_model()` for all agents.
+  ADR-03's provider abstraction lives here, not in any individual agent.
+- **No module-level agent instance**: `get_agent()` is a factory called from
+  `cli.main()`, not a module-level `agent = Agent(...)`. Importing the package
+  is inert.
+- **CLI separated**: `ask()` and `main()` live in `aiida_agents/cli.py`, not
+  in any agent module. The CLI drives whichever agent is active.
 
-Sub-agents receive a structured context object from the Orchestrator: the original user message, the resolved intent class, and any identifiers (PKs, UUIDs) already extracted.
-Sub-agents return a structured result; the Orchestrator composes the final user-facing response.
-All inter-agent calls are in-process — no network hops, no message queues.
+### Analysis Agent tool set
 
-### Library
+The Analysis Agent exposes seven tools:
 
-Pydantic AI (ADR-03) provides the agent/tool abstraction.
-Each sub-agent is a `pydantic_ai.Agent` instance with its own tool set and system prompt.
-The Orchestrator is also a `pydantic_ai.Agent` whose only "tools" are the sub-agent `run()` calls.
+| Tool                 | Source                    | Type                             |
+| -------------------- | ------------------------- | -------------------------------- |
+| `get_process_status` | `mcp/tools/processes.py`  | Read                             |
+| `list_processes`     | `mcp/tools/processes.py`  | Read                             |
+| `query_nodes`        | `mcp/tools/nodes.py`      | Read                             |
+| `get_node_inputs`    | `mcp/tools/nodes.py`      | Read                             |
+| `get_node_outputs`   | `mcp/tools/nodes.py`      | Read                             |
+| `search_structures`  | `mcp/tools/structures.py` | Read                             |
+| `search_aiida_docs`  | `rag/__init__.py`         | Read (RAG)                       |
+| `submit_workflow`    | `mcp/tools/submit.py`     | Write — `requires_approval=True` |
+
+`submit_workflow` is registered with Pydantic AI's native `requires_approval=True`,
+which pauses the agent run and returns a `DeferredToolRequests` object for the
+CLI to handle (ADR-08).
+
+### Future multi-agent architecture (Weeks 7–8)
+
+Once the single-agent foundation is stable, the architecture expands to:
+
+| Agent                | Responsibility                       | AiiDA access        |
+| -------------------- | ------------------------------------ | ------------------- |
+| **Orchestrator**     | Routes intent to specialist agents   | No tools            |
+| **Analysis Agent**   | Provenance queries, structure search | Read-only MCP + RAG |
+| **Diagnostic Agent** | Interpret failures, map exit codes   | Read-only MCP + RAG |
+| **Workflow Agent**   | Submit workflows                     | Write tools + HITL  |
+
+Each specialist agent will be a sibling subpackage under `agents/`. The
+Orchestrator will be a `pydantic_ai.Agent` whose only tools are the specialist
+`run()` calls. A2A vs. plain function calls will be decided empirically.
 
 ## Consequences
 
-- Each agent's system prompt and tool surface stays small and auditable.
-- The read/write split (ADR-02, ADR-08) maps cleanly onto agent boundaries — the Workflow Agent is the only one with write tools, making the HITL gate structurally enforceable.
-- Adding a new capability means adding a new sub-agent, not growing a monolithic prompt.
-- The Orchestrator is a single point of failure for routing; misclassification sends the query to the wrong agent. Mitigation: the Orchestrator prompt is tested with a representative query suite (the eval harness).
-- Inter-agent calls are synchronous and in-process; parallel sub-agent execution is not supported in the first milestone and deferred.
+- The read/write split maps cleanly onto agent boundaries — the write tool
+  is gated by `requires_approval` regardless of which agent holds it.
+- Adding a new agent means adding a new sibling subpackage; no changes to
+  existing agents.
+- The single-agent-first approach meant a working, testable system at the
+  end of Weeks 3–4 rather than a partially-working multi-agent system.
+- `_models.py` as shared infrastructure means model selection is changed in
+  one place for all agents.
 
 ## Alternatives considered
 
+- **Build Orchestrator + specialists first.**
+  Rejected: multi-agent routing before a single working agent is complexity
+  without a concretion to validate it. Julian's timeline explicitly sequences
+  single agent first, Orchestrator post-midterm.
 - **Single monolithic agent with all tools.**
-  Rejected: the system prompt grows unboundedly, tool selection degrades as the surface widens, and the read/write risk split cannot be structurally enforced.
-- **Separate processes / microservices per agent.**
-  Rejected: adds network, serialisation, and deployment complexity for no benefit at this scale; in-process calls are sufficient.
-- **LangGraph or a dedicated orchestration framework.**
-  Rejected: introduces a heavy dependency and framework-specific abstractions; Pydantic AI's native agent composition is sufficient for the first milestone and keeps the stack minimal (ADR-01 reuse ethos).
-- **Static routing (if/else on keywords).**
-  Rejected: brittle against natural language variation; an LLM classifier generalises better and requires no hand-maintained keyword lists.
+  Rejected: system prompt grows unboundedly; read/write risk split cannot be
+  structurally enforced.
+- **Shared `prompts/` directory.**
+  Rejected: each agent owns its prompt; a shared directory implies shared
+  prompts that don't exist yet. Refactor when a common preamble emerges.
+- **LangGraph or dedicated orchestration framework.**
+  Rejected: heavy dependency, framework-specific abstractions; Pydantic AI's
+  native agent composition is sufficient and keeps the stack minimal.

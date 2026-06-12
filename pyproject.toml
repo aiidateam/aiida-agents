@@ -37,6 +37,10 @@ aiida-agents = "aiida_agents.cli:main"
 docs = [
   "mystmd"
 ]
+rag = [
+  "chromadb>=1.5.9",
+  "sentence-transformers>=5.5.1",
+]
 tests = [
   "pytest",
   "pytest-cov"
@@ -52,7 +56,8 @@ pre-commit = [
 
 [dependency-groups]
 dev = [
-  "aiida-agents[docs,tests,pre-commit]"
+  "aiida-agents[docs,tests,rag,pre-commit]",
+  "pytest-asyncio>=1.4.0",
 ]
 
 [tool.hatch.metadata]
@@ -76,12 +81,12 @@ scripts.serve = "cd docs && myst start"
 [tool.hatch.envs.pre-commit]
 # `tests` is included so the mypy hook (which now type-checks `tests/`) has
 # pytest and the test deps available.
-features = ["pre-commit", "tests"]
+features = ["pre-commit", "tests", "rag"]
 scripts.install = "pre-commit install"
 scripts.run = "pre-commit run {args}"
 
 [tool.hatch.envs.hatch-test]
-features = ["tests"]
+features = ["tests", "rag"]
 randomize = false
 parallel = false
 
@@ -100,6 +105,9 @@ show_missing = true
 fail_under = 80
 
 [tool.ruff]
+exclude = [
+    ".aiida_agent_vector_db",
+]
 lint.ignore = [
     "TRY003",  # https://docs.astral.sh/ruff/rules/raise-vanilla-args/
     "EM101",   # https://docs.astral.sh/ruff/rules/raw-string-in-exception/
