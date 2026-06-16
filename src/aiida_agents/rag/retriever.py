@@ -34,6 +34,7 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -111,22 +112,33 @@ def _clone_and_build_text(target_dir: str) -> None:
         docs_dir = repo_dir / "docs"
         text_out = tmp_path / "text_build"
 
-        # Step 2: install docs dependencies (sphinx + aiida theme)
-        logger.info("installing docs dependencies…")
-        subprocess.run(
-            ["pip", "install", "--quiet", "-r", str(docs_dir / "requirements.txt")],
-            check=False,  # non-fatal — sphinx may already be installed
-            capture_output=True,
-        )
+        # Step 2: require the docs toolchain in THIS interpreter. We do not
+        # pip-install at runtime: that mutates the user's environment and fails
+        # on uv venvs (no bundled pip). It is an opt-in dependency; fail early
+        # with guidance if it is missing.
+        try:
+            import sphinx  # noqa: F401
+        except ModuleNotFoundError as exc:
+            msg = (
+                "Building the docs corpus needs the AiiDA docs toolchain, which "
+                "is not installed in this environment. Install it with:\n"
+                "    uv pip install 'aiida-core[docs]'\n"
+                "then re-run indexing."
+            )
+            raise RuntimeError(msg) from exc
 
-        # Step 3: run sphinx text builder
+        # Step 3: run the sphinx text builder under THIS interpreter
+        # (sys.executable), so it uses the environment that has aiida installed,
+        # not a stray system sphinx-build on PATH.
         # -E = don't use cached environment (fresh build)
         # -D nb_execution_mode=off = don't execute notebooks
         # -q = quiet (suppress most output)
-        logger.info("running sphinx-build -b text (this takes ~30–60s)…")
+        logger.info("running sphinx -b text (this takes ~30–60s)…")
         result = subprocess.run(
             [
-                "sphinx-build",
+                sys.executable,
+                "-m",
+                "sphinx",
                 "-b",
                 "text",
                 "-E",
@@ -154,7 +166,15 @@ def _clone_and_build_text(target_dir: str) -> None:
         else:
             logger.info("sphinx text build complete")
 
-        # Step 4: copy the .txt output to our persistent location
+        # Step 4: copy the .txt output to our persistent location. Guard against
+        # a build that produced nothing, so the failure surfaces here with the
+        # sphinx error rather than as an opaque FileNotFoundError from copytree.
+        if not text_out.exists():
+            msg = (
+                f"sphinx produced no output (rc={result.returncode}); "
+                f"the docs build failed. Last stderr:\n{result.stderr[-2000:]}"
+            )
+            raise RuntimeError(msg)
         if Path(target_dir).exists():
             shutil.rmtree(target_dir)
         shutil.copytree(str(text_out), target_dir)
