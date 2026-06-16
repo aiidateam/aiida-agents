@@ -22,6 +22,7 @@ from aiida_agents.agents._models import get_model
 from aiida_agents.mcp.tools.nodes import get_node_inputs, get_node_outputs, query_nodes
 from aiida_agents.mcp.tools.processes import get_process_status, list_processes
 from aiida_agents.mcp.tools.structures import search_structures
+from aiida_agents.rag import search_aiida_docs
 
 _TOOLS: list[Any] = [
     get_process_status,
@@ -30,6 +31,7 @@ _TOOLS: list[Any] = [
     get_node_inputs,
     get_node_outputs,
     search_structures,
+    search_aiida_docs,
 ]
 
 _SYSTEM_PROMPT = (
