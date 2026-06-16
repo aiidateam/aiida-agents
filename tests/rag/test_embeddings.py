@@ -20,10 +20,13 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# White-box test of the embedding backends: the concrete classes and the
+# query-prefix constant are internal (`_`-prefixed), aliased here to keep the
+# test body readable.
 from aiida_agents.rag.embeddings import (
-    MXBAI_QUERY_PREFIX,
-    OllamaEmbedding,
-    SentenceTransformerEmbedding,
+    _MXBAI_QUERY_PREFIX as MXBAI_QUERY_PREFIX,
+    _OllamaEmbedding as OllamaEmbedding,
+    _SentenceTransformerEmbedding as SentenceTransformerEmbedding,
     get_embedding_function,
 )
 

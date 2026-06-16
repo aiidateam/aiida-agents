@@ -21,7 +21,7 @@ from sentence_transformers import SentenceTransformer
 logger = logging.getLogger(__name__)
 
 # mxbai-embed-large query prefix (documents need no prefix)
-MXBAI_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
+_MXBAI_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
 
 class EmbeddingFunction(Protocol):
@@ -32,7 +32,7 @@ class EmbeddingFunction(Protocol):
     def embed_query(self, input: list[str]) -> list[list[float]]: ...
 
 
-class OllamaEmbedding:
+class _OllamaEmbedding:
     """Embeddings via a locally running Ollama server.
 
     Uses mxbai-embed-large by default.
@@ -83,14 +83,14 @@ class OllamaEmbedding:
 
     def embed_query(self, input: list[str]) -> list[list[float]]:
         """Embed queries — adds mxbai query prefix."""
-        prefixed = [MXBAI_QUERY_PREFIX + t for t in input]
+        prefixed = [_MXBAI_QUERY_PREFIX + t for t in input]
         return self._embed(prefixed)
 
     def name(self) -> str:
         return f"ollama/{self.model}"
 
 
-class SentenceTransformerEmbedding:
+class _SentenceTransformerEmbedding:
     """Embeddings via sentence-transformers (CPU, no server required)."""
 
     def __init__(self, model: str = "all-MiniLM-L6-v2") -> None:
@@ -127,9 +127,9 @@ def get_embedding_function() -> EmbeddingFunction:
             urllib.request.urlopen(base, timeout=2)
             model = os.getenv("AIIDA_AGENTS_EMBED_MODEL", "mxbai-embed-large")
             logger.debug("embedding backend: ollama (%s)", model)
-            return OllamaEmbedding(model=model)
+            return _OllamaEmbedding(model=model)
         except Exception:
             logger.warning("Ollama unreachable — falling back to sentence-transformers")
 
     logger.debug("embedding backend: sentence-transformers (all-MiniLM-L6-v2)")
-    return SentenceTransformerEmbedding()
+    return _SentenceTransformerEmbedding()
