@@ -23,15 +23,17 @@ Why Nomic task prefixes matter:
   and "search_query:" prefixes. Without them retrieval is near-random.
   The prefixes are added by OllamaEmbedding — NOT added here manually.
 
-DB path defaults to .aiida_agent_vector_db/, overridable via
+DB path defaults to .aiida_agents_vector_db/, overridable via
 AIIDA_AGENTS_VECTOR_DB_PATH.
 """
 
 from __future__ import annotations
 
 import chromadb
+import importlib.util
 import logging
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -39,11 +41,11 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from aiida_agents.rag.embeddings import get_embedding_function
+from aiida_agents.rag.embeddings import EmbeddingFunction, get_embedding_function
 
 logger = logging.getLogger(__name__)
 
-_COLLECTION_NAME = "aiida_docs"
+_COLLECTION_PREFIX = "aiida_docs"
 _TARGET_CHUNK_CHARS = 2000  # ~512 tokens; 2026 benchmark sweet spot
 _MIN_CHUNK_CHARS = 150  # discard stubs shorter than this
 
@@ -53,13 +55,26 @@ _DOCS_SUBDIR = "docs"  # need full docs/ for sphinx-build, not just source/
 
 
 def _get_db_path() -> str:
-    return os.getenv("AIIDA_AGENTS_VECTOR_DB_PATH", ".aiida_agent_vector_db")
+    return os.getenv("AIIDA_AGENTS_VECTOR_DB_PATH", ".aiida_agents_vector_db")
 
 
 def _get_client() -> Any:
     path = _get_db_path()
     Path(path).mkdir(parents=True, exist_ok=True)
     return chromadb.PersistentClient(path=path)
+
+
+def _collection_name(embed_fn: EmbeddingFunction) -> str:
+    """Collection name keyed by docs version and embedding model.
+
+    Index- and query-time embeddings must use the same model, and therefore
+    the same vector dimension, so the collection is keyed by both ``_DOCS_TAG``
+    and ``embed_fn.name()``. A docs-version bump or an embedding-backend change
+    resolves to a different collection name, which triggers a rebuild rather
+    than silently serving a stale or dimension-incompatible index.
+    """
+    model_slug = re.sub(r"[^A-Za-z0-9._-]", "_", embed_fn.name())
+    return f"{_COLLECTION_PREFIX}__{_DOCS_TAG}__{model_slug}"
 
 
 # ---------------------------------------------------------------------------
@@ -116,16 +131,14 @@ def _clone_and_build_text(target_dir: str) -> None:
         # pip-install at runtime: that mutates the user's environment and fails
         # on uv venvs (no bundled pip). It is an opt-in dependency; fail early
         # with guidance if it is missing.
-        try:
-            import sphinx  # noqa: F401
-        except ModuleNotFoundError as exc:
+        if importlib.util.find_spec("sphinx") is None:
             msg = (
                 "Building the docs corpus needs the AiiDA docs toolchain, which "
                 "is not installed in this environment. Install it with:\n"
                 "    uv pip install 'aiida-core[docs]'\n"
                 "then re-run indexing."
             )
-            raise RuntimeError(msg) from exc
+            raise RuntimeError(msg)
 
         # Step 3: run the sphinx text builder under THIS interpreter
         # (sys.executable), so it uses the environment that has aiida installed,
@@ -376,24 +389,33 @@ def _load_docs(text_dir: str) -> list[dict[str, str]]:
 def index_docs(force: bool = False) -> None:
     """Build or rebuild the ChromaDB collection from aiida-core docs.
 
+    The collection is keyed by docs version and embedding model (see
+    :func:`_collection_name`), so different versions or backends never share an
+    index.
+
     Args:
         force: If True, delete and rebuild even if the collection exists.
     """
     client = _get_client()
+    embed_fn = get_embedding_function()
+    name = _collection_name(embed_fn)
     existing = [c.name for c in client.list_collections()]
 
-    if _COLLECTION_NAME in existing and not force:
-        logger.info("collection '%s' already exists — skipping index", _COLLECTION_NAME)
+    if name in existing and not force:
+        logger.info("collection '%s' already exists — skipping index", name)
         return
 
-    if _COLLECTION_NAME in existing:
-        client.delete_collection(_COLLECTION_NAME)
+    if name in existing:
+        client.delete_collection(name)
 
-    embed_fn = get_embedding_function()
     collection = client.create_collection(
-        name=_COLLECTION_NAME,
+        name=name,
         embedding_function=embed_fn,
-        metadata={"hnsw:space": "cosine"},
+        metadata={
+            "hnsw:space": "cosine",
+            "docs_version": _DOCS_TAG,
+            "embedding": embed_fn.name(),
+        },
     )
 
     text_dir = os.path.join(_get_db_path(), "aiida_text_corpus")
@@ -425,14 +447,14 @@ def index_docs(force: bool = False) -> None:
             -(-len(texts) // batch),
         )
 
-    logger.info("indexed %d chunks into '%s'", len(texts), _COLLECTION_NAME)
+    logger.info("indexed %d chunks into '%s'", len(texts), name)
 
 
 def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
     """Query the AiiDA docs with a natural language string.
 
-    The query is embedded with the "search_query:" Nomic prefix
-    (handled inside OllamaEmbedding.embed_query).
+    The query is embedded with the mxbai query prefix (added inside
+    ``OllamaEmbedding.embed_query``).
 
     Args:
         query: Natural language question.
@@ -443,21 +465,23 @@ def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
         ordered by relevance.
     """
     client = _get_client()
+    embed_fn = get_embedding_function()
+    name = _collection_name(embed_fn)
     existing = [c.name for c in client.list_collections()]
 
-    if _COLLECTION_NAME not in existing:
-        logger.warning("collection not found — run index_docs() first")
+    if name not in existing:
+        logger.warning(
+            "no index for docs %s + embedding '%s' — run `aiida-agents rag init`",
+            _DOCS_TAG,
+            embed_fn.name(),
+        )
         return []
 
-    embed_fn = get_embedding_function()
-    collection = client.get_collection(
-        name=_COLLECTION_NAME,
-        embedding_function=embed_fn,
-    )
+    collection = client.get_collection(name=name, embedding_function=embed_fn)
 
-    # IMPORTANT: ChromaDB's query_texts always calls __call__ (search_document prefix).
-    # We must manually embed with embed_query (search_query prefix) and pass the
-    # vector directly via query_embeddings so Nomic gets the correct task signal.
+    # ChromaDB's query_texts path would embed via __call__ (the document side,
+    # no prefix). We embed the query ourselves via embed_query (which adds the
+    # mxbai query prefix) and pass the vector directly through query_embeddings.
     query_vector = embed_fn.embed_query([query])[0]
     results = collection.query(query_embeddings=[query_vector], n_results=limit)
     docs = results.get("documents", [[]])[0]

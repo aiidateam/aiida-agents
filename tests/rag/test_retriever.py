@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 
 from aiida_agents.rag.retriever import (
     _chunk_text,
+    _collection_name,
     _extract_text_sections,
     _split_large_text,
     query_docs,
@@ -102,20 +103,32 @@ class TestChunkText:
 class TestQueryDocs:
     def test_returns_empty_list_when_collection_missing(self) -> None:
         mock_client = MagicMock()
-        mock_client.list_collections.return_value = []
+        mock_client.list_collections.return_value = []  # nothing indexed yet
+
+        fake_embed = MagicMock()
+        fake_embed.name.return_value = "fake/model"
 
         with (
             patch("aiida_agents.rag.retriever._get_client", return_value=mock_client),
-            patch("aiida_agents.rag.embeddings.get_embedding_function"),
+            patch(
+                "aiida_agents.rag.retriever.get_embedding_function",
+                return_value=fake_embed,
+            ),
         ):
             results = query_docs("anything")
 
         assert results == []
 
     def test_returns_results_with_expected_keys(self) -> None:
-        mock_client = MagicMock()
+        fake_embed = MagicMock()
+        fake_embed.name.return_value = "fake/model"
+        fake_embed.embed_query.return_value = [[0.1, 0.2, 0.3]]
+        # The query path looks for the collection keyed by version + model.
+        name = _collection_name(fake_embed)
+
         mock_col = MagicMock()
-        mock_col.name = "aiida_docs"
+        mock_col.name = name
+        mock_client = MagicMock()
         mock_client.list_collections.return_value = [mock_col]
         mock_collection = MagicMock()
         mock_collection.query.return_value = {
@@ -124,19 +137,15 @@ class TestQueryDocs:
         }
         mock_client.get_collection.return_value = mock_collection
 
-        mock_embed_fn = MagicMock()
-        mock_embed_fn.embed_query.return_value = [[0.1, 0.2, 0.3]]
-
         with (
             patch("aiida_agents.rag.retriever._get_client", return_value=mock_client),
             patch(
-                "aiida_agents.rag.embeddings.get_embedding_function",
-                return_value=mock_embed_fn,
+                "aiida_agents.rag.retriever.get_embedding_function",
+                return_value=fake_embed,
             ),
         ):
             results = query_docs("What is Foo?", limit=1)
 
-        assert len(results) == 1
-        assert results[0]["text"] == "doc text"
-        assert results[0]["source"] == "topics/foo.txt"
-        assert results[0]["section"] == "Foo"
+        assert results == [
+            {"text": "doc text", "source": "topics/foo.txt", "section": "Foo"}
+        ]

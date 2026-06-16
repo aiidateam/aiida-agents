@@ -106,7 +106,7 @@ fail_under = 80
 
 [tool.ruff]
 exclude = [
-    ".aiida_agent_vector_db",
+    ".aiida_agents_vector_db",
 ]
 lint.ignore = [
     "TRY003",  # https://docs.astral.sh/ruff/rules/raise-vanilla-args/
