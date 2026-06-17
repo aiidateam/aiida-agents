@@ -132,8 +132,7 @@ text corpus is cached. ChromaDB runs in-process with cosine similarity
 The index is built on demand by a one-time CLI step, `aiida-agents rag init`,
 not shipped. It runs the full pipeline: clone the docs at the pinned tag,
 `sphinx-build -b text`, curate, chunk, embed, and persist. The build needs the
-AiiDA docs toolchain, installed explicitly with `uv pip install
-'aiida-core[docs]'`; `rag init` checks for it and errors with that hint rather
+AiiDA docs toolchain, installed explicitly with `uv pip install 'aiida-core[docs]'`; `rag init` checks for it and errors with that hint rather
 than installing it silently. The clone +
 `sphinx-build` runs under the active interpreter (`sys.executable -m sphinx`)
 so it uses the environment that has `aiida` installed, not a stray system

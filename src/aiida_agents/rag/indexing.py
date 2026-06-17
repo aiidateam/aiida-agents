@@ -38,6 +38,17 @@ def _clone_and_build_text(target_dir: str) -> None:
     Produces .txt files in target_dir — clean prose, no RST markup.
     Notebook execution is disabled (NB_EXECUTION_MODE=off) for faster builds.
     """
+    # Fail fast, before the (slow) clone: the docs toolchain must be present in
+    # THIS interpreter. We do not pip-install at runtime (it mutates the user's
+    # env and fails on uv venvs with no bundled pip); it is an opt-in dependency.
+    if importlib.util.find_spec("sphinx") is None:
+        msg = (
+            "Building the docs corpus needs the AiiDA docs toolchain, which "
+            "is not installed in this environment. Install it with:\n"
+            "    uv pip install 'aiida-core[docs]'\n"
+            "then re-run indexing."
+        )
+        raise RuntimeError(msg)
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -77,20 +88,7 @@ def _clone_and_build_text(target_dir: str) -> None:
         docs_dir = repo_dir / "docs"
         text_out = tmp_path / "text_build"
 
-        # Step 2: require the docs toolchain in THIS interpreter. We do not
-        # pip-install at runtime: that mutates the user's environment and fails
-        # on uv venvs (no bundled pip). It is an opt-in dependency; fail early
-        # with guidance if it is missing.
-        if importlib.util.find_spec("sphinx") is None:
-            msg = (
-                "Building the docs corpus needs the AiiDA docs toolchain, which "
-                "is not installed in this environment. Install it with:\n"
-                "    uv pip install 'aiida-core[docs]'\n"
-                "then re-run indexing."
-            )
-            raise RuntimeError(msg)
-
-        # Step 3: run the sphinx text builder under THIS interpreter
+        # Step 2: run the sphinx text builder under THIS interpreter
         # (sys.executable), so it uses the environment that has aiida installed,
         # not a stray system sphinx-build on PATH.
         # -E = don't use cached environment (fresh build)
@@ -129,7 +127,7 @@ def _clone_and_build_text(target_dir: str) -> None:
         else:
             logger.info("sphinx text build complete")
 
-        # Step 4: copy the .txt output to our persistent location. Guard against
+        # Step 3: copy the .txt output to our persistent location. Guard against
         # a build that produced nothing, so the failure surfaces here with the
         # sphinx error rather than as an opaque FileNotFoundError from copytree.
         if not text_out.exists():
