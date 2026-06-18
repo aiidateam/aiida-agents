@@ -23,6 +23,7 @@ import pytest
 # White-box test of the embedding backends: the concrete classes and the
 # query-prefix constant are internal (`_`-prefixed), aliased here to keep the
 # test body readable.
+from aiida_agents._settings import OllamaSettings, RagSettings
 from aiida_agents.rag.embeddings import (
     _MXBAI_QUERY_PREFIX as MXBAI_QUERY_PREFIX,
     _OllamaEmbedding as OllamaEmbedding,
@@ -253,4 +254,56 @@ class TestGetEmbeddingFunction:
             "sentence_transformers.SentenceTransformer", return_value=mock_model
         ):
             fn = get_embedding_function()
+        assert isinstance(fn, SentenceTransformerEmbedding)
+
+
+# ---------------------------------------------------------------------------
+# get_embedding_function - dependency injection
+# ---------------------------------------------------------------------------
+
+
+class TestGetEmbeddingFunctionInjection:
+    """Both DI params (``settings`` and ``ollama``) must be honoured.
+
+    Regression for the half-DI gap: ``get_embedding_function`` used to build
+    ``RagSettings()`` / ``OllamaSettings()`` from the environment unconditionally,
+    so neither the backend nor the Ollama endpoint could actually be injected.
+    """
+
+    def test_injected_ollama_endpoint_overrides_env(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The probe hits the injected endpoint, not ``OLLAMA_BASE_URL``.
+
+        Also confirms the injected URL's ``/v1`` suffix is stripped, exactly as
+        the environment path strips it.
+        """
+        monkeypatch.setenv("OLLAMA_BASE_URL", "http://from-env:11434/v1")
+        captured: list[str] = []
+
+        def _fake_urlopen(url: Any, timeout: Any) -> Any:  # noqa: ANN001
+            captured.append(url)
+
+        with patch("urllib.request.urlopen", side_effect=_fake_urlopen):
+            fn = get_embedding_function(
+                rag_settings=RagSettings(embed_backend="ollama"),
+                ollama_settings=OllamaSettings(base_url="http://injected:9999/v1"),
+            )
+
+        assert isinstance(fn, OllamaEmbedding)
+        assert fn.base_url == "http://injected:9999"
+        assert captured == ["http://injected:9999"]
+
+    def test_injected_settings_select_backend(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An injected ``RagSettings`` picks the backend, not the environment."""
+        monkeypatch.setenv("AIIDA_AGENTS_EMBED_BACKEND", "ollama")
+        mock_model = MagicMock()
+        with patch(
+            "sentence_transformers.SentenceTransformer", return_value=mock_model
+        ):
+            fn = get_embedding_function(
+                rag_settings=RagSettings(embed_backend="sentence-transformers")
+            )
         assert isinstance(fn, SentenceTransformerEmbedding)

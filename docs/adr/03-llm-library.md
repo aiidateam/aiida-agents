@@ -33,14 +33,14 @@ avoiding unnecessary SDK bloat.
 ### Provider support
 
 Four providers are supported via `agents/_models.py`, selected at runtime
-from `AIIDA_AGENT_PROVIDER`:
+from `AIIDA_AGENTS_PROVIDER`:
 
-| Provider            | Model class                          | Notes                                                                                            |
-| ------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------ |
-| `ollama` (default)  | `OpenAIChatModel` + `OllamaProvider` | Local; `OLLAMA_BASE_URL` sets endpoint                                                           |
-| `openai`            | `OpenAIChatModel`                    | Reads `OPENAI_API_KEY`                                                                           |
-| `anthropic`         | `AnthropicModel`                     | Reads `ANTHROPIC_API_KEY`                                                                        |
-| `openai-compatible` | `OpenAIChatModel` + `OpenAIProvider` | Any OpenAI-compatible endpoint (DeepSeek, Together, vLLM, etc.); requires `AIIDA_AGENT_BASE_URL` |
+| Provider            | Model class                          | Notes                                                                                             |
+| ------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `ollama` (default)  | `OpenAIChatModel` + `OllamaProvider` | Local; `OLLAMA_BASE_URL` sets endpoint                                                            |
+| `openai`            | `OpenAIChatModel`                    | Reads `OPENAI_API_KEY`                                                                            |
+| `anthropic`         | `AnthropicModel`                     | Reads `ANTHROPIC_API_KEY`                                                                         |
+| `openai-compatible` | `OpenAIChatModel` + `OpenAIProvider` | Any OpenAI-compatible endpoint (DeepSeek, Together, vLLM, etc.); requires `AIIDA_AGENTS_BASE_URL` |
 
 ### Model strategy: local + cloud, dual-path
 

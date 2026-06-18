@@ -25,7 +25,7 @@ dependencies = [
     "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
     "fastmcp>=3.0.0",
     "pydantic-ai-slim[openai,anthropic]>=0.1",
-    "python-dotenv>=1.0",
+    "pydantic-settings>=2.14.1",
     "typing-extensions>=4.12",
     "uvicorn>=0.33",
 ]

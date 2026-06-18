@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 
 from pydantic_ai import Agent
 
@@ -25,18 +24,17 @@ async def ask(agent: Agent, question: str) -> None:  # pragma: no cover
 
 def main() -> None:  # pragma: no cover
     """Interactive REPL for the AiiDA agent."""
-    from dotenv import load_dotenv
     from aiida import load_profile
     from aiida_agents.agents import get_agent
+    from aiida_agents._settings import ModelSettings, warn_on_unrecognized_settings
 
-    load_dotenv(".env")
+    warn_on_unrecognized_settings()
+    settings = ModelSettings()
     load_profile()
 
     agent = get_agent()
 
-    provider = os.getenv("AIIDA_AGENT_PROVIDER", "ollama")
-    model = os.getenv("AIIDA_AGENT_MODEL", "qwen3.5:2b")
-    print(f"AiiDA Agent — {provider}:{model} — type 'quit' to exit\n")
+    print(f"AiiDA Agent [{settings.provider}:{settings.model}] - type 'quit' to exit\n")
 
     while True:
         try:

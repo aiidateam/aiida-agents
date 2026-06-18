@@ -17,11 +17,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+from aiida_agents._settings import RagSettings
 from aiida_agents.rag.store import (
     _DOCS_TAG,
     _collection_name,
     _get_client,
-    _get_db_path,
 )
 from aiida_agents.rag.chunking import _load_docs
 from aiida_agents.rag.embeddings import get_embedding_function
@@ -153,8 +153,9 @@ def index_docs(force: bool = False) -> None:
     Args:
         force: If True, delete and rebuild even if the collection exists.
     """
-    client = _get_client()
-    embed_fn = get_embedding_function()
+    cfg = RagSettings()
+    client = _get_client(cfg)
+    embed_fn = get_embedding_function(cfg)
     name = _collection_name(embed_fn)
     existing = [c.name for c in client.list_collections()]
 
@@ -175,7 +176,7 @@ def index_docs(force: bool = False) -> None:
         },
     )
 
-    text_dir = os.path.join(_get_db_path(), "aiida_text_corpus")
+    text_dir = str(cfg.vector_db_path / "aiida_text_corpus")
     # Skip clone if text corpus already exists
     if not os.path.exists(text_dir) or not list(Path(text_dir).rglob("*.txt")):
         _clone_and_build_text(text_dir)

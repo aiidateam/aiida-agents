@@ -3,7 +3,7 @@
 Primary: mxbai-embed-large via Ollama (local, 1024-dim).
 Fallback: sentence-transformers/all-MiniLM-L6-v2 (CPU, no server needed).
 
-Backend selection (AIIDA_AGENTS_EMBED_BACKEND):
+Backend selection (``AIIDA_AGENTS_EMBED_BACKEND`` via ``RagSettings``):
   ollama                — local Ollama server (default)
   sentence-transformers — HuggingFace sentence-transformers
 """
@@ -12,11 +12,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import urllib.request
 from typing import Protocol, cast
 
 from sentence_transformers import SentenceTransformer
+
+from aiida_agents._settings import OllamaSettings, RagSettings
 
 logger = logging.getLogger(__name__)
 
@@ -44,16 +45,16 @@ class _OllamaEmbedding:
     """
 
     def __init__(
-        self, model: str = "mxbai-embed-large", base_url: str | None = None
+        self,
+        model: str = "mxbai-embed-large",
+        base_url: str = "http://localhost:11434/v1",
     ) -> None:
         self.model = model
-        raw = (
-            base_url
-            if base_url is not None
-            else os.environ.get("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-        )
-        # Strip the /v1 suffix if present (we call /api/embed directly)
-        base = raw[:-3] if raw.endswith("/v1") else raw
+        # Strip the /v1 suffix correctly: we call /api/embed directly, not the
+        # OpenAI-style /v1 routes. Use endswith+slice, not rstrip("/v1"): rstrip
+        # treats its argument as a *set* of characters and would mangle a URL
+        # like "http://localhost:11434" by stripping trailing chars from {/, v, 1}.
+        base = base_url[:-3] if base_url.endswith("/v1") else base_url
         self.base_url = base.rstrip("/") or "http://localhost:11434"
 
     def _embed(self, texts: list[str]) -> list[list[float]]:
@@ -106,28 +107,37 @@ class _SentenceTransformerEmbedding:
         return "sentence-transformers/all-MiniLM-L6-v2"
 
 
-def get_embedding_function() -> EmbeddingFunction:
+def get_embedding_function(
+    rag_settings: RagSettings | None = None,
+    ollama_settings: OllamaSettings | None = None,
+) -> EmbeddingFunction:
     """Return the configured embedding function.
 
-    Checks AIIDA_AGENTS_EMBED_BACKEND (ollama | sentence-transformers).
-    If Ollama is unreachable, falls back to sentence-transformers.
+    Args:
+        rag_settings: RAG configuration. Read from env / ``.env`` if not given.
+        ollama_settings: Ollama endpoint configuration, consulted only for the
+            ``ollama`` backend. Read from env / ``.env`` if not given.
+
+    Reads ``embed_backend`` (ollama | sentence-transformers). If Ollama is
+    unreachable, falls back to sentence-transformers.
     """
-    backend = os.getenv("AIIDA_AGENTS_EMBED_BACKEND", "ollama").lower()
+    cfg = rag_settings if rag_settings is not None else RagSettings()
 
-    if backend == "ollama":
+    if cfg.embed_backend == "ollama":
+        ollama_cfg = (
+            ollama_settings if ollama_settings is not None else OllamaSettings()
+        )
+        embedding = _OllamaEmbedding(
+            model=cfg.embed_model, base_url=ollama_cfg.base_url
+        )
         try:
-            # Strip /v1 suffix correctly — rstrip("/v1") is wrong because
-            # rstrip treats its argument as a set of characters, not a suffix,
-            # and will mangle URLs like "http://localhost:11434" by stripping
-            # trailing chars from {/, v, 1}.
-            raw_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-            base = raw_url[:-3] if raw_url.endswith("/v1") else raw_url
-            base = base.rstrip("/") or "http://localhost:11434"
-
-            urllib.request.urlopen(base, timeout=2)
-            model = os.getenv("AIIDA_AGENTS_EMBED_MODEL", "mxbai-embed-large")
-            logger.debug("embedding backend: ollama (%s)", model)
-            return _OllamaEmbedding(model=model)
+            # Health-check the bare server root. ``embedding.base_url`` already
+            # has the /v1 suffix stripped (the embedder calls /api/embed), so the
+            # probe and the embedder agree on the endpoint rather than stripping
+            # the URL in two places.
+            urllib.request.urlopen(embedding.base_url, timeout=2)
+            logger.debug("embedding backend: ollama (%s)", cfg.embed_model)
+            return embedding
         except Exception:
             logger.warning("Ollama unreachable — falling back to sentence-transformers")
 

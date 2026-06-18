@@ -3,32 +3,28 @@
 Shared by the indexing and retrieval paths so they agree on where the store
 lives and how a collection is named. The persistence path defaults to
 ``.aiida_agents_vector_db/`` and is overridable via
-``AIIDA_AGENTS_VECTOR_DB_PATH``.
+``AIIDA_AGENTS_VECTOR_DB_PATH`` (read through ``RagSettings``).
 """
 
 from __future__ import annotations
 
-import os
 import re
-from pathlib import Path
 from typing import Any
 
 import chromadb
 
+from aiida_agents._settings import RagSettings
 from aiida_agents.rag.embeddings import EmbeddingFunction
 
 _COLLECTION_PREFIX = "aiida_docs"
 _DOCS_TAG = "v2.8.0"  # pinned aiida-core docs version; part of the index identity
 
 
-def _get_db_path() -> str:
-    return os.getenv("AIIDA_AGENTS_VECTOR_DB_PATH", ".aiida_agents_vector_db")
-
-
-def _get_client() -> Any:
-    path = _get_db_path()
-    Path(path).mkdir(parents=True, exist_ok=True)
-    return chromadb.PersistentClient(path=path)
+def _get_client(settings: RagSettings | None = None) -> Any:
+    cfg = settings if settings is not None else RagSettings()
+    path = cfg.vector_db_path
+    path.mkdir(parents=True, exist_ok=True)
+    return chromadb.PersistentClient(path=str(path))
 
 
 def _collection_name(embed_fn: EmbeddingFunction) -> str:

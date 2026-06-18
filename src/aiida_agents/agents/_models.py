@@ -1,34 +1,31 @@
 """Shared model factory for all AiiDA agents.
 
-All agents share one model, selected from environment variables (ADR-04).
-This module is the single place to change provider or model configuration.
-
-Environment variables
----------------------
-AIIDA_AGENT_PROVIDER
-    ``ollama`` (default) | ``openai`` | ``anthropic`` | ``openai-compatible``
-AIIDA_AGENT_MODEL
-    Model name. Default: ``qwen3.5:2b``.
-OLLAMA_BASE_URL
-    Ollama endpoint. Default: ``http://localhost:11434/v1``.
-AIIDA_AGENT_BASE_URL
-    Base URL for ``openai-compatible`` providers.
-AIIDA_AGENT_API_KEY
-    API key for ``openai-compatible`` providers (optional for keyless servers).
+All agents share one model (ADR-04). Configuration is read from
+``ModelSettings``, a typed, validated object that fails fast on bad
+config rather than blowing up deep inside a tool call.
 """
 
 from __future__ import annotations
-
-import os
 
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
+from aiida_agents._settings import ModelSettings, OllamaSettings
 
-def get_model() -> Model:
-    """Return the configured model from environment variables.
+
+def get_model(
+    model_settings: ModelSettings | None = None,
+    ollama_settings: OllamaSettings | None = None,
+) -> Model:
+    """Return the configured model.
+
+    Args:
+        model_settings: Model configuration. Read from env / ``.env`` if
+            not given.
+        ollama_settings: Ollama endpoint configuration, consulted only for
+            ``provider='ollama'``. Read from env / ``.env`` if not given.
 
     Providers:
 
@@ -36,43 +33,46 @@ def get_model() -> Model:
     * ``openai`` — OpenAI cloud; reads ``OPENAI_API_KEY``.
     * ``anthropic`` — Anthropic cloud; reads ``ANTHROPIC_API_KEY``.
     * ``openai-compatible`` — any OpenAI-compatible endpoint (DeepSeek, Together,
-      vLLM, etc.); requires ``AIIDA_AGENT_BASE_URL``.
+      vLLM, etc.); requires ``AIIDA_AGENTS_BASE_URL``.
 
     Raises:
-        ValueError: For an unrecognised provider, or if ``openai-compatible``
-            is selected without ``AIIDA_AGENT_BASE_URL``.
+        ValidationError: When called without ``settings``, an unsupported
+            provider fails here as ``ModelSettings()`` is constructed; a
+            pre-built ``settings`` would already have failed on construction
+            upstream.
+        ValueError: If ``openai-compatible`` is selected without ``base_url``.
     """
-    provider = os.getenv("AIIDA_AGENT_PROVIDER", "ollama").lower()
-    model_name = os.getenv("AIIDA_AGENT_MODEL", "qwen3.5:2b")
+    cfg = model_settings if model_settings is not None else ModelSettings()
 
-    if provider == "ollama":
-        base_url = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")
-        return OpenAIChatModel(model_name, provider=OllamaProvider(base_url=base_url))
-
-    if provider == "openai":
-        return OpenAIChatModel(model_name)
-
-    if provider == "anthropic":
-        from pydantic_ai.models.anthropic import AnthropicModel
-
-        return AnthropicModel(model_name)
-
-    if provider == "openai-compatible":
-        compat_base_url = os.getenv("AIIDA_AGENT_BASE_URL")
-        if not compat_base_url:
-            msg = (
-                "AIIDA_AGENT_PROVIDER='openai-compatible' requires AIIDA_AGENT_BASE_URL "
-                "(e.g. https://api.deepseek.com/v1)."
-            )
-            raise ValueError(msg)
-        api_key = os.getenv("AIIDA_AGENT_API_KEY", "api-key-not-set")
+    if cfg.provider == "ollama":
+        ollama_cfg = (
+            ollama_settings if ollama_settings is not None else OllamaSettings()
+        )
         return OpenAIChatModel(
-            model_name,
-            provider=OpenAIProvider(base_url=compat_base_url, api_key=api_key),
+            cfg.model, provider=OllamaProvider(base_url=ollama_cfg.base_url)
         )
 
-    msg = (
-        f"Unsupported AIIDA_AGENT_PROVIDER {provider!r}; "
-        "use 'ollama', 'openai', 'anthropic', or 'openai-compatible'."
-    )
-    raise ValueError(msg)
+    if cfg.provider == "openai":
+        return OpenAIChatModel(cfg.model)
+
+    if cfg.provider == "anthropic":
+        from pydantic_ai.models.anthropic import AnthropicModel
+
+        return AnthropicModel(cfg.model)
+
+    if cfg.provider == "openai-compatible":
+        if not cfg.base_url:
+            msg = (
+                "AIIDA_AGENTS_PROVIDER='openai-compatible' requires "
+                "AIIDA_AGENTS_BASE_URL (e.g. https://api.deepseek.com/v1)."
+            )
+            raise ValueError(msg)
+        return OpenAIChatModel(
+            cfg.model,
+            provider=OpenAIProvider(base_url=cfg.base_url, api_key=cfg.api_key),
+        )
+
+    # Unreachable: Literal validation catches bad providers at settings load.
+    # Included for type checker completeness.
+    msg = f"Unsupported provider {cfg.provider!r}"  # pragma: no cover
+    raise ValueError(msg)  # pragma: no cover
