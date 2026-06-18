@@ -36,10 +36,10 @@ def get_model(
       vLLM, etc.); requires ``AIIDA_AGENTS_BASE_URL``.
 
     Raises:
-        ValidationError: When called without ``settings``, an unsupported
-            provider fails here as ``ModelSettings()`` is constructed; a
-            pre-built ``settings`` would already have failed on construction
-            upstream.
+        ValidationError: When called without ``model_settings``, an
+            unsupported provider fails here as ``ModelSettings()`` is
+            constructed; a pre-built ``model_settings`` would already have
+            failed on construction upstream.
         ValueError: If ``openai-compatible`` is selected without ``base_url``.
     """
     cfg = model_settings if model_settings is not None else ModelSettings()

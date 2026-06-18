@@ -1,9 +1,9 @@
 """Typed, centralized configuration for aiida-agents.
 
 Every ``AIIDA_AGENTS_*`` knob in the project lives here, one ``BaseSettings``
-per subsystem (model, RAG, server) plus a shared ``OllamaSettings`` endpoint
-group, all on a shared base so the loading rules are defined once. Each
-subsystem imports only the group(s) it needs.
+per subsystem (model, RAG, server) plus the cross-cutting ``OllamaSettings``
+endpoint and ``LoggingSettings`` groups, all on a shared base so the loading
+rules are defined once. Each subsystem imports only the group(s) it needs.
 
 The local Ollama endpoint is shared infrastructure (both the chat model and
 the RAG embeddings talk to the same server), so it lives in its own
@@ -24,9 +24,9 @@ from __future__ import annotations
 import logging
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, TypeAlias
 
-from pydantic import Field, field_validator
+from pydantic import BeforeValidator, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 logger = logging.getLogger(__name__)
@@ -39,7 +39,7 @@ class _Base(BaseSettings):
         env_prefix="AIIDA_AGENTS_",
         env_file=".env",
         env_file_encoding="utf-8",
-        # The four groups share one .env file, and pydantic-settings reads the
+        # The groups share one .env file, and pydantic-settings reads the
         # whole file; without this, each group would fail on the *other* groups'
         # AIIDA_AGENTS_* keys (e.g. ModelSettings choking on AIIDA_AGENTS_PORT).
         # Non-prefixed vars like PATH/HOME are already filtered out by env_prefix.
@@ -52,10 +52,27 @@ class _Base(BaseSettings):
     )
 
 
+# Constrained strings whose env value is case-folded before the ``Literal``
+# check, so mixed-case input (``Ollama``, ``debug``) is accepted while a
+# genuinely invalid value still fails fast with a ``literal_error``.
+_Provider: TypeAlias = Annotated[
+    Literal["ollama", "openai", "anthropic", "openai-compatible"],
+    BeforeValidator(str.lower),
+]
+_EmbedBackend: TypeAlias = Annotated[
+    Literal["ollama", "sentence-transformers"],
+    BeforeValidator(str.lower),
+]
+_LogLevel: TypeAlias = Annotated[
+    Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
+    BeforeValidator(str.upper),  # ``logging`` level names are case-sensitive
+]
+
+
 class ModelSettings(_Base):
     """LLM model/provider configuration (``AIIDA_AGENTS_*``)."""
 
-    provider: Literal["ollama", "openai", "anthropic", "openai-compatible"] = "ollama"
+    provider: _Provider = "ollama"
     model: str = "qwen3.5:2b"
 
     # OpenAI-compatible provider settings. ``api_key`` is the endpoint
@@ -86,7 +103,7 @@ class RagSettings(_Base):
 
     # ``embed_model`` applies to the ``ollama`` backend; the
     # ``sentence-transformers`` backend uses its own fixed model.
-    embed_backend: Literal["ollama", "sentence-transformers"] = "ollama"
+    embed_backend: _EmbedBackend = "ollama"
     embed_model: str = "mxbai-embed-large"
     vector_db_path: Path = Path(".aiida_agents_vector_db")
 
@@ -94,30 +111,22 @@ class RagSettings(_Base):
     # the chat model), read by ``get_embedding_function`` where it builds the
     # client, not duplicated here.
 
-    @field_validator("embed_backend", mode="before")
-    @classmethod
-    def _normalize_embed_backend(cls, value: str) -> str:
-        """Lower-case the backend so ``OLLAMA`` / ``Ollama`` are accepted too."""
-        return value.lower()
-
 
 class ServerSettings(_Base):
     """MCP server configuration (``AIIDA_AGENTS_*``)."""
 
-    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"] = "INFO"
     port: int = 8000
 
-    @field_validator("log_level", mode="before")
-    @classmethod
-    def _normalize_log_level(cls, value: str) -> str:
-        """Upper-case the level so ``debug`` / ``Debug`` load as ``DEBUG``.
 
-        ``logging`` level names are case-sensitive; normalising before the
-        ``Literal`` check lets the natural lowercase form work, while an
-        out-of-set value (e.g. ``verbose``) still fails fast with a
-        ``literal_error`` instead of blowing up in ``logging.basicConfig``.
-        """
-        return value.upper()
+class LoggingSettings(_Base):
+    """Process-wide logging configuration (``AIIDA_AGENTS_*``).
+
+    Not MCP-server specific: every entry point (CLI, MCP server, RAG indexing)
+    logs, so the level is a package-wide knob rather than part of
+    ``ServerSettings``.
+    """
+
+    log_level: _LogLevel = "INFO"
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +144,7 @@ _SETTINGS_GROUPS: tuple[type[_Base], ...] = (
     OllamaSettings,
     RagSettings,
     ServerSettings,
+    LoggingSettings,
 )
 
 

@@ -14,6 +14,7 @@ you need them.
 from __future__ import annotations
 
 from aiida_agents._settings import (
+    LoggingSettings,
     ModelSettings,
     OllamaSettings,
     RagSettings,
@@ -21,6 +22,7 @@ from aiida_agents._settings import (
 )
 
 __all__ = [
+    "LoggingSettings",
     "ModelSettings",
     "OllamaSettings",
     "RagSettings",

@@ -22,6 +22,7 @@ import pytest
 from pydantic import ValidationError
 
 from aiida_agents._settings import (
+    LoggingSettings,
     ModelSettings,
     OllamaSettings,
     RagSettings,
@@ -62,9 +63,15 @@ from aiida_agents._settings import (
         ),
         pytest.param(
             ServerSettings,
-            ("AIIDA_AGENTS_LOG_LEVEL", "AIIDA_AGENTS_PORT"),
-            {"log_level": "INFO", "port": 8000},
+            ("AIIDA_AGENTS_PORT",),
+            {"port": 8000},
             id="server",
+        ),
+        pytest.param(
+            LoggingSettings,
+            ("AIIDA_AGENTS_LOG_LEVEL",),
+            {"log_level": "INFO"},
+            id="logging",
         ),
     ],
 )
@@ -102,7 +109,7 @@ def test_defaults(
             id="embed-backend",
         ),
         pytest.param(
-            ServerSettings,
+            LoggingSettings,
             "AIIDA_AGENTS_LOG_LEVEL",
             "verbose",
             "literal_error",
@@ -129,6 +136,14 @@ def test_invalid_value_fails_fast(
     ("settings_cls", "env_var", "raw", "field", "expected"),
     [
         pytest.param(
+            ModelSettings,
+            "AIIDA_AGENTS_PROVIDER",
+            "Ollama",
+            "provider",
+            "ollama",
+            id="provider-lowercased",
+        ),
+        pytest.param(
             RagSettings,
             "AIIDA_AGENTS_EMBED_BACKEND",
             "Ollama",
@@ -137,7 +152,7 @@ def test_invalid_value_fails_fast(
             id="embed-backend-lowercased",
         ),
         pytest.param(
-            ServerSettings,
+            LoggingSettings,
             "AIIDA_AGENTS_LOG_LEVEL",
             "debug",
             "log_level",

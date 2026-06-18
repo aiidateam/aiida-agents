@@ -263,7 +263,7 @@ class TestGetEmbeddingFunction:
 
 
 class TestGetEmbeddingFunctionInjection:
-    """Both DI params (``settings`` and ``ollama``) must be honoured.
+    """Both DI params (``rag_settings`` and ``ollama_settings``) must be honoured.
 
     Regression for the half-DI gap: ``get_embedding_function`` used to build
     ``RagSettings()`` / ``OllamaSettings()`` from the environment unconditionally,

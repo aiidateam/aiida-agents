@@ -11,7 +11,11 @@ from aiida import load_profile
 from aiida.manage import get_manager
 from fastmcp import FastMCP
 
-from aiida_agents._settings import ServerSettings, warn_on_unrecognized_settings
+from aiida_agents._settings import (
+    LoggingSettings,
+    ServerSettings,
+    warn_on_unrecognized_settings,
+)
 from aiida_agents.mcp.tools import register_all
 
 
@@ -25,8 +29,7 @@ async def _lifespan(_: FastMCP) -> AsyncGenerator[None]:
     load is skipped if one is already active (e.g. the test fixture's), so it
     never clobbers a loaded profile.
     """
-    settings = ServerSettings()
-    logging.basicConfig(level=settings.log_level, stream=sys.stderr)
+    logging.basicConfig(level=LoggingSettings().log_level, stream=sys.stderr)
     warn_on_unrecognized_settings()
     if get_manager().get_profile() is None:
         load_profile()
