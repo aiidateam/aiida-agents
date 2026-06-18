@@ -39,6 +39,12 @@ class _Base(BaseSettings):
         env_prefix="AIIDA_AGENTS_",
         env_file=".env",
         env_file_encoding="utf-8",
+        # A blank value (e.g. ``AIIDA_AGENTS_PROVIDER=``) means "unset", not the
+        # empty string. Without this, the blank is read as "" and fails
+        # validation (a literal_error for the constrained fields, a bad int for
+        # the port), so uncommenting a key in .env but leaving it empty would
+        # crash the group at startup instead of falling back to its default.
+        env_ignore_empty=True,
         # The groups share one .env file, and pydantic-settings reads the
         # whole file; without this, each group would fail on the *other* groups'
         # AIIDA_AGENTS_* keys (e.g. ModelSettings choking on AIIDA_AGENTS_PORT).

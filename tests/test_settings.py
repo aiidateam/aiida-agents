@@ -32,60 +32,75 @@ from aiida_agents._settings import (
 )
 
 
-@pytest.mark.parametrize(
-    ("settings_cls", "clear_env", "expected"),
-    [
-        pytest.param(
-            ModelSettings,
-            ("AIIDA_AGENTS_PROVIDER", "AIIDA_AGENTS_MODEL", "AIIDA_AGENTS_BASE_URL"),
-            {"provider": "ollama", "model": "qwen3.5:2b", "base_url": None},
-            id="model",
+# Shared default data, (settings_cls, env_keys, expected): the env var names a
+# group reads and the values it falls back to. Reused below to assert the
+# defaults apply whether those keys are absent or present-but-blank in .env.
+_GROUP_DEFAULTS = [
+    pytest.param(
+        ModelSettings,
+        ("AIIDA_AGENTS_PROVIDER", "AIIDA_AGENTS_MODEL", "AIIDA_AGENTS_BASE_URL"),
+        {"provider": "ollama", "model": "qwen3.5:2b", "base_url": None},
+        id="model",
+    ),
+    pytest.param(
+        OllamaSettings,
+        ("OLLAMA_BASE_URL",),
+        {"base_url": "http://localhost:11434/v1"},
+        id="ollama",
+    ),
+    pytest.param(
+        RagSettings,
+        (
+            "AIIDA_AGENTS_EMBED_BACKEND",
+            "AIIDA_AGENTS_EMBED_MODEL",
+            "AIIDA_AGENTS_VECTOR_DB_PATH",
         ),
-        pytest.param(
-            OllamaSettings,
-            ("OLLAMA_BASE_URL",),
-            {"base_url": "http://localhost:11434/v1"},
-            id="ollama",
-        ),
-        pytest.param(
-            RagSettings,
-            (
-                "AIIDA_AGENTS_EMBED_BACKEND",
-                "AIIDA_AGENTS_EMBED_MODEL",
-                "AIIDA_AGENTS_VECTOR_DB_PATH",
-            ),
-            {
-                "embed_backend": "ollama",
-                "embed_model": "mxbai-embed-large",
-                "vector_db_path": pathlib.Path(".aiida_agents_vector_db"),
-            },
-            id="rag",
-        ),
-        pytest.param(
-            ServerSettings,
-            ("AIIDA_AGENTS_PORT",),
-            {"port": 8000},
-            id="server",
-        ),
-        pytest.param(
-            LoggingSettings,
-            ("AIIDA_AGENTS_LOG_LEVEL",),
-            {"log_level": "INFO"},
-            id="logging",
-        ),
-    ],
-)
-def test_defaults(
+        {
+            "embed_backend": "ollama",
+            "embed_model": "mxbai-embed-large",
+            "vector_db_path": pathlib.Path(".aiida_agents_vector_db"),
+        },
+        id="rag",
+    ),
+    pytest.param(
+        ServerSettings,
+        ("AIIDA_AGENTS_PORT",),
+        {"port": 8000},
+        id="server",
+    ),
+    pytest.param(
+        LoggingSettings,
+        ("AIIDA_AGENTS_LOG_LEVEL",),
+        {"log_level": "INFO"},
+        id="logging",
+    ),
+]
+
+
+@pytest.mark.parametrize(("settings_cls", "env_keys", "expected"), _GROUP_DEFAULTS)
+@pytest.mark.parametrize("source", ["absent", "blank"])
+def test_falls_back_to_declared_defaults(
+    source: str,
     settings_cls: type[_Base],
-    clear_env: tuple[str, ...],
+    env_keys: tuple[str, ...],
     expected: dict[str, object],
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """In a clean environment, each group falls back to its declared defaults."""
-    monkeypatch.chdir(tmp_path)  # empty dir, no .env to read
-    for var in clear_env:
-        monkeypatch.delenv(var, raising=False)
+    """Each group uses its declared defaults when a knob is not actively set.
+
+    The two ways of "not setting" a value must behave identically: the key
+    absent from the environment, and the key present-but-blank in ``.env``
+    (``KEY=``). The blank case is the ``env_ignore_empty`` contract: without it
+    the blank reads as ``""``, so a constrained field crashes at load
+    (``literal_error`` / bad int) and a plain string field silently becomes
+    empty, instead of falling back to the default.
+    """
+    monkeypatch.chdir(tmp_path)  # isolated dir, no stray .env to read
+    for key in env_keys:
+        monkeypatch.delenv(key, raising=False)
+    if source == "blank":
+        (tmp_path / ".env").write_text("".join(f"{key}=\n" for key in env_keys))
     settings = settings_cls()
     for field, value in expected.items():
         assert getattr(settings, field) == value
