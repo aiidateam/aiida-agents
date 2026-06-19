@@ -15,8 +15,6 @@ import logging
 import urllib.request
 from typing import Protocol, cast
 
-from sentence_transformers import SentenceTransformer
-
 from aiida_agents._settings import OllamaSettings, RagSettings
 
 logger = logging.getLogger(__name__)
@@ -95,6 +93,18 @@ class _SentenceTransformerEmbedding:
     """Embeddings via sentence-transformers (CPU, no server required)."""
 
     def __init__(self, model: str = "all-MiniLM-L6-v2") -> None:
+        # Imported lazily: the default backend is Ollama, and importing
+        # sentence-transformers eagerly would force torch (and its CUDA wheel
+        # stack) onto every install, even ones that never touch this fallback.
+        try:
+            from sentence_transformers import SentenceTransformer
+        except ImportError as exc:
+            msg = (
+                "The sentence-transformers fallback embedder is not installed. "
+                "Either run a local Ollama server (the default 'ollama' backend) "
+                "or install the optional extra: uv pip install 'aiida-agents[rag-fallback]'."
+            )
+            raise ImportError(msg) from exc
         self._model = SentenceTransformer(model)
 
     def __call__(self, input: list[str]) -> list[list[float]]:

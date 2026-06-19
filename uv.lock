@@ -37,6 +37,9 @@ pre-commit = [
 ]
 rag = [
     { name = "chromadb" },
+]
+rag-fallback = [
+    { name = "chromadb" },
     { name = "sentence-transformers" },
 ]
 tests = [
@@ -55,6 +58,7 @@ requires-dist = [
     { name = "aiida-core", git = "https://github.com/aiidateam/aiida-core.git" },
     { name = "aiida-restapi", git = "https://github.com/edan-bainglass/aiida-restapi?rev=deps" },
     { name = "chromadb", marker = "extra == 'rag'", specifier = ">=1.5.9" },
+    { name = "chromadb", marker = "extra == 'rag-fallback'", specifier = ">=1.5.9" },
     { name = "fastmcp", specifier = ">=3.0.0" },
     { name = "mypy", marker = "extra == 'lint'" },
     { name = "mypy", marker = "extra == 'pre-commit'" },
@@ -66,11 +70,11 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'tests'" },
     { name = "ruff", marker = "extra == 'lint'" },
     { name = "ruff", marker = "extra == 'pre-commit'" },
-    { name = "sentence-transformers", marker = "extra == 'rag'", specifier = ">=5.5.1" },
+    { name = "sentence-transformers", marker = "extra == 'rag-fallback'", specifier = ">=5.5.1" },
     { name = "typing-extensions", specifier = ">=4.12" },
     { name = "uvicorn", specifier = ">=0.33" },
 ]
-provides-extras = ["docs", "lint", "pre-commit", "rag", "tests"]
+provides-extras = ["docs", "lint", "pre-commit", "rag", "rag-fallback", "tests"]
 
 [package.metadata.requires-dev]
 dev = [

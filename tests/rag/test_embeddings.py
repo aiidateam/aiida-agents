@@ -15,6 +15,7 @@ stays fast and dependency-free.  The contract tested here is:
 from __future__ import annotations
 
 import json
+from importlib.util import find_spec
 from typing import Any
 from unittest.mock import MagicMock, patch
 
@@ -29,6 +30,14 @@ from aiida_agents.rag.embeddings import (
     _OllamaEmbedding as OllamaEmbedding,
     _SentenceTransformerEmbedding as SentenceTransformerEmbedding,
     get_embedding_function,
+)
+
+# The sentence-transformers fallback is an optional extra (rag-fallback). When it
+# is not installed, its tests cannot even patch `sentence_transformers.*`, so
+# skip them rather than error on collection.
+requires_sentence_transformers = pytest.mark.skipif(
+    find_spec("sentence_transformers") is None,
+    reason="sentence-transformers not installed (optional 'rag-fallback' extra)",
 )
 
 # ---------------------------------------------------------------------------
@@ -182,6 +191,7 @@ class TestOllamaEmbeddingPrefixes:
 # ---------------------------------------------------------------------------
 
 
+@requires_sentence_transformers
 class TestSentenceTransformerEmbedding:
     def test_call_and_embed_query_return_same_result(self) -> None:
         mock_model = MagicMock()
@@ -218,6 +228,7 @@ class TestGetEmbeddingFunction:
             fn = get_embedding_function()
         assert isinstance(fn, OllamaEmbedding)
 
+    @requires_sentence_transformers
     def test_falls_back_to_sentence_transformers_when_ollama_unreachable(
         self,
     ) -> None:
@@ -245,6 +256,7 @@ class TestGetEmbeddingFunction:
         # Must be the clean base URL, not a mangled one
         assert captured[0] == "http://localhost:11434"
 
+    @requires_sentence_transformers
     def test_sentence_transformers_backend_via_env(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -294,6 +306,7 @@ class TestGetEmbeddingFunctionInjection:
         assert fn.base_url == "http://injected:9999"
         assert captured == ["http://injected:9999"]
 
+    @requires_sentence_transformers
     def test_injected_settings_select_backend(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:

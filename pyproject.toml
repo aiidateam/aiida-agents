@@ -39,6 +39,12 @@ docs = [
 ]
 rag = [
   "chromadb>=1.5.9",
+]
+# In-process CPU fallback embedder, used only when no Ollama server is reachable.
+# (The default `rag` extra is already local: it embeds via the local Ollama
+# daemon.) Heavy: pulls torch and on PyPI its CUDA wheel stack, so it is opt-in.
+rag-fallback = [
+  "aiida-agents[rag]",
   "sentence-transformers>=5.5.1",
 ]
 tests = [
@@ -134,6 +140,13 @@ explicit_package_bases = true
 # Disable just that check for the tests; everything else stays strict.
 module = "tests.*"
 disallow_untyped_calls = false
+
+[[tool.mypy.overrides]]
+# sentence-transformers is an optional dependency (the `rag-fallback` extra) and is
+# imported lazily, so it is absent from the default lint/test env. Don't fail on
+# the missing import; it also ships no type stubs.
+module = "sentence_transformers.*"
+ignore_missing_imports = true
 
 [tool.basedpyright]
 # Not run in CI (mypy is the type checker); this just keeps local basedpyright
