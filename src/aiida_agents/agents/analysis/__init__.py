@@ -69,7 +69,7 @@ def get_agent(
     cfg = agent_settings if agent_settings is not None else AgentSettings()
     toolset = RetryOnToolError(FunctionToolset(_TOOLS))
     return Agent(
-        get_model(model_settings, ollama_settings),
+        get_model(model_settings=model_settings, ollama_settings=ollama_settings),
         toolsets=[toolset],
         retries=cfg.tool_retries,
         system_prompt=_SYSTEM_PROMPT,

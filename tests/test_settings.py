@@ -44,6 +44,12 @@ _GROUP_DEFAULTS = [
         id="model",
     ),
     pytest.param(
+        AgentSettings,
+        ("AIIDA_AGENTS_TOOL_RETRIES",),
+        {"tool_retries": 3},
+        id="agent",
+    ),
+    pytest.param(
         OllamaSettings,
         ("OLLAMA_BASE_URL",),
         {"base_url": "http://localhost:11434/v1"},
@@ -217,6 +223,14 @@ def test_value_is_normalized(
             "port",
             9001,
             id="str-to-int",
+        ),
+        pytest.param(
+            AgentSettings,
+            "AIIDA_AGENTS_TOOL_RETRIES",
+            "5",
+            "tool_retries",
+            5,
+            id="tool-retries-str-to-int",
         ),
     ],
 )

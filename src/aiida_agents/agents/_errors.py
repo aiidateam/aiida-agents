@@ -47,7 +47,9 @@ class RetryOnToolError(WrapperToolset[Any]):
         tool: ToolsetTool[Any],
     ) -> Any:
         try:
-            return await super().call_tool(name, tool_args, ctx, tool)
+            return await super().call_tool(
+                name=name, tool_args=tool_args, ctx=ctx, tool=tool
+            )
         except ModelRetry:
             # A tool asked for a retry deliberately; pass its message through.
             raise
