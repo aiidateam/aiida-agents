@@ -88,6 +88,18 @@ class ModelSettings(_Base):
     api_key: str = "api-key-not-set"
 
 
+class AgentSettings(_Base):
+    """Agent behaviour configuration (``AIIDA_AGENTS_*``)."""
+
+    # Max *consecutive* failed attempts at a single tool before the run is
+    # aborted; any success resets the count (pydantic-ai tracks it per tool, not
+    # per run). A small budget lets a hallucinating model recover from a bad or
+    # wrong-type identifier without letting a genuinely broken tool retry forever,
+    # which on a paid provider is unbounded cost. ``0`` disables retries (a tool
+    # error aborts immediately); a negative value is meaningless, so reject it.
+    tool_retries: int = Field(default=3, ge=0)
+
+
 class OllamaSettings(_Base):
     """Local Ollama server endpoint.
 
@@ -147,6 +159,7 @@ class LoggingSettings(_Base):
 
 _SETTINGS_GROUPS: tuple[type[_Base], ...] = (
     ModelSettings,
+    AgentSettings,
     OllamaSettings,
     RagSettings,
     ServerSettings,

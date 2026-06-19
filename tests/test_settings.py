@@ -22,6 +22,7 @@ import pytest
 from pydantic import ValidationError
 
 from aiida_agents._settings import (
+    AgentSettings,
     LoggingSettings,
     ModelSettings,
     OllamaSettings,
@@ -129,6 +130,13 @@ def test_falls_back_to_declared_defaults(
             "verbose",
             "literal_error",
             id="log-level",
+        ),
+        pytest.param(
+            AgentSettings,
+            "AIIDA_AGENTS_TOOL_RETRIES",
+            "-1",
+            "greater_than_equal",
+            id="tool-retries-negative",
         ),
     ],
 )

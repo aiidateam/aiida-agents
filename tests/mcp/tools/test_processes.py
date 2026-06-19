@@ -1,16 +1,19 @@
 """Tests for ``aiida_agents.mcp.tools.processes``.
 
 These tools wrap the ORM / ``aiida-restapi`` thinly, so the tests target only
-what is *ours*: the output-dict contract, pk/uuid acceptance, the ``ToolError``
-on a missing node, and the ``%process%`` filter plus state-from-attributes
-assembly. See ``tests/conftest.py`` for the real, session-scoped process fixtures.
+what is *ours*: the output-dict contract, pk/uuid acceptance, the missing-node
+behaviour (the function lets a bare ``NotExistent`` propagate), and the
+``%process%`` filter plus state-from-attributes assembly. The surface adapters
+that turn that ``NotExistent`` into a ``ToolError`` (MCP) or ``ModelRetry``
+(agent) are covered in ``tests/mcp/test_errors.py`` and
+``tests/agents/test_errors.py``. See ``tests/conftest.py`` for the real,
+session-scoped process fixtures.
 """
 
 from __future__ import annotations
 
 import pytest
 from aiida import orm
-from fastmcp.exceptions import ToolError
 
 from aiida_agents.mcp.tools.processes import get_process_status, list_processes
 
@@ -36,9 +39,31 @@ def test_get_process_status(add_calc: orm.CalcJobNode, by: str) -> None:
 
 @pytest.mark.usefixtures("aiida_profile")
 def test_get_process_status_not_found() -> None:
-    """An unknown identifier raises a ``ToolError`` naming the identifier."""
-    with pytest.raises(ToolError, match="987654321"):
+    """The bare function lets a ``NotExistent`` propagate, naming the identifier.
+
+    Each surface adapts that exception at its own boundary; the conversions live
+    in ``tests/mcp/test_errors.py`` (ToolError) and ``tests/agents/test_errors.py``
+    (ModelRetry).
+    """
+    from aiida.common.exceptions import NotExistent
+
+    with pytest.raises(NotExistent, match="987654321"):
         get_process_status("987654321")
+
+
+@pytest.mark.usefixtures("aiida_profile")
+def test_get_process_status_rejects_non_process_node() -> None:
+    """A valid pk for a *data* node raises WrongNodeType, not a cryptic crash.
+
+    Regression for the wrong-tool case: a model passing a data-node pk to
+    get_process_status used to hit ``AttributeError`` on ``node.process_label``;
+    now it gets an AiiDA exception the surfaces turn into a clear message.
+    """
+    from aiida_agents.mcp._orm import WrongNodeType
+
+    data = orm.Int(42).store()
+    with pytest.raises(WrongNodeType, match="not a process node"):
+        get_process_status(str(data.pk))
 
 
 def test_list_processes(add_calc: orm.CalcJobNode) -> None:

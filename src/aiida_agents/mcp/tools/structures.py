@@ -10,6 +10,7 @@ from aiida import orm
 from aiida.common.constants import elements
 from fastmcp import FastMCP
 
+from .._errors import register_tool
 from .._types import StructureRecord
 
 logger = logging.getLogger(__name__)
@@ -88,4 +89,4 @@ def search_structures(
 
 def register(mcp: FastMCP) -> None:
     """Register structure tools on the MCP server."""
-    mcp.tool()(search_structures)
+    register_tool(mcp, search_structures)

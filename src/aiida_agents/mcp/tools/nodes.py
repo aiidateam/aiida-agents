@@ -14,6 +14,7 @@ from aiida_restapi.common.query import QueryBuilderParams
 
 from .._orm import load_node
 from .._types import Identifier, NodeLink, NodeRecord
+from .._errors import register_tool
 
 logger = logging.getLogger(__name__)
 
@@ -147,6 +148,6 @@ def get_node_outputs(identifier: Identifier) -> list[NodeLink]:
 
 def register(mcp: FastMCP) -> None:
     """Register node tools on the MCP server."""
-    mcp.tool()(query_nodes)
-    mcp.tool()(get_node_inputs)
-    mcp.tool()(get_node_outputs)
+    register_tool(mcp, query_nodes)
+    register_tool(mcp, get_node_inputs)
+    register_tool(mcp, get_node_outputs)
