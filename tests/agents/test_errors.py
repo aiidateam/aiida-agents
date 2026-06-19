@@ -82,46 +82,45 @@ def test_aiida_error_recovers_and_carries_guidance() -> None:
     assert "list_processes()" in captured["retry"]
 
 
-def test_non_aiida_error_is_converted_not_fatal() -> None:
-    """A non-AiiDA tool error (the wrong-type-node case) does not crash the run.
+@pytest.mark.parametrize(
+    ("raised", "expected_retry"),
+    [
+        pytest.param(
+            AttributeError("process_label"),
+            f"process_label {_RECHECK_HINT}",
+            id="non-aiida-error-gets-recheck-hint",
+        ),
+        pytest.param(
+            ModelRetry("give a real identifier, not 42"),
+            "give a real identifier, not 42",
+            id="tool-model-retry-forwarded-verbatim",
+        ),
+    ],
+)
+def test_unrecoverable_tool_error_is_bounded_not_fatal(
+    raised: Exception, expected_retry: str
+) -> None:
+    """An always-failing tool is bounded by ``retries``, never escaping raw.
 
-    ``get_process_status`` on a data-node pk raises ``AttributeError``, which is
-    not an ``AiidaException``. The boundary still converts it to a retry, so the
-    raw error never escapes; it is bounded by ``retries`` and surfaces as
-    ``UnexpectedModelBehavior`` once the model runs out of attempts.
+    Two boundary behaviours, same shape: a non-AiiDA error (the wrong-type-node
+    case, an ``AttributeError`` that is *not* an ``AiidaException``) is converted
+    to a retry carrying the recheck hint, and a tool's own ``ModelRetry`` is
+    forwarded verbatim (no hint appended). Either way the raw error never
+    escapes; once the retry budget is spent the run ends in
+    ``UnexpectedModelBehavior``, not the original exception.
     """
 
-    def wrong_type(identifier: str) -> str:
-        raise AttributeError("process_label")
+    def always_fails(identifier: str) -> str:
+        raise raised
 
     captured: dict[str, str] = {"retry": ""}
-    toolset = RetryOnToolError(FunctionToolset([wrong_type]))
+    toolset = RetryOnToolError(FunctionToolset([always_fails]))
     agent = Agent(
-        FunctionModel(_call_then_answer("wrong_type", captured)),
+        FunctionModel(_call_then_answer("always_fails", captured)),
         toolsets=[toolset],
         retries=1,
     )
 
     with pytest.raises(UnexpectedModelBehavior):
         agent.run_sync("go")
-    assert _RECHECK_HINT in captured["retry"]
-
-
-def test_tool_model_retry_passes_through_unchanged() -> None:
-    """A ``ModelRetry`` a tool raises itself is forwarded verbatim, not re-wrapped."""
-
-    def asks_for_better_input(identifier: str) -> str:
-        raise ModelRetry("give a real identifier, not 42")
-
-    captured: dict[str, str] = {"retry": ""}
-    toolset = RetryOnToolError(FunctionToolset([asks_for_better_input]))
-    agent = Agent(
-        FunctionModel(_call_then_answer("asks_for_better_input", captured)),
-        toolsets=[toolset],
-        retries=1,
-    )
-
-    with pytest.raises(UnexpectedModelBehavior):
-        agent.run_sync("go")
-    assert captured["retry"] == "give a real identifier, not 42"
-    assert _RECHECK_HINT not in captured["retry"]
+    assert captured["retry"] == expected_retry
