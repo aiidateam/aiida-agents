@@ -87,6 +87,12 @@ class ModelSettings(_Base):
     base_url: str | None = None
     api_key: str = "api-key-not-set"
 
+    # Local models routinely produce substantial reasoning/thinking content
+    # across multi-step tool-calling runs (status -> docs -> evidence ->
+    # synthesis); the provider default output token budget is often too
+    # small to contain it, raising UnexpectedModelBehavior mid-run.
+    max_tokens: int = 8192
+
 
 class AgentSettings(_Base):
     """Agent behaviour configuration (``AIIDA_AGENTS_*``)."""

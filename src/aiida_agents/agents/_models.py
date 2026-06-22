@@ -13,52 +13,34 @@ from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
 
 from aiida_agents._settings import ModelSettings, OllamaSettings
+from pydantic_ai.settings import ModelSettings as PydanticModelSettings
 
 
 def get_model(
     model_settings: ModelSettings | None = None,
     ollama_settings: OllamaSettings | None = None,
 ) -> Model:
-    """Return the configured model.
-
-    Args:
-        model_settings: Model configuration. Read from env / ``.env`` if
-            not given.
-        ollama_settings: Ollama endpoint configuration, consulted only for
-            ``provider='ollama'``. Read from env / ``.env`` if not given.
-
-    Providers:
-
-    * ``ollama`` — local Ollama server; ``OLLAMA_BASE_URL`` sets the endpoint.
-    * ``openai`` — OpenAI cloud; reads ``OPENAI_API_KEY``.
-    * ``anthropic`` — Anthropic cloud; reads ``ANTHROPIC_API_KEY``.
-    * ``openai-compatible`` — any OpenAI-compatible endpoint (DeepSeek, Together,
-      vLLM, etc.); requires ``AIIDA_AGENTS_BASE_URL``.
-
-    Raises:
-        ValidationError: When called without ``model_settings``, an
-            unsupported provider fails here as ``ModelSettings()`` is
-            constructed; a pre-built ``model_settings`` would already have
-            failed on construction upstream.
-        ValueError: If ``openai-compatible`` is selected without ``base_url``.
-    """
+    ...
     cfg = model_settings if model_settings is not None else ModelSettings()
+    pai_settings = PydanticModelSettings(max_tokens=cfg.max_tokens)
 
     if cfg.provider == "ollama":
         ollama_cfg = (
             ollama_settings if ollama_settings is not None else OllamaSettings()
         )
         return OpenAIChatModel(
-            cfg.model, provider=OllamaProvider(base_url=ollama_cfg.base_url)
+            cfg.model,
+            provider=OllamaProvider(base_url=ollama_cfg.base_url),
+            settings=pai_settings,
         )
 
     if cfg.provider == "openai":
-        return OpenAIChatModel(cfg.model)
+        return OpenAIChatModel(cfg.model, settings=pai_settings)
 
     if cfg.provider == "anthropic":
         from pydantic_ai.models.anthropic import AnthropicModel
 
-        return AnthropicModel(cfg.model)
+        return AnthropicModel(cfg.model, settings=pai_settings)
 
     if cfg.provider == "openai-compatible":
         if not cfg.base_url:
@@ -70,9 +52,8 @@ def get_model(
         return OpenAIChatModel(
             cfg.model,
             provider=OpenAIProvider(base_url=cfg.base_url, api_key=cfg.api_key),
+            settings=pai_settings,
         )
 
-    # Unreachable: Literal validation catches bad providers at settings load.
-    # Included for type checker completeness.
     msg = f"Unsupported provider {cfg.provider!r}"  # pragma: no cover
     raise ValueError(msg)  # pragma: no cover
