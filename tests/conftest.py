@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import pytest
 from aiida import orm
+from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
+from aiida.engine import run_get_node
+from aiida.workflows.arithmetic.multiply_add import MultiplyAddWorkChain
 
 # Pull in AiiDA's test fixtures (``aiida_profile``, ``aiida_localhost``, ...).
 # ``aiida_profile`` is session-scoped and autouse: it loads a temporary
@@ -59,9 +62,6 @@ def add_calc(arithmetic_add_code: orm.InstalledCode) -> orm.CalcJobNode:
 
     :return: The stored ``CalcJobNode`` for the completed calculation.
     """
-    from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
-    from aiida.engine import run_get_node
-
     _, node = run_get_node(
         ArithmeticAddCalculation,
         x=orm.Int(2),
@@ -86,9 +86,6 @@ def multiply_add_workchain(
 
     :return: The stored top-level ``WorkChainNode`` for the completed run.
     """
-    from aiida.engine import run_get_node
-    from aiida.workflows.arithmetic.multiply_add import MultiplyAddWorkChain
-
     _, node = run_get_node(
         MultiplyAddWorkChain,
         x=orm.Int(2),

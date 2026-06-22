@@ -1,8 +1,10 @@
 """Tool registration for aiida-agents MCP server."""
 
 from __future__ import annotations
+
 from fastmcp import FastMCP
-from . import nodes, processes, structures
+
+from . import nodes, processes, structures, submit
 
 
 def register_all(mcp: FastMCP) -> None:
@@ -10,3 +12,4 @@ def register_all(mcp: FastMCP) -> None:
     processes.register(mcp)
     nodes.register(mcp)
     structures.register(mcp)
+    submit.register(mcp)

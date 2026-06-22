@@ -23,6 +23,7 @@ __all__ = [
     "ProcessRecord",
     "ProcessStatus",
     "StructureRecord",
+    "SubmitResult",
 ]
 
 # A node identifier: a pk or a uuid, both as a plain string. Using ``str``
@@ -83,3 +84,12 @@ class StructureRecord(TypedDict):
     formula: str
     num_sites: int
     ctime: str
+
+
+class SubmitResult(TypedDict):
+    """Return shape of ``submit_workflow``."""
+
+    pk: int
+    uuid: str
+    workflow: str
+    state: str
