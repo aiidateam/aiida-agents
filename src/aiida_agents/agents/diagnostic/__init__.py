@@ -1,0 +1,69 @@
+"""Diagnostic agent — interprets AiiDA process failures.
+
+Public API
+----------
+get_agent()
+    Build and return a ready-to-use Diagnostic agent instance.
+"""
+
+from __future__ import annotations
+
+from importlib.resources import files
+from typing import Any
+
+from pydantic_ai import Agent
+from pydantic_ai.toolsets import FunctionToolset
+
+from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
+from aiida_agents.agents._errors import RetryOnToolError
+from aiida_agents.agents._models import get_model
+from aiida_agents.mcp.tools.nodes import get_node_inputs, get_node_outputs, query_nodes
+from aiida_agents.mcp.tools.processes import get_process_status
+from aiida_agents.rag import search_aiida_docs
+
+# Every tool is exposed through RetryOnToolError (see get_agent), so a tool that
+# raises -- e.g. on a hallucinated or wrong-type identifier -- comes back to the
+# model as a recoverable ModelRetry instead of crashing the agent run.
+_TOOLS: list[Any] = [
+    get_process_status,
+    get_node_inputs,
+    get_node_outputs,
+    query_nodes,
+    search_aiida_docs,
+]
+
+_SYSTEM_PROMPT = (
+    files(__package__).joinpath("prompt.md").read_text(encoding="utf-8").strip()
+)
+
+
+def get_agent(
+    model_settings: ModelSettings | None = None,
+    ollama_settings: OllamaSettings | None = None,
+    agent_settings: AgentSettings | None = None,
+) -> Agent:
+    """Build and return the Diagnostic agent.
+
+    Read-only -- no write tools, no requires_approval. Called from the CLI
+    after environment variables are loaded, so model construction always sees
+    a fully populated environment.
+
+    The tools are wrapped once, at the toolset boundary, by ``RetryOnToolError``:
+    a tool failure becomes a ``ModelRetry`` the model can recover from rather than
+    a fatal error that aborts the run, bounded by ``tool_retries``.
+
+    :param model_settings: Model/provider configuration, forwarded to
+        ``get_model``. Read from env / ``.env`` if not given.
+    :param ollama_settings: Ollama endpoint configuration, forwarded to
+        ``get_model``. Read from env / ``.env`` if not given.
+    :param agent_settings: Agent behaviour configuration (the per-tool retry
+        budget). Read from env / ``.env`` if not given.
+    """
+    cfg = agent_settings if agent_settings is not None else AgentSettings()
+    toolset = RetryOnToolError(FunctionToolset(_TOOLS))
+    return Agent(
+        get_model(model_settings=model_settings, ollama_settings=ollama_settings),
+        toolsets=[toolset],
+        retries=cfg.tool_retries,
+        system_prompt=_SYSTEM_PROMPT,
+    )
