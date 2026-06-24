@@ -12,7 +12,6 @@ from aiida.plugins.entry_point import load_entry_point
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
-from aiida_agents.agents.validator import ValidationError, validate
 from aiida_agents.mcp._types import SubmitResult
 
 
@@ -40,16 +39,105 @@ def _load_process_class(entry_point: str) -> Any:
     raise ToolError(msg)
 
 
-def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
-    """Resolve Python primitives to AiiDA nodes using the process port spec.
+def _resolve_node_reference(ref: dict[str, Any], port_name: str) -> orm.Node:
+    """Resolve an explicit node reference dict to an AiiDA node.
 
-    For each input:
-    - If it's already an AiiDA node, use it as-is.
-    - If it's a primitive (int, float, str, bool, list, dict):
-      - Check the port's valid_type from the spec.
-      - If the primitive is an int and a node with that PK exists and matches
-        the expected type, reuse that node (explicit PK reference).
-      - Otherwise, wrap the primitive in the expected AiiDA node type.
+    Supported reference forms:
+        {"pk": 42}                  — load by PK
+        {"uuid": "abc-..."}         — load by UUID
+        {"label": "bash@localhost"} — load Code by label (Code ports only)
+
+    Args:
+        ref: The reference dict from the user.
+        port_name: Port name, used only for error messages.
+
+    Returns:
+        The loaded AiiDA node.
+
+    Raises:
+        ToolError: If the reference form is unrecognised or the node is not found.
+    """
+    if "pk" in ref:
+        try:
+            return orm.load_node(ref["pk"])
+        except Exception as exc:
+            raise ToolError(
+                f"No node found with pk={ref['pk']!r} for input {port_name!r}"
+            ) from exc
+
+    if "uuid" in ref:
+        try:
+            return orm.load_node(ref["uuid"])
+        except Exception as exc:
+            raise ToolError(
+                f"No node found with uuid={ref['uuid']!r} for input {port_name!r}"
+            ) from exc
+
+    if "label" in ref:
+        try:
+            return orm.load_code(ref["label"])
+        except Exception as exc:
+            raise ToolError(
+                f"No Code found with label={ref['label']!r} for input {port_name!r}. "
+                f"Use the format 'name@computer', e.g. 'bash@localhost'."
+            ) from exc
+
+    raise ToolError(
+        f"Unrecognised node reference for input {port_name!r}: {ref!r}. "
+        f'Use one of: {{"pk": N}}, {{"uuid": "..."}}, {{"label": "name@computer"}}.'
+    )
+
+
+def _is_reference_type(expected_types: tuple[type, ...]) -> bool:
+    """Return True if the port expects a node type that cannot be created from a bare primitive.
+
+    Ports expecting types like Code, AbstractCode, or StructureData require an
+    explicit node reference (pk/uuid/label) rather than a plain Python value.
+    """
+    _REFERENCE_ONLY_TYPES = (orm.AbstractCode,)
+    return any(
+        issubclass(t, _REFERENCE_ONLY_TYPES)
+        for t in expected_types
+        if isinstance(t, type)
+    )
+
+
+def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
+    """Resolve user-supplied values to AiiDA nodes using the process port spec.
+
+    Input value conventions
+    -----------------------
+    Bare primitive (``{"x": 2}``)
+        Always treated as the *value* 2 — wraps in ``orm.Int(2)``.
+        Never interpreted as a node PK.
+
+    Reference dict (``{"code": {"pk": 42}}``)
+        Loads an existing node explicitly. Three forms are supported:
+
+        * ``{"pk": N}``                  — load by integer PK
+        * ``{"uuid": "abc-..."}``        — load by UUID string
+        * ``{"label": "bash@localhost"}``— load Code by ``name@computer`` label
+
+    Already an AiiDA node
+        Passed through as-is.
+
+    Reference-only ports (e.g. ``code``)
+        Ports whose ``valid_type`` is ``AbstractCode`` or similar non-wrappable
+        types *require* an explicit reference dict. Passing a bare primitive
+        raises a clear ``ToolError``.
+
+    Args:
+        entry_point: AiiDA entry point string.
+        inputs: Dict mapping port names to values or reference dicts.
+
+    Returns:
+        Dict mapping port names to resolved, *unstored* AiiDA nodes.
+        Nodes are stored by AiiDA automatically during ``submit()`` /
+        ``run_get_node()``.
+
+    Raises:
+        ToolError: If a reference cannot be resolved or a reference-only port
+            receives a bare primitive.
     """
     process_class = _load_process_class(entry_point)
     spec = process_class.spec()
@@ -61,66 +149,100 @@ def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
             resolved[name] = value
             continue
 
+        # Explicit node reference dict — resolve and use directly
+        if isinstance(value, dict) and {"pk", "uuid", "label"} & value.keys():
+            resolved[name] = _resolve_node_reference(value, name)
+            continue
+
         # Get the expected type from the port spec
         port = spec.inputs.get(name)
         valid_type = getattr(port, "valid_type", None) if port else None
 
-        # Normalise valid_type to a tuple
+        # Normalise valid_type to a tuple, stripping NoneType
         if valid_type is None:
             expected_types: tuple[type, ...] = ()
         elif isinstance(valid_type, tuple):
-            expected_types = valid_type
+            expected_types = tuple(t for t in valid_type if t is not type(None))
         else:
-            expected_types = (valid_type,)
+            expected_types = (valid_type,) if valid_type is not type(None) else ()
 
-        # Filter out NoneType
-        expected_types = tuple(t for t in expected_types if t is not type(None))
+        # Reference-only ports require an explicit reference dict
+        if expected_types and _is_reference_type(expected_types):
+            raise ToolError(
+                f"Input {name!r} expects a node reference, not a plain value. "
+                f'Use one of: {{"pk": N}}, {{"uuid": "..."}}, '
+                f'{{"label": "name@computer"}}.'
+            )
 
-        # For integers: try PK lookup if the expected type matches
-        if isinstance(value, int) and expected_types:
-            try:
-                node = orm.load_node(value)
-                if isinstance(node, expected_types):
-                    resolved[name] = node
-                    continue
-            except Exception:
-                pass
-
-        # Auto-wrap primitive in the first matching expected AiiDA type
+        # Auto-wrap primitive in the first matching expected AiiDA type.
+        # Nodes are intentionally NOT stored here — storage happens during
+        # submit()/run_get_node() so that validation failures leave no
+        # orphaned nodes in the database (ADR-07).
         python_type = type(value)
         if python_type in _PRIMITIVE_TO_NODE and expected_types:
             for expected in expected_types:
-                if issubclass(expected, orm.Data):
-                    resolved[name] = expected(value).store()
+                if isinstance(expected, type) and issubclass(expected, orm.Data):
+                    resolved[name] = expected(value)
                     break
             else:
-                # Fallback: wrap using the generic primitive mapping
+                # Fallback: use the generic primitive → node mapping
                 node_class = _PRIMITIVE_TO_NODE.get(python_type)
-                if node_class:
-                    resolved[name] = node_class(value).store()
-                else:
-                    resolved[name] = value
+                resolved[name] = node_class(value) if node_class else value
         else:
             resolved[name] = value
 
     return resolved
 
 
+def _format_resolved_inputs(resolved: dict[str, Any]) -> str:
+    """Format resolved AiiDA nodes for human-readable display in the HITL prompt.
+
+    For each resolved input, shows:
+    - Stored nodes: their type, PK, and value (if available)
+    - Unstored nodes: their type and value
+
+    Args:
+        resolved: Dict of port names to resolved AiiDA nodes or plain values.
+
+    Returns:
+        A formatted multi-line string for display.
+    """
+    lines = []
+    for name, node in resolved.items():
+        if isinstance(node, orm.Node):
+            node_type = type(node).__name__
+            if node.is_stored:
+                # Existing node loaded by pk/uuid/label
+                value = node.value if hasattr(node, "value") else repr(node)
+                lines.append(f"   {name}: {node_type}(pk={node.pk}, value={value!r})")
+            else:
+                # Newly wrapped primitive — not yet in DB
+                value = node.value if hasattr(node, "value") else repr(node)
+                lines.append(f"   {name}: {node_type}(value={value!r})  [new]")
+        else:
+            lines.append(f"   {name}: {node!r}")
+    return "\n".join(lines)
+
+
 def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
     """Submit an AiiDA workflow or calculation.
 
-    Resolves Python primitives to AiiDA nodes automatically using the process
-    port spec — pass ``{"x": 2, "y": 3}`` and the tool wraps them in
-    ``orm.Int`` as required. Integer values that match an existing node PK of
-    the correct type are reused rather than duplicated.
+    Resolves user-supplied values to AiiDA nodes automatically using the
+    process port spec. Three input conventions are supported:
 
-    Validates all inputs before submission. The caller (CLI) must obtain user
-    confirmation (HITL) before calling this tool.
+    * **Bare primitive** — ``{"x": 2}`` always means the *value* 2 and wraps
+      it in ``orm.Int(2)``. It is never treated as a node PK.
+    * **Reference dict** — pass ``{"pk": N}``, ``{"uuid": "..."}``, or
+      ``{"label": "bash@localhost"}`` to reuse an existing node.
+    * **AiiDA node** — passed through unchanged.
+
+    Validates all inputs before submission. No nodes are written to the
+    database until validation passes (ADR-07). The caller (CLI) must obtain
+    user confirmation (HITL) before calling this tool.
 
     Args:
         entry_point: AiiDA entry point string, e.g. ``"core.arithmetic.add"``.
-        inputs: Dict mapping port names to values. Primitives are wrapped
-            automatically; AiiDA nodes are used as-is.
+        inputs: Dict mapping port names to values or reference dicts.
 
     Returns:
         A ``SubmitResult`` with the new process PK, UUID, and initial state.
@@ -128,6 +250,10 @@ def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
     Raises:
         ToolError: If validation fails or the entry point is not found.
     """
+    # Lazy import — breaks the circular dependency:
+    # analysis -> mcp.tools.submit -> agents.validator -> agents.__init__ -> analysis
+    from aiida_agents.agents.validator import ValidationError, validate
+
     try:
         resolved = _resolve_inputs(entry_point, inputs)
     except ToolError:
@@ -150,7 +276,7 @@ def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
         if profile and profile.process_control_backend:
             node = submit(process_class, **resolved)
         else:
-            # brokerless profile (sqlite_dos) — run in-process
+            # Brokerless profile (sqlite_dos) — run in-process
             _, node = run_get_node(process_class, **resolved)
     except Exception as exc:
         raise ToolError(f"Submission failed: {exc}") from exc
