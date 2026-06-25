@@ -1,7 +1,8 @@
 """Regression tests for the HITL enforcement on submit_workflow.
 
-These tests prove the structural guarantee from ADR-08: there is no code
-path that submits to AiiDA without passing through human confirmation.
+These tests prove the structural guarantee from ADR-08
+(docs/adr/08-human-in-the-loop-before-writes.md): there is no code path
+that submits to AiiDA without passing through human confirmation.
 
 Two invariants are tested:
 1. submit_workflow is registered with requires_approval=True — the agent
@@ -18,54 +19,35 @@ from unittest.mock import MagicMock, patch
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents.agents import get_agent
+from aiida_agents.agents._errors import RetryOnToolError
+from aiida_agents.agents.analysis import _READ_TOOLS
 
-
-# ---------------------------------------------------------------------------
-# Structural: submit_workflow must be approval-required
-# ---------------------------------------------------------------------------
+# Derived from the single source of truth in analysis.get_agent, so this tracks
+# the registered read tools instead of duplicating their names by hand.
+READ_TOOL_NAMES = frozenset(tool.__name__ for tool in _READ_TOOLS)
 
 
 class TestSubmitWorkflowRequiresApproval:
-    def test_submit_workflow_has_requires_approval(self) -> None:
-        """submit_workflow must be registered with requires_approval=True."""
+    def test_submit_workflow_is_the_only_approval_tool(self) -> None:
+        """submit_workflow is registered approval-gated, and nothing else is.
+
+        Approval-capable tools live in the agent's function toolset (populated
+        by ``tool_plain``); read tools sit in a separate plain toolset with no
+        approval mechanism. Asserting the whole set, not just membership, means
+        a second write tool added without ``requires_approval`` fails here too.
+        """
+        function_toolset = get_agent()._function_toolset
+        assert set(function_toolset.tools) == {"submit_workflow"}
+        assert function_toolset.tools["submit_workflow"].requires_approval is True
+
+    def test_read_tools_match_the_registered_set(self) -> None:
+        """The read toolset is exactly ``_READ_TOOLS``, and the write tool never
+        leaks into it, an ungated submit_workflow here would bypass approval.
+        """
         agent = get_agent()
-        toolset = agent._function_toolset
-
-        # Pydantic AI stores approval-required tools separately from plain tools
-        approval_tool_names = {
-            t.name
-            for t in toolset.tools.values()
-            if getattr(t, "requires_approval", False)
-        }
-        assert "submit_workflow" in approval_tool_names, (
-            "submit_workflow must be registered with requires_approval=True (ADR-08). "
-            "Without this, the agent can submit without user confirmation."
-        )
-
-    def test_read_tools_do_not_require_approval(self) -> None:
-        """Read-only tools must not require approval — they should be frictionless."""
-        agent = get_agent()
-        toolset = agent._function_toolset
-
-        read_tools = {
-            "get_process_status",
-            "list_processes",
-            "query_nodes",
-            "get_node_inputs",
-            "get_node_outputs",
-            "search_structures",
-            "search_aiida_docs",
-        }
-        for name, tool in toolset.tools.items():
-            if name in read_tools:
-                assert not getattr(tool, "requires_approval", False), (
-                    f"Read tool '{name}' must not require approval."
-                )
-
-
-# ---------------------------------------------------------------------------
-# Behavioural: CLI HITL path
-# ---------------------------------------------------------------------------
+        retry = next(ts for ts in agent.toolsets if isinstance(ts, RetryOnToolError))
+        assert set(retry.wrapped.tools) == READ_TOOL_NAMES
+        assert "submit_workflow" not in retry.wrapped.tools
 
 
 class TestHITLConfirmationPath:

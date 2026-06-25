@@ -39,7 +39,8 @@ def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
 
     For ``submit_workflow`` calls, inputs are resolved (without storing) before
     the prompt so the user sees the actual node types and values they are
-    approving, not the raw agent arguments (ADR-08).
+    approving, not the raw agent arguments (ADR-08,
+    docs/adr/08-human-in-the-loop-before-writes.md).
     """
     from aiida_agents.mcp.tools.submit import _resolve_inputs, _format_resolved_inputs
     from fastmcp.exceptions import ToolError

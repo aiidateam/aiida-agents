@@ -1,6 +1,7 @@
 """Analysis agent — read-only exploration of an AiiDA profile.
 
-This is the first concrete agent (ADR-04). It exposes read-only MCP tools
+This is the first concrete agent (ADR-04,
+docs/adr/04-multi-agent-architecture.md). It exposes read-only MCP tools
 for querying processes, nodes, and crystal structures, and a write tool
 (submit_workflow) that requires explicit human confirmation before execution.
 
@@ -32,7 +33,8 @@ from aiida_agents.rag import search_aiida_docs
 # tool that raises -- e.g. on a hallucinated or wrong-type identifier -- comes
 # back to the model as a recoverable ModelRetry instead of crashing the agent
 # run. submit_workflow is registered separately with requires_approval=True
-# (ADR-08) and is not part of this toolset.
+# (ADR-08, docs/adr/08-human-in-the-loop-before-writes.md) and is not part
+# of this toolset.
 _READ_TOOLS: list[Any] = [
     get_process_status,
     list_processes,

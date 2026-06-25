@@ -10,16 +10,10 @@ Three layers tested here:
 from __future__ import annotations
 
 import pytest
-from typing import Any
 from aiida import orm
 
 from aiida_agents.agents.validator import ValidationError, validate
 from aiida_agents.agents.validator._schema import validate_schema
-
-
-# ---------------------------------------------------------------------------
-# Schema tier — validate_schema()
-# ---------------------------------------------------------------------------
 
 
 class TestValidateSchema:
@@ -87,11 +81,6 @@ class TestValidateSchema:
         assert errors == []
 
 
-# ---------------------------------------------------------------------------
-# Validator public API — validate()
-# ---------------------------------------------------------------------------
-
-
 class TestValidate:
     def test_raises_validation_error_on_missing_input(self) -> None:
         """validate() raises ValidationError, not a bare list."""
@@ -121,11 +110,6 @@ class TestValidate:
         assert any("y" in e for e in errors)
 
 
-# ---------------------------------------------------------------------------
-# submit_workflow — validation gate
-# ---------------------------------------------------------------------------
-
-
 class TestSubmitWorkflowValidationGate:
     def test_raises_tool_error_when_validation_fails(self) -> None:
         """submit_workflow must not reach orm.submit if validation fails."""
@@ -143,21 +127,27 @@ class TestSubmitWorkflowValidationGate:
         with pytest.raises(ToolError):
             submit_workflow("core.nonexistent.workflow", {})
 
-    def test_no_submit_without_valid_inputs(
+    def test_no_engine_call_without_valid_inputs(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """orm.submit is never called if validation raises."""
+        """Neither engine entry point runs when validation fails.
+
+        Both branches are patched: a broker profile reaches ``submit`` and a
+        brokerless one (like the test profile) reaches ``run_get_node``, so
+        guarding only one would pass for the wrong reason.
+        """
         from fastmcp.exceptions import ToolError
-        from aiida_agents.mcp.tools.submit import submit_workflow
+        from aiida_agents.mcp.tools import submit as submit_mod
 
-        submitted: list[bool] = []
+        called: list[str] = []
+        monkeypatch.setattr(
+            submit_mod, "submit", lambda *a, **k: called.append("submit")
+        )
+        monkeypatch.setattr(
+            submit_mod, "run_get_node", lambda *a, **k: called.append("run_get_node")
+        )
 
-        def _fake_submit(*args: Any, **kwargs: Any) -> Any:  # noqa: ANN002, ANN003
-            submitted.append(True)
+        with pytest.raises(ToolError, match="Validation failed"):
+            submit_mod.submit_workflow("core.arithmetic.add", {})
 
-        monkeypatch.setattr("aiida_agents.mcp.tools.submit.submit", _fake_submit)
-
-        with pytest.raises(ToolError):
-            submit_workflow("core.arithmetic.add", {})
-
-        assert submitted == [], "orm.submit was called despite validation failure"
+        assert called == [], "engine was invoked despite validation failure"
