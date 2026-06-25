@@ -8,13 +8,12 @@ from functools import lru_cache
 
 from aiida import orm
 from aiida.plugins.entry_point import get_entry_point_names, load_entry_point
-from fastmcp import FastMCP
 from aiida_restapi.services.node import NodeService
 from aiida_restapi.common.query import QueryBuilderParams
 
-from .._orm import load_node
-from .._types import Identifier, NodeLink, NodeRecord
-from .._errors import register_tool
+from ._orm import load_node
+from ._types import Identifier, NodeLink, NodeRecord
+
 
 logger = logging.getLogger(__name__)
 
@@ -144,10 +143,3 @@ def get_node_outputs(identifier: Identifier) -> list[NodeLink]:
     results = _node_links(identifier, "outgoing")
     logger.debug("get_node_outputs: found %d outgoing links", len(results))
     return results
-
-
-def register(mcp: FastMCP) -> None:
-    """Register node tools on the MCP server."""
-    register_tool(mcp, query_nodes)
-    register_tool(mcp, get_node_inputs)
-    register_tool(mcp, get_node_outputs)

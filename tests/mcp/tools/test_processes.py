@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 from aiida import orm
 
-from aiida_agents.mcp.tools.processes import get_process_status, list_processes
+from aiida_agents.tools.processes import get_process_status, list_processes
 
 
 @pytest.mark.parametrize("by", ["pk", "uuid"])
@@ -59,7 +59,7 @@ def test_get_process_status_rejects_non_process_node() -> None:
     get_process_status used to hit ``AttributeError`` on ``node.process_label``;
     now it gets an AiiDA exception the surfaces turn into a clear message.
     """
-    from aiida_agents.mcp._orm import WrongNodeType
+    from aiida_agents.tools._orm import WrongNodeType
 
     data = orm.Int(42).store()
     with pytest.raises(WrongNodeType, match="not a process node"):

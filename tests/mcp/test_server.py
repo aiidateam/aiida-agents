@@ -7,7 +7,7 @@ import importlib
 import inspect
 import pkgutil
 
-from aiida_agents.mcp import tools
+from aiida_agents import tools
 from aiida_agents.mcp.server import mcp
 
 

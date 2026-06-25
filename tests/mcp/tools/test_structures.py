@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from aiida import orm
 
-from aiida_agents.mcp.tools.structures import search_structures
+from aiida_agents.tools.structures import search_structures
 
 
 @pytest.mark.parametrize(

@@ -13,7 +13,6 @@ get_agent()
 from __future__ import annotations
 
 from importlib.resources import files
-
 from typing import Any
 
 from pydantic_ai import Agent
@@ -22,9 +21,9 @@ from pydantic_ai.toolsets import FunctionToolset
 from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
-from aiida_agents.mcp.tools.nodes import get_node_inputs, get_node_outputs, query_nodes
-from aiida_agents.mcp.tools.processes import get_process_status, list_processes
-from aiida_agents.mcp.tools.structures import search_structures
+from aiida_agents.tools.nodes import get_node_inputs, get_node_outputs, query_nodes
+from aiida_agents.tools.processes import get_process_status, list_processes
+from aiida_agents.tools.structures import search_structures
 from aiida_agents.rag import search_aiida_docs
 
 # Every tool is exposed through RetryOnToolError (see get_agent), so a tool that

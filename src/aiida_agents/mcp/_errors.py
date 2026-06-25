@@ -6,14 +6,13 @@ helpers like ``load_node()`` and let AiiDA's native exceptions (``NotExistent``,
 
 This module owns the MCP-server boundary:
 
-- ``describe_aiida_error`` turns an AiiDA exception into a user-facing message
-  with recovery guidance fitted to the failure. It is shared: the agent boundary
-  (``aiida_agents.agents._errors``) reuses it so both surfaces speak the same
-  way. It depends only on AiiDA, never on a surface framework.
 - ``to_mcp_tool_error`` is the adapter: AiiDA exceptions become a clean
   ``ToolError`` for the MCP client instead of an uncaught 500.
 - ``register_tool`` registers a tool with the adapter always applied, so a tool
   cannot be wired up with an uncaught ``AiidaException`` by mistake.
+
+``describe_aiida_error`` has moved to ``aiida_agents.tools._errors`` — it depends
+only on AiiDA and is shared by both surfaces. Import it from there.
 
 The agent boundary lives in ``aiida_agents.agents._errors`` (not here) because it
 depends on pydantic-ai, which the MCP server surface must not import.
@@ -25,31 +24,16 @@ import functools
 from collections.abc import Callable
 from typing import ParamSpec, TypeVar
 
-from aiida.common.exceptions import AiidaException, MultipleObjectsError, NotExistent
+from aiida.common.exceptions import AiidaException
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
+from aiida_agents.tools._errors import describe_aiida_error
+
+__all__ = ["describe_aiida_error", "to_mcp_tool_error", "register_tool"]
+
 P = ParamSpec("P")
 R = TypeVar("R")
-
-_FIND_IDENTIFIERS = "Use list_processes() or query_nodes() to find valid identifiers."
-
-
-def describe_aiida_error(exc: AiidaException) -> str:
-    """Build a user-facing message from an AiiDA exception, with recovery guidance.
-
-    The guidance is fitted to the failure: a missing identifier points at the
-    listing tools, an ambiguous uuid prefix asks for a longer identifier, and any
-    other AiiDA error is reported as-is (without a hint that would misdescribe it).
-
-    :param exc: The AiiDA exception a tool function let propagate.
-    :return: The exception text plus what to do next.
-    """
-    if isinstance(exc, NotExistent):
-        return f"{exc} {_FIND_IDENTIFIERS}"
-    if isinstance(exc, MultipleObjectsError):
-        return f"{exc} The identifier is ambiguous; give the full uuid or the pk."
-    return str(exc)
 
 
 def to_mcp_tool_error(func: Callable[P, R]) -> Callable[P, R]:

@@ -8,10 +8,9 @@ import typing as t
 
 from aiida import orm
 from aiida.common.constants import elements
-from fastmcp import FastMCP
 
-from .._errors import register_tool
-from .._types import StructureRecord
+
+from ._types import StructureRecord
 
 logger = logging.getLogger(__name__)
 
@@ -85,8 +84,3 @@ def search_structures(
 
     logger.debug("search_structures: found %d matching structures", len(results))
     return results
-
-
-def register(mcp: FastMCP) -> None:
-    """Register structure tools on the MCP server."""
-    register_tool(mcp, search_structures)
