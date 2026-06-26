@@ -7,20 +7,22 @@ that submits to AiiDA without passing through human confirmation.
 Two invariants are tested:
 1. submit_workflow is registered with requires_approval=True — the agent
    framework will never execute it inline; it always pauses for approval.
-2. When the agent run returns a DeferredToolRequests, the CLI's
-   _handle_deferred path calls build_results only after user confirms,
-   and does nothing if the user declines.
+2. submit_workflow inputs are resolved and validated before the user is
+   asked: invalid submissions are denied straight back to the model, only
+   valid ones reach the confirmation prompt (via _triage_submissions).
 """
 
 from __future__ import annotations
 
-from unittest.mock import MagicMock, patch
-
-from pydantic_ai.tools import DeferredToolRequests
+from aiida import orm
+from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.toolsets import FunctionToolset
+from pydantic_ai.tools import DeferredToolRequests, ToolDenied
 
 from aiida_agents.agents import get_agent
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents.analysis import _READ_TOOLS
+from aiida_agents.cli import _triage_submissions
 
 # Derived from the single source of truth in analysis.get_agent, so this tracks
 # the registered read tools instead of duplicating their names by hand.
@@ -46,65 +48,67 @@ class TestSubmitWorkflowRequiresApproval:
         """
         agent = get_agent()
         retry = next(ts for ts in agent.toolsets if isinstance(ts, RetryOnToolError))
-        assert set(retry.wrapped.tools) == READ_TOOL_NAMES
-        assert "submit_workflow" not in retry.wrapped.tools
+        read_toolset = retry.wrapped
+        assert isinstance(read_toolset, FunctionToolset)
+        assert set(read_toolset.tools) == READ_TOOL_NAMES
+        assert "submit_workflow" not in read_toolset.tools
 
 
-class TestHITLConfirmationPath:
-    def test_declined_confirmation_does_not_call_build_results(self) -> None:
-        """When the user declines, build_results is never called."""
-        from aiida_agents.cli import _handle_deferred
+MULTIPLY_ADD = "core.arithmetic.multiply_add"
 
-        pending = MagicMock(spec=DeferredToolRequests)
-        pending.approvals = [MagicMock(tool_name="submit_workflow", args={})]
-        result = MagicMock()
-        result.output = pending
 
-        agent = MagicMock()
+class TestTriageSubmissions:
+    """Inputs are resolved and validated before the user is asked: invalid
+    submissions are denied straight back to the model, valid ones are queued
+    for confirmation. This is the decision the deferred path used to skip.
+    """
 
-        with patch("builtins.input", return_value="n"):
-            _handle_deferred(agent, result)
+    @staticmethod
+    def _pending(*calls: ToolCallPart) -> DeferredToolRequests:
+        return DeferredToolRequests(approvals=list(calls))
 
-        pending.build_results.assert_not_called()
-        agent.run.assert_not_called()
+    def test_invalid_submission_is_denied_without_prompting(self) -> None:
+        call = ToolCallPart(
+            tool_name="submit_workflow",
+            args={"entry_point": MULTIPLY_ADD, "inputs": {"x": 1, "y": 2}},
+            tool_call_id="c1",
+        )
+        auto, previews = _triage_submissions(self._pending(call))
 
-    def test_confirmed_calls_build_results_with_approve_all(self) -> None:
-        """When the user confirms, build_results(approve_all=True) is called."""
-        from aiida_agents.cli import _handle_deferred
+        assert previews == []  # the user is never bothered with invalid inputs
+        assert set(auto) == {"c1"}
+        assert isinstance(auto["c1"], ToolDenied)
+        assert "submit_workflow again" in auto["c1"].message
 
-        pending = MagicMock(spec=DeferredToolRequests)
-        pending.approvals = [MagicMock(tool_name="submit_workflow", args={})]
-        deferred_results = MagicMock()
-        pending.build_results.return_value = deferred_results
+    def test_valid_submission_is_queued_for_the_user(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        call = ToolCallPart(
+            tool_name="submit_workflow",
+            args={
+                "entry_point": MULTIPLY_ADD,
+                "inputs": {
+                    "x": 2,
+                    "y": 3,
+                    "z": 4,
+                    "code": {"pk": arithmetic_add_code.pk},
+                },
+            },
+            tool_call_id="c1",
+        )
+        auto, previews = _triage_submissions(self._pending(call))
 
-        result = MagicMock()
-        result.output = pending
-        result.all_messages.return_value = []
+        assert auto == {}
+        assert len(previews) == 1
+        preview_call, resolved = previews[0]
+        assert preview_call.tool_call_id == "c1"
+        assert resolved is not None
+        assert isinstance(resolved["x"], orm.Int) and resolved["x"].value == 2
 
-        followup = MagicMock()
-        followup.output = "Submitted successfully."
-        agent = MagicMock()
-        agent.run = MagicMock(return_value=followup)
+    def test_non_submit_approval_falls_through_to_the_user(self) -> None:
+        """Any other approval-gated tool is shown to the user with raw args."""
+        call = ToolCallPart(tool_name="other_tool", args={}, tool_call_id="c2")
+        auto, previews = _triage_submissions(self._pending(call))
 
-        with (
-            patch("builtins.input", return_value="y"),
-            patch("asyncio.run", return_value=followup),
-        ):
-            _handle_deferred(agent, result)
-
-        pending.build_results.assert_called_once_with(approve_all=True)
-
-    def test_empty_input_treated_as_decline(self) -> None:
-        """Pressing Enter without typing 'y' must not proceed."""
-        from aiida_agents.cli import _handle_deferred
-
-        pending = MagicMock(spec=DeferredToolRequests)
-        pending.approvals = [MagicMock(tool_name="submit_workflow", args={})]
-        result = MagicMock()
-        result.output = pending
-        agent = MagicMock()
-
-        with patch("builtins.input", return_value=""):
-            _handle_deferred(agent, result)
-
-        pending.build_results.assert_not_called()
+        assert auto == {}
+        assert previews == [(call, None)]

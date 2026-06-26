@@ -34,59 +34,119 @@ def _parse_args(args: str | dict[str, Any] | None) -> dict[str, Any]:
     return {}
 
 
-def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
-    """Show pending approval requests and ask the user to confirm or cancel.
+# Bound the propose -> deny -> retry loop so a model that keeps emitting bad
+# inputs cannot spin forever.
+_MAX_APPROVAL_ROUNDS = 10
 
-    For ``submit_workflow`` calls, inputs are resolved (without storing) before
-    the prompt so the user sees the actual node types and values they are
-    approving, not the raw agent arguments (ADR-08,
-    docs/adr/08-human-in-the-loop-before-writes.md).
+# A pending submission awaiting the user's decision: the original tool call and
+# its resolved inputs (None for non-submit approval tools, shown with raw args).
+_Preview = tuple[Any, dict[str, Any] | None]
+
+
+def _triage_submissions(
+    pending: DeferredToolRequests,
+) -> tuple[dict[str, Any], list[_Preview]]:
+    """Resolve and validate each pending approval before the user sees it.
+
+    Returns ``(auto_denials, previews)``:
+
+    * ``auto_denials`` maps a tool-call id to a ``ToolDenied`` for any
+      ``submit_workflow`` whose inputs fail resolution or validation. These go
+      straight back to the model so it can correct its own mistakes without
+      bothering the user.
+    * ``previews`` lists ``(call, resolved)`` for the calls the user must
+      decide on: ``resolved`` is the resolved-inputs dict for a valid
+      ``submit_workflow``, or ``None`` for any other approval-gated tool.
     """
-    from aiida_agents.mcp.tools.submit import _resolve_inputs, _format_resolved_inputs
-    from fastmcp.exceptions import ToolError
+    from pydantic_ai.tools import ToolDenied
 
-    pending = result.output
+    from aiida_agents.mcp.tools.submit import SubmissionInputError, _prepare_submission
+
+    auto: dict[str, Any] = {}
+    previews: list[_Preview] = []
+    for call in pending.approvals:
+        if call.tool_name != "submit_workflow":
+            previews.append((call, None))
+            continue
+        args = _parse_args(call.args)
+        try:
+            _, resolved = _prepare_submission(
+                args.get("entry_point", ""), args.get("inputs", {})
+            )
+        except SubmissionInputError as exc:
+            auto[call.tool_call_id] = ToolDenied(
+                f"Submission rejected before reaching the user: {exc} "
+                "Correct the inputs and call submit_workflow again."
+            )
+            continue
+        previews.append((call, resolved))
+    return auto, previews
+
+
+def _print_previews(previews: list[_Preview]) -> None:  # pragma: no cover
+    """Print the resolved submissions awaiting the user's confirmation."""
+    from aiida_agents.mcp.tools.submit import _format_resolved_inputs
 
     print("\n⚠️  The agent wants to perform the following submission(s):")
-    for call in pending.approvals:
+    for call, resolved in previews:
         print(f"   Tool  : {call.tool_name}")
-
+        if resolved is None:
+            print(f"   Inputs: {_parse_args(call.args)}")
+            continue
         args = _parse_args(call.args)
+        print(f"   Entry : {args.get('entry_point', '<unknown>')}")
+        print(f"   Inputs (resolved):\n{_format_resolved_inputs(resolved)}")
 
-        # For submit_workflow, resolve inputs first so the user sees the real
-        # node types/values — not the raw primitives or reference dicts.
-        if call.tool_name == "submit_workflow":
-            entry_point = args.get("entry_point", "<unknown>")
-            raw_inputs = args.get("inputs", {})
-            print(f"   Entry : {entry_point}")
-            try:
-                resolved = _resolve_inputs(entry_point, raw_inputs)
-                print(f"   Inputs (resolved):\n{_format_resolved_inputs(resolved)}")
-            except ToolError as exc:
-                # Resolution failed — show raw args and the error so the user
-                # can make an informed decision to cancel.
-                print(f"   Inputs (raw)   : {raw_inputs}")
-                print(f"   ⚠️  Could not resolve inputs: {exc}")
-        else:
-            print(f"   Inputs: {args}")
 
-    answer = input("\nProceed? [y/N]: ").strip().lower()
-    if answer != "y":
-        print("Cancelled — nothing was submitted.")
-        return
+def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
+    """Resolve, validate, and confirm pending submissions, then continue the run.
 
-    deferred_results = pending.build_results(approve_all=True)
-    try:
-        followup = asyncio.run(
-            agent.run(
-                None,
-                message_history=result.all_messages(),
-                deferred_tool_results=deferred_results,
+    Each round: invalid submissions are denied straight back to the model so it
+    retries with corrected inputs; valid ones are shown to the user, who
+    approves or cancels. Only confirmed, valid inputs reach the database
+    (ADR-08, docs/adr/08-human-in-the-loop-before-writes.md). The loop repeats
+    while the model keeps proposing submissions in response.
+    """
+    from pydantic_ai.tools import ToolApproved, ToolDenied
+
+    for _ in range(_MAX_APPROVAL_ROUNDS):
+        pending = result.output
+        auto, previews = _triage_submissions(pending)
+        approvals: dict[str, Any] = dict(auto)
+
+        if previews:
+            _print_previews(previews)
+            approved = input("\nProceed? [y/N]: ").strip().lower() == "y"
+            if approved:
+                decision: Any = ToolApproved()
+            else:
+                decision = ToolDenied("Cancelled by the user.")
+                print("Cancelled — nothing was submitted.")
+            for call, _ in previews:
+                approvals[call.tool_call_id] = decision
+        elif auto:
+            print("\n⚠️  Inputs were invalid; asking the agent to correct them.")
+
+        if not approvals:
+            return
+
+        try:
+            result = asyncio.run(
+                agent.run(
+                    None,
+                    message_history=result.all_messages(),
+                    deferred_tool_results=pending.build_results(approvals=approvals),
+                )
             )
-        )
-        print(f"Agent: {followup.output}")
-    except Exception as exc:
-        print(f"\n❌ Error during submission: {exc}")
+        except Exception as exc:
+            print(f"\n❌ Error during submission: {exc}")
+            return
+
+        if not isinstance(result.output, DeferredToolRequests):
+            print(f"Agent: {result.output}")
+            return
+
+    print("\n⚠️  Too many correction rounds; stopping without submitting.")
 
 
 def main() -> None:  # pragma: no cover

@@ -23,8 +23,10 @@ from aiida import orm
 from fastmcp.exceptions import ToolError
 
 from aiida_agents.mcp.tools.submit import (
+    SubmissionInputError,
     _format_resolved_inputs,
     _resolve_inputs,
+    _prepare_submission,
     submit_workflow,
 )
 
@@ -140,6 +142,43 @@ class TestFormatResolvedInputs:
         )
 
 
+class TestPrepareSubmission:
+    """The seam that resolves inputs and delegates validation to the spec."""
+
+    def test_valid_inputs_return_class_and_resolved(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        from aiida.plugins import WorkflowFactory
+
+        process_class, resolved = _prepare_submission(
+            MULTIPLY_ADD_EP,
+            {"x": 2, "y": 3, "z": 4, "code": {"pk": arithmetic_add_code.pk}},
+        )
+        assert process_class is WorkflowFactory(MULTIPLY_ADD_EP)
+        assert isinstance(resolved["x"], orm.Int) and resolved["x"].value == 2
+        assert resolved["code"].uuid == arithmetic_add_code.uuid
+
+    @pytest.mark.parametrize(
+        "entry_point, inputs, match",
+        [
+            pytest.param(
+                MULTIPLY_ADD_EP, {"x": 1, "y": 2}, r"'z'", id="missing-required"
+            ),
+            pytest.param(
+                "core.does.not.exist", {}, r"Entry point not found", id="unknown-ep"
+            ),
+        ],
+    )
+    def test_invalid_inputs_raise_submission_input_error(
+        self, entry_point: str, inputs: dict[str, object], match: str
+    ) -> None:
+        """Both resolution and validation failures surface as one error type,
+        which is what the CLI triage catches to deny back to the model.
+        """
+        with pytest.raises(SubmissionInputError, match=match):
+            _prepare_submission(entry_point, inputs)
+
+
 class TestSubmitWorkflow:
     def test_submit_runs_workflow_end_to_end(
         self, arithmetic_add_code: orm.InstalledCode
@@ -163,15 +202,12 @@ class TestSubmitWorkflow:
 
     def test_validation_failure_writes_no_orphans(self) -> None:
         """Invalid inputs raise before any node is stored, so the wrapped
-        primitives leave no orphan behind.
+        primitives leave no orphan behind. AiiDA's spec validator reports the
+        first missing port ('z' here); the point is that nothing was written.
         """
         sentinel = 987654321  # distinctive value to detect a leaked node
-        with pytest.raises(ToolError, match="Validation failed") as exc_info:
+        with pytest.raises(ToolError, match=r"'z'"):
             submit_workflow(MULTIPLY_ADD_EP, {"x": sentinel, "y": 2})  # missing z, code
-
-        # the error names every missing port, not just the first
-        message = str(exc_info.value)
-        assert "'z'" in message and "'code'" in message
 
         leaked = (
             orm.QueryBuilder()
@@ -179,3 +215,24 @@ class TestSubmitWorkflow:
             .count()
         )
         assert leaked == 0
+
+    def test_invalid_inputs_never_reach_the_engine(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The validation gate runs before either engine entry point, so a bad
+        submission cannot touch the database (the ADR-08 write guarantee).
+        """
+        from aiida_agents.mcp.tools import submit as submit_mod
+
+        called: list[str] = []
+        monkeypatch.setattr(
+            submit_mod, "submit", lambda *a, **k: called.append("submit")
+        )
+        monkeypatch.setattr(
+            submit_mod, "run_get_node", lambda *a, **k: called.append("run_get_node")
+        )
+
+        with pytest.raises(ToolError):
+            submit_workflow("core.arithmetic.add", {})
+
+        assert called == []

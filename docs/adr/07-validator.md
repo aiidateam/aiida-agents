@@ -1,7 +1,8 @@
 # ADR-07: Validator — deterministic schema and range checks before writes
 
-> Status: accepted — schema tier implemented in Weeks 5–6 (June 2026).
-> Range/physics tier deferred to Weeks 7–8.
+> Status: revised (2026-06). The standalone validator subpackage is removed;
+> schema validation is delegated to AiiDA's own `spec.inputs.validate()` (see
+> the Revision section). The range/physics tier remains deferred.
 
 ## Context
 
@@ -93,3 +94,28 @@ and asserts it is never called when validation fails.
   Rejected: the two-tier design (schema + ranges) benefits from separate
   files that can evolve independently; a subpackage also mirrors the
   `agents/analysis/` pattern established in ADR-04.
+
+## Revision (2026-06)
+
+The two-tier subpackage in this ADR was implemented and then removed. The
+schema tier (`_schema.py`) re-implemented checks that AiiDA's port spec already
+performs: `process_class.spec().inputs.validate(inputs)` runs the full
+required/type/nested-namespace validation, returns the first error, and (the
+point the "rely on AiiDA" alternative above missed) writes nothing to the
+database. It is pre-submit, not submit-time, so it meets the "catch before any
+DB write" requirement that drove this ADR while honoring its own stated
+principle: there is no reason to duplicate the spec's knowledge.
+
+Validation now lives in `_prepare_submission` (`mcp/tools/submit.py`), the
+single seam every submission passes through: resolve the agent's JSON inputs to
+unstored nodes, then call `spec.inputs.validate()`; on failure raise
+`SubmissionInputError`. The CLI (`_triage_submissions`) runs this before the
+user is prompted and denies invalid submissions straight back to the model
+(pydantic-ai `ToolDenied`), so the agent corrects its own inputs and only valid
+submissions reach the confirmation prompt. The range/physics tier, if pursued,
+attaches as an extra check in `_prepare_submission`, or as port validators on
+the workflow (which `spec.inputs.validate()` runs for free), not as a separate
+subpackage.
+
+Trade-off accepted: `spec.inputs.validate()` reports the first error, not all
+at once. For an agent loop this is fine, arguably better: one fix per turn.

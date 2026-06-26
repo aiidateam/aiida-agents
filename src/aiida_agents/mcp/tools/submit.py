@@ -6,7 +6,7 @@ import logging
 from typing import Any, cast
 
 from aiida import orm
-from aiida.engine import submit, run_get_node
+from aiida.engine import Process, run_get_node, submit
 from aiida.manage import get_manager
 from aiida.plugins.entry_point import load_entry_point
 from fastmcp import FastMCP
@@ -224,6 +224,52 @@ def _format_resolved_inputs(resolved: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+class SubmissionInputError(Exception):
+    """Inputs could not be resolved or failed the process spec.
+
+    Carries a model-facing message and is raised *before* anything is written
+    to the database, so the caller can route it back to the agent as a
+    correctable error (or show it to the user) without leaving orphan nodes.
+    """
+
+
+def _prepare_submission(
+    entry_point: str, inputs: dict[str, Any]
+) -> tuple[type[Process], dict[str, Any]]:
+    """Resolve JSON inputs to unstored nodes and validate against the spec.
+
+    Resolution turns the agent's JSON (bare values, reference dicts) into AiiDA
+    nodes; validation is delegated to AiiDA's own ``spec().inputs.validate()``,
+    which runs the full required/type/nested-namespace check pre-submit and
+    writes nothing. This is the single seam every submission passes through, and
+    the place to repoint at aiida-restapi once it grows a write endpoint
+    (ADR-02, docs/adr/02-mcp-tools-wrap-aiida-restapi.md).
+
+    Args:
+        entry_point: AiiDA entry point string, e.g. ``"core.arithmetic.add"``.
+        inputs: Port names mapped to bare values, reference dicts, or nodes.
+
+    Returns:
+        The loaded process class and the resolved, *unstored* inputs.
+
+    Raises:
+        SubmissionInputError: If resolution fails or the spec rejects the
+            inputs. The message is safe to show the agent or the user.
+    """
+    try:
+        resolved = _resolve_inputs(entry_point, inputs)
+    except ToolError as exc:
+        raise SubmissionInputError(str(exc)) from exc
+    except Exception as exc:
+        raise SubmissionInputError(f"Could not build inputs: {exc}") from exc
+
+    process_class = _load_process_class(entry_point)
+    error = process_class.spec().inputs.validate(resolved)
+    if error is not None:
+        raise SubmissionInputError(str(error))
+    return process_class, resolved
+
+
 def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
     """Submit an AiiDA workflow or calculation.
 
@@ -236,9 +282,9 @@ def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
       ``{"label": "bash@localhost"}`` to reuse an existing node.
     * **AiiDA node** — passed through unchanged.
 
-    Validates all inputs before submission. No nodes are written to the
-    database until validation passes (ADR-07). The caller (CLI) must obtain
-    user confirmation (HITL) before calling this tool.
+    Inputs are resolved and validated against the process spec before
+    submission; nothing is written to the database unless they pass. The
+    caller (CLI) must obtain user confirmation (HITL) before calling this tool.
 
     Args:
         entry_point: AiiDA entry point string, e.g. ``"core.arithmetic.add"``.
@@ -248,27 +294,12 @@ def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
         A ``SubmitResult`` with the new process PK, UUID, and initial state.
 
     Raises:
-        ToolError: If validation fails or the entry point is not found.
+        ToolError: If inputs fail to resolve/validate or submission fails.
     """
-    # Lazy import — breaks the circular dependency:
-    # analysis -> mcp.tools.submit -> agents.validator -> agents.__init__ -> analysis
-    from aiida_agents.agents.validator import ValidationError, validate
-
     try:
-        resolved = _resolve_inputs(entry_point, inputs)
-    except ToolError:
-        raise
-    except Exception as exc:
-        raise ToolError(f"Failed to resolve inputs: {exc}") from exc
-
-    try:
-        validate(entry_point, resolved)
-    except ValidationError as exc:
-        raise ToolError(
-            f"Validation failed for {entry_point!r}:\n" + "\n".join(exc.errors)
-        ) from exc
-
-    process_class = _load_process_class(entry_point)
+        process_class, resolved = _prepare_submission(entry_point, inputs)
+    except SubmissionInputError as exc:
+        raise ToolError(str(exc)) from exc
 
     try:
         manager = get_manager()
