@@ -6,10 +6,10 @@ import logging
 from typing import Any, cast
 
 from aiida import orm
+from aiida.common.exceptions import MissingEntryPointError
 from aiida.engine import Process, run_get_node, submit
 from aiida.manage import get_manager
 from aiida.plugins.entry_point import load_entry_point
-from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 
 from aiida_agents.mcp._types import SubmitResult
@@ -17,23 +17,33 @@ from aiida_agents.mcp._types import SubmitResult
 
 logger = logging.getLogger(__name__)
 
-# Mapping from Python primitives to AiiDA data node types
-_PRIMITIVE_TO_NODE: dict[type, type] = {
-    int: orm.Int,
-    float: orm.Float,
-    str: orm.Str,
-    bool: orm.Bool,
-    list: orm.List,
-    dict: orm.Dict,
+# Node types a bare Python value may be wrapped into. A value is wrapped only
+# into a type it can faithfully represent: ``int`` widens to ``Float`` (an int
+# is a valid float), but ``float`` does not narrow to ``Int`` -- a float for an
+# Int-only port is left raw so ``spec.inputs.validate()`` rejects it instead of
+# silently truncating it into ``Int(2)``.
+_COMPATIBLE_NODES: dict[type, tuple[type, ...]] = {
+    int: (orm.Int, orm.Float),
+    float: (orm.Float,),
+    str: (orm.Str,),
+    bool: (orm.Bool,),
+    list: (orm.List,),
+    dict: (orm.Dict,),
 }
 
 
-def _load_process_class(entry_point: str) -> Any:
-    """Load an AiiDA process class from its entry point string."""
+def _load_process_class(entry_point: str) -> type[Process]:
+    """Load an AiiDA process class from its entry point string.
+
+    Tries the calculation group, then the workflow group. Only a genuinely
+    *missing* entry point falls through to the next group; a registered entry
+    point that fails to import (a broken plugin) raises its own error rather
+    than being masked as "not found".
+    """
     for group in ("aiida.calculations", "aiida.workflows"):
         try:
-            return load_entry_point(group, entry_point)
-        except Exception:
+            return cast("type[Process]", load_entry_point(group, entry_point))
+        except MissingEntryPointError:
             continue
     msg = f"Entry point not found: {entry_point!r}"
     raise ToolError(msg)
@@ -126,6 +136,11 @@ def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
         types *require* an explicit reference dict. Passing a bare primitive
         raises a clear ``ToolError``.
 
+    Only top-level ports are resolved. A nested input namespace (e.g.
+    ``pw.parameters`` on a real workchain) is passed through unchanged, so this
+    handles flat-input processes (the arithmetic add / multiply_add demos) but
+    not workflows whose inputs live under nested namespaces.
+
     Args:
         entry_point: AiiDA entry point string.
         inputs: Dict mapping port names to values or reference dicts.
@@ -174,20 +189,20 @@ def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
                 f'{{"label": "name@computer"}}.'
             )
 
-        # Auto-wrap primitive in the first matching expected AiiDA type.
-        # Nodes are intentionally NOT stored here — storage happens during
-        # submit()/run_get_node() so that validation failures leave no
-        # orphaned nodes in the database (ADR-07).
-        python_type = type(value)
-        if python_type in _PRIMITIVE_TO_NODE and expected_types:
-            for expected in expected_types:
-                if isinstance(expected, type) and issubclass(expected, orm.Data):
-                    resolved[name] = expected(value)
-                    break
-            else:
-                # Fallback: use the generic primitive → node mapping
-                node_class = _PRIMITIVE_TO_NODE.get(python_type)
-                resolved[name] = node_class(value) if node_class else value
+        # Auto-wrap a bare primitive in the first port-accepted node type the
+        # value can faithfully represent (see _COMPATIBLE_NODES). A value
+        # incompatible with every accepted type is left raw, so the spec
+        # validator reports the type error rather than the wrap silently
+        # coercing it. Nodes are intentionally NOT stored here -- storage
+        # happens during submit()/run_get_node() so that validation failures
+        # leave no orphaned nodes in the database (ADR-07).
+        compatible_nodes = _COMPATIBLE_NODES.get(type(value), ())
+        for expected in expected_types:
+            if isinstance(expected, type) and any(
+                issubclass(node, expected) for node in compatible_nodes
+            ):
+                resolved[name] = expected(value)
+                break
         else:
             resolved[name] = value
 
@@ -285,6 +300,12 @@ def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
     Inputs are resolved and validated against the process spec before
     submission; nothing is written to the database unless they pass. The
     caller (CLI) must obtain user confirmation (HITL) before calling this tool.
+    Only top-level inputs are resolved (see ``_resolve_inputs``).
+
+    With a process-control broker the workflow is submitted and this returns
+    immediately, with ``state`` the initial state. On a brokerless profile
+    (e.g. ``core.sqlite_dos``) it runs in-process and *blocks* until the run
+    finishes, with ``state`` the final state.
 
     Args:
         entry_point: AiiDA entry point string, e.g. ``"core.arithmetic.add"``.
@@ -320,8 +341,3 @@ def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
         "workflow": entry_point,
         "state": node.process_state.value if node.process_state else "created",
     }
-
-
-def register(mcp: FastMCP) -> None:
-    """Register submit tools on the MCP server."""
-    mcp.tool()(submit_workflow)

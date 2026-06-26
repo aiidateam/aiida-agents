@@ -1,7 +1,7 @@
 """Set up a local AiiDA profile for manual end-to-end agent testing.
 
 Creates a brokerless sqlite profile with a bash code matching
-core.arithmetic.add, so the full agent -> validator -> HITL -> submit
+core.arithmetic.add, so the full agent -> validate -> HITL -> submit
 path can be exercised interactively (not via pytest).
 
 Usage:

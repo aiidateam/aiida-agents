@@ -20,14 +20,14 @@ and asserts on tool selection and output structure.
 
 ### What the harness tests
 
-**Structural tests** (`tests/agent/test_agent.py`) — verified without any LLM
-call or DB fixture:
+**Structural tests** (in `tests/agents/analysis/test_analysis.py`) — verified
+without any LLM call or DB fixture:
 
 - `get_agent()` returns an agent with exactly the expected tool set
-- `get_model()` selects the correct provider class per `AIIDA_AGENT_PROVIDER`
+- `get_model()` selects the correct provider class per `AIIDA_AGENTS_PROVIDER`
 - Unsupported providers raise `ValueError` with a clear message
 
-**Tool-execution tests** (`tests/agent/test_eval_harness.py`) — use
+**Tool-execution tests** (same module) — use
 `pydantic_ai.models.function.FunctionModel` to script tool calls deterministically,
 exercising real tool logic against real AiiDA fixture nodes without a live LLM:
 

@@ -1,8 +1,10 @@
 """Regression tests for the HITL enforcement on submit_workflow.
 
-These tests prove the structural guarantee from ADR-08
-(docs/adr/08-human-in-the-loop-before-writes.md): there is no code path
-that submits to AiiDA without passing through human confirmation.
+These tests prove the agent half of the structural guarantee from ADR-08
+(docs/adr/08-human-in-the-loop-before-writes.md): on the agent path there is
+no way to submit to AiiDA without passing through human confirmation. The
+other half -- that the standalone MCP server never exposes the write tool at
+all -- is covered in tests/mcp/test_server.py.
 
 Two invariants are tested:
 1. submit_workflow is registered with requires_approval=True — the agent

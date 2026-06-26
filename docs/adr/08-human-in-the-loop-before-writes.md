@@ -13,9 +13,9 @@ LLMs can produce inputs that look correct but are physically nonsensical, and th
 Gate agent permissions on the read/write split:
 
 - **Read-only operations run unguarded** — the agent may issue queries, status lookups, and provenance traversals freely, with no human confirmation. The cost of a wrong read is negligible.
-- **Any write/submit operation requires explicit human confirmation**, preceded by the deterministic Validator (ADR-07). The agent echoes the concrete action (the resolved top-level workflow and its inputs); a human approves before anything is submitted.
+- **Any write/submit operation requires explicit human confirmation**, preceded by deterministic input validation against the process spec (ADR-07). The agent echoes the concrete action (the resolved top-level workflow and its inputs); a human approves before anything is submitted.
 
-A regression test enforces the invariant: there is no code path that submits without passing through confirmation.
+Regression tests enforce the invariant on both exposed surfaces: in the agent the write tool is registered only behind human approval (never in the unguarded read toolset), and the standalone MCP server exposes read-only tools (the write tool is not registered there at all). No exposed surface submits without confirmation.
 
 ## Consequences
 

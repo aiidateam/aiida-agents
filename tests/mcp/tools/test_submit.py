@@ -62,6 +62,15 @@ class TestBareValueResolution:
         node = request.getfixturevalue(node_fixture)
         assert _resolve_inputs(MULTIPLY_ADD_EP, {"x": node})["x"] is node
 
+    def test_float_for_int_port_is_not_silently_truncated(self) -> None:
+        """A float for an ``Int``-only port is left unwrapped, not coerced into
+        ``Int(2)``. Wrapping would hide the type error; leaving the raw value
+        lets ``spec.inputs.validate()`` reject it.
+        """
+        resolved = _resolve_inputs(MULTIPLY_ADD_EP, {"z": 2.5})
+        assert not isinstance(resolved["z"], orm.Int)
+        assert resolved["z"] == 2.5
+
 
 class TestReferenceResolution:
     @pytest.mark.parametrize("ref_key", ["pk", "uuid", "label"])

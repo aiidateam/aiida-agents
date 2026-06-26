@@ -32,7 +32,16 @@ def _tool_functions() -> set[str]:
     return names
 
 
-def test_all_tools_registered() -> None:
-    """``register_all`` wires up exactly the public tool functions, no more, no less."""
+def test_server_registers_read_tools_only() -> None:
+    """The server exposes exactly the read tools, and never ``submit_workflow``.
+
+    ``submit_workflow`` writes to the database, so it must be reached only
+    through the HITL-gated agent (ADR-08), never the unauthenticated MCP
+    server. It still lives in ``mcp/tools/`` (the agent imports it directly),
+    so it is *discovered* by ``_tool_functions`` but deliberately *not*
+    registered on the server.
+    """
     registered = {tool.name for tool in asyncio.run(mcp.list_tools())}
-    assert registered == _tool_functions()
+    discovered = _tool_functions()
+    assert "submit_workflow" in discovered
+    assert registered == discovered - {"submit_workflow"}

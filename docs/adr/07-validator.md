@@ -119,3 +119,9 @@ subpackage.
 
 Trade-off accepted: `spec.inputs.validate()` reports the first error, not all
 at once. For an agent loop this is fine, arguably better: one fix per turn.
+
+Scope: resolution and validation operate on top-level inputs only. A nested
+input namespace (a real multi-step workflow) is passed through unresolved,
+which suits the flat-input demo processes targeted here (arithmetic add /
+multiply_add). Nested support can extend `_resolve_inputs` later without
+touching the seam or the HITL layer.
