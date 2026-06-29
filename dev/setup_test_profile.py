@@ -1,11 +1,16 @@
 """Set up a local AiiDA profile for manual end-to-end agent testing.
 
-Creates a brokerless sqlite profile with a bash code matching
-core.arithmetic.add, so the full agent -> validate -> HITL -> submit
-path can be exercised interactively (not via pytest).
+Adds a bash code matching core.arithmetic.add to an existing sqlite
+profile, so the full agent -> validate -> HITL -> submit path can be
+exercised interactively (not via pytest).
+
+The submit-only write path hands the process to the daemon, so the
+profile needs a broker and a running daemon. `verdi presto --use-zmq`
+provides both: it pins the ZMQ broker (no external services, skipping
+RabbitMQ auto-detection) and starts the daemon.
 
 Usage:
-    verdi presto --profile-name agent-test   # create the profile first
+    verdi presto --profile-name agent-test --use-zmq   # broker + daemon
     uv run python dev/setup_test_profile.py
     uv run python -c "from aiida import load_profile; load_profile('agent-test'); from aiida_agents.cli import main; main()"
 """
