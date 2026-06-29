@@ -15,9 +15,14 @@ from aiida_agents.tools.nodes import get_node_inputs, get_node_outputs, query_no
 from aiida_agents.tools.processes import get_process_status, list_processes
 from aiida_agents.tools.structures import search_structures
 
+# submit is intentionally NOT registered here. submit_workflow writes to the
+# database and must be reached only through the HITL-gated agent (ADR-08),
+# never this unauthenticated server. The agent imports it directly from
+# aiida_agents.mcp.tools.submit.
+
 
 def register_all(mcp: FastMCP) -> None:
-    """Register all tools on the MCP server.
+    """Register the read-only tools on the MCP server.
 
     Read tools are wrapped with ``register_tool`` so AiiDA exceptions surface
     as a clean ``ToolError`` for the MCP client.

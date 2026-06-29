@@ -1,0 +1,405 @@
+"""MCP tool for submitting AiiDA workflows."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, cast
+
+from aiida import orm
+from aiida.common.exceptions import MissingEntryPointError
+from aiida.engine import CalcJob, Process, submit
+from aiida.manage import get_manager
+from aiida.plugins.entry_point import load_entry_point
+from fastmcp.exceptions import ToolError
+
+from aiida_agents.tools._types import SubmitResult
+
+
+logger = logging.getLogger(__name__)
+
+# Node types a bare Python value may be wrapped into. A value is wrapped only
+# into a type it can faithfully represent: ``int`` widens to ``Float`` (an int
+# is a valid float), but ``float`` does not narrow to ``Int`` -- a float for an
+# Int-only port is left raw so ``spec.inputs.validate()`` rejects it instead of
+# silently truncating it into ``Int(2)``.
+_COMPATIBLE_NODES: dict[type, tuple[type, ...]] = {
+    int: (orm.Int, orm.Float),
+    float: (orm.Float,),
+    str: (orm.Str,),
+    bool: (orm.Bool,),
+    list: (orm.List,),
+    dict: (orm.Dict,),
+}
+
+# The node types a bare Python value can be wrapped into (the targets above). A
+# port accepting none of these (Code, StructureData, RemoteData, ...) cannot be
+# built from a plain value and needs an explicit reference (see _is_reference_type).
+_WRAPPABLE_TYPES: tuple[type, ...] = tuple(
+    dict.fromkeys(node for nodes in _COMPATIBLE_NODES.values() for node in nodes)
+)
+
+
+def _load_process_class(entry_point: str) -> type[Process]:
+    """Load an AiiDA process class from its entry point string.
+
+    Tries the calculation group, then the workflow group. Only a genuinely
+    *missing* entry point falls through to the next group; a registered entry
+    point that fails to import (a broken plugin) raises its own error rather
+    than being masked as "not found".
+    """
+    for group in ("aiida.calculations", "aiida.workflows"):
+        try:
+            return cast("type[Process]", load_entry_point(group, entry_point))
+        except MissingEntryPointError:
+            continue
+    msg = f"Entry point not found: {entry_point!r}"
+    raise ToolError(msg)
+
+
+def _resolve_node_reference(ref: dict[str, Any], port_name: str) -> orm.Node:
+    """Resolve an explicit node reference dict to an AiiDA node.
+
+    Supported reference forms:
+        {"pk": 42}                  — load by PK
+        {"uuid": "abc-..."}         — load by UUID
+        {"label": "bash@localhost"} — load Code by label (Code ports only)
+
+    Args:
+        ref: The reference dict from the user.
+        port_name: Port name, used only for error messages.
+
+    Returns:
+        The loaded AiiDA node.
+
+    Raises:
+        ToolError: If the reference form is unrecognised or the node is not found.
+    """
+    if "pk" in ref:
+        try:
+            return orm.load_node(ref["pk"])
+        except Exception as exc:
+            raise ToolError(
+                f"No node found with pk={ref['pk']!r} for input {port_name!r}"
+            ) from exc
+
+    if "uuid" in ref:
+        try:
+            return orm.load_node(ref["uuid"])
+        except Exception as exc:
+            raise ToolError(
+                f"No node found with uuid={ref['uuid']!r} for input {port_name!r}"
+            ) from exc
+
+    if "label" in ref:
+        try:
+            return orm.load_code(ref["label"])
+        except Exception as exc:
+            raise ToolError(
+                f"No Code found with label={ref['label']!r} for input {port_name!r}. "
+                f"Use the format 'name@computer', e.g. 'bash@localhost'."
+            ) from exc
+
+    raise ToolError(
+        f"Unrecognised node reference for input {port_name!r}: {ref!r}. "
+        f'Use one of: {{"pk": N}}, {{"uuid": "..."}}, {{"label": "name@computer"}}.'
+    )
+
+
+def _is_reference_type(expected_types: tuple[type, ...]) -> bool:
+    """Return True if the port needs an explicit node reference (pk/uuid/label).
+
+    A port is wrappable from a bare value only if at least one of its valid types
+    is a primitive-backed node (``_WRAPPABLE_TYPES``); anything else (``Code``,
+    ``StructureData``, ``RemoteData``, ...) needs a reference. Inverting the rule
+    this way (allow-list of wrappable types, not a block-list of one) means a bare
+    value handed to, e.g., a ``StructureData`` port gets the clean "expects a
+    reference" error instead of a confusing ``StructureData(value)`` failure.
+    An unconstrained port (no concrete valid_type) is left to spec validation.
+    """
+    return bool(expected_types) and not any(
+        isinstance(t, type) and issubclass(t, _WRAPPABLE_TYPES) for t in expected_types
+    )
+
+
+def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
+    """Resolve user-supplied values to AiiDA nodes using the process port spec.
+
+    Input value conventions
+    -----------------------
+    Bare primitive (``{"x": 2}``)
+        Always treated as the *value* 2 — wraps in ``orm.Int(2)``.
+        Never interpreted as a node PK.
+
+    Reference dict (``{"code": {"pk": 42}}``)
+        Loads an existing node explicitly. Three forms are supported:
+
+        * ``{"pk": N}``                  — load by integer PK
+        * ``{"uuid": "abc-..."}``        — load by UUID string
+        * ``{"label": "bash@localhost"}``— load Code by ``name@computer`` label
+
+    Already an AiiDA node
+        Passed through as-is.
+
+    Reference-only ports (e.g. ``code``)
+        Ports whose ``valid_type`` is not a primitive-backed node (``Code``,
+        ``StructureData``, ``RemoteData``, ...) *require* an explicit reference
+        dict. Passing a bare primitive raises a clear ``ToolError``.
+
+    Only top-level ports are resolved. A nested input namespace (e.g.
+    ``pw.parameters`` on a real workchain) is passed through unchanged, so this
+    handles flat-input processes (the arithmetic add / multiply_add demos) but
+    not workflows whose inputs live under nested namespaces.
+
+    Args:
+        entry_point: AiiDA entry point string.
+        inputs: Dict mapping port names to values or reference dicts.
+
+    Returns:
+        Dict mapping port names to resolved, *unstored* AiiDA nodes.
+        Nodes are stored by AiiDA automatically during ``submit()`` /
+        ``run_get_node()``.
+
+    Raises:
+        ToolError: If a reference cannot be resolved or a reference-only port
+            receives a bare primitive.
+    """
+    process_class = _load_process_class(entry_point)
+    spec = process_class.spec()
+    resolved: dict[str, Any] = {}
+
+    for name, value in inputs.items():
+        # Already an AiiDA node — use as-is
+        if isinstance(value, orm.Node):
+            resolved[name] = value
+            continue
+
+        # Explicit node reference dict — resolve and use directly
+        if isinstance(value, dict) and {"pk", "uuid", "label"} & value.keys():
+            resolved[name] = _resolve_node_reference(value, name)
+            continue
+
+        # Get the expected type from the port spec
+        port = spec.inputs.get(name)
+        valid_type = getattr(port, "valid_type", None) if port else None
+
+        # Normalise valid_type to a tuple, stripping NoneType
+        if valid_type is None:
+            expected_types: tuple[type, ...] = ()
+        elif isinstance(valid_type, tuple):
+            expected_types = tuple(t for t in valid_type if t is not type(None))
+        else:
+            expected_types = (valid_type,) if valid_type is not type(None) else ()
+
+        # Ports that can't be built from a bare value require an explicit reference
+        if _is_reference_type(expected_types):
+            raise ToolError(
+                f"Input {name!r} expects a node reference, not a plain value. "
+                f'Use one of: {{"pk": N}}, {{"uuid": "..."}}, '
+                f'{{"label": "name@computer"}}.'
+            )
+
+        # Auto-wrap a bare primitive in the first port-accepted node type the
+        # value can faithfully represent (see _COMPATIBLE_NODES). A value
+        # incompatible with every accepted type is left raw, so the spec
+        # validator reports the type error rather than the wrap silently
+        # coercing it. Nodes are intentionally NOT stored here -- storage
+        # happens during submit()/run_get_node() so that validation failures
+        # leave no orphaned nodes in the database (ADR-07).
+        compatible_nodes = _COMPATIBLE_NODES.get(type(value), ())
+        for expected in expected_types:
+            if isinstance(expected, type) and any(
+                issubclass(node, expected) for node in compatible_nodes
+            ):
+                resolved[name] = expected(value)
+                break
+        else:
+            resolved[name] = value
+
+    return resolved
+
+
+def _format_resolved_inputs(resolved: dict[str, Any]) -> str:
+    """Format resolved AiiDA nodes for human-readable display in the HITL prompt.
+
+    For each resolved input, shows:
+    - Stored nodes: their type, PK, and value (if available)
+    - Unstored nodes: their type and value
+
+    Args:
+        resolved: Dict of port names to resolved AiiDA nodes or plain values.
+
+    Returns:
+        A formatted multi-line string for display.
+    """
+    lines = []
+    for name, node in resolved.items():
+        if isinstance(node, orm.Node):
+            node_type = type(node).__name__
+            if node.is_stored:
+                # Existing node loaded by pk/uuid/label
+                value = node.value if hasattr(node, "value") else repr(node)
+                lines.append(f"   {name}: {node_type}(pk={node.pk}, value={value!r})")
+            else:
+                # Newly wrapped primitive — not yet in DB
+                value = node.value if hasattr(node, "value") else repr(node)
+                lines.append(f"   {name}: {node_type}(value={value!r})  [new]")
+        else:
+            lines.append(f"   {name}: {node!r}")
+    return "\n".join(lines)
+
+
+class SubmissionInputError(Exception):
+    """Inputs could not be resolved or failed the process spec.
+
+    Carries a model-facing message and is raised *before* anything is written
+    to the database, so the caller can route it back to the agent as a
+    correctable error (or show it to the user) without leaving orphan nodes.
+    """
+
+
+def _prepare_submission(
+    entry_point: str, inputs: dict[str, Any]
+) -> tuple[type[Process], dict[str, Any]]:
+    """Resolve JSON inputs to unstored nodes and validate against the spec.
+
+    Resolution turns the agent's JSON (bare values, reference dicts) into AiiDA
+    nodes. Validation is delegated to AiiDA's own ``spec().inputs.validate()``,
+    run on the ``pre_process``-ed inputs so the process's port defaults (e.g.
+    ``metadata.options.resources``) are filled exactly as the engine fills them
+    at submit time; this is pre-submit and writes nothing. Validating the raw
+    inputs instead would reject submissions the engine accepts and make the user
+    supply boilerplate options by hand. This is the single seam every submission
+    passes through, and the place to repoint at aiida-restapi once it grows a
+    write endpoint (ADR-02, docs/adr/02-mcp-tools-wrap-aiida-restapi.md).
+
+    Args:
+        entry_point: AiiDA entry point string, e.g. ``"core.arithmetic.add"``.
+        inputs: Port names mapped to bare values, reference dicts, or nodes.
+
+    Returns:
+        The loaded process class and the resolved, *unstored* inputs.
+
+    Raises:
+        SubmissionInputError: If resolution fails or the spec rejects the
+            inputs. The message is safe to show the agent or the user.
+    """
+    try:
+        resolved = _resolve_inputs(entry_point, inputs)
+    except ToolError as exc:
+        raise SubmissionInputError(str(exc)) from exc
+    except Exception as exc:
+        raise SubmissionInputError(f"Could not build inputs: {exc}") from exc
+
+    process_class = _load_process_class(entry_point)
+    spec_inputs = process_class.spec().inputs
+    # Validate against the engine's eventual view of the inputs: pre_process
+    # fills the process's own port defaults (scheduler resources, filenames,
+    # parser, ...) exactly as the engine does at submit time. Skipping it would
+    # reject submissions the engine accepts and force the user to hand-specify
+    # boilerplate options such as ``metadata.options.resources``. pre_process
+    # mutates its argument, so pass a copy and keep ``resolved`` (what the HITL
+    # preview shows) limited to what the user actually supplied.
+    try:
+        processed = spec_inputs.pre_process(dict(resolved))
+    except Exception as exc:
+        raise SubmissionInputError(f"Could not build inputs: {exc}") from exc
+    error = spec_inputs.validate(processed)
+    if error is not None:
+        raise SubmissionInputError(str(error))
+    # Agent-scope policy: a compute CalcJob always needs a code. AiiDA makes
+    # ``code`` optional on the base CalcJob on purpose (import/parse jobs ingest a
+    # RemoteData and run no code), but the agent only submits compute jobs, so
+    # require one and fail loudly rather than queue a job that cannot run.
+    if issubclass(process_class, CalcJob) and "code" not in resolved:
+        raise SubmissionInputError(
+            "This calculation needs a code to run. Provide one as a reference, "
+            'e.g. {"code": {"label": "bash@localhost"}}.'
+        )
+    return process_class, resolved
+
+
+def _run_submission(
+    entry_point: str,
+    process_class: type[Process],
+    resolved: dict[str, Any],
+) -> SubmitResult:
+    """Submit pre-resolved, pre-validated inputs to the engine via the broker.
+
+    Submit-only by design: the agent's model is "submit, get a pk, check status
+    later", so we always hand the process to the daemon rather than ever blocking
+    the caller on an in-process run. A profile with no broker is refused with an
+    actionable error (the ZMQ broker needs no system services and bundles into
+    the daemon, so ``verdi daemon start`` is all it takes).
+
+    Kept separate from ``submit_workflow`` so the CLI can call it on the main
+    thread after human approval: AiiDA's storage is thread-bound and pydantic-ai
+    runs sync tools on a worker thread, so writing there (while the approval
+    preview bound the default user / nodes to the main-thread session) raises a
+    cross-thread SQLAlchemy error.
+
+    Raises:
+        ToolError: If the profile has no broker or the engine rejects submission.
+    """
+    profile = get_manager().get_profile()
+    if profile is None or not profile.process_control_backend:
+        raise ToolError(
+            "This profile has no broker, so the agent cannot submit a workflow. "
+            "Use a profile with a broker and a running daemon: the ZMQ broker "
+            "needs no system services (it bundles into the daemon), so "
+            "`verdi daemon start` is enough."
+        )
+
+    try:
+        node = submit(process_class, **resolved)
+    except Exception as exc:
+        raise ToolError(f"Submission failed: {exc}") from exc
+
+    logger.info("submitted %s → pk=%d", entry_point, node.pk)
+
+    return {
+        "pk": cast(int, node.pk),
+        "uuid": node.uuid,
+        "workflow": entry_point,
+        "state": node.process_state.value if node.process_state else "created",
+    }
+
+
+def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
+    """Submit an AiiDA workflow or calculation.
+
+    Resolves user-supplied values to AiiDA nodes automatically using the
+    process port spec. Three input conventions are supported:
+
+    * **Bare primitive** — ``{"x": 2}`` always means the *value* 2 and wraps
+      it in ``orm.Int(2)``. It is never treated as a node PK.
+    * **Reference dict** — pass ``{"pk": N}``, ``{"uuid": "..."}``, or
+      ``{"label": "bash@localhost"}`` to reuse an existing node.
+    * **AiiDA node** — passed through unchanged.
+
+    Inputs are resolved and validated against the process spec before
+    submission; nothing is written to the database unless they pass, and a
+    compute CalcJob must include a ``code``. The caller (CLI) must obtain user
+    confirmation (HITL) before calling this tool. Only top-level inputs are
+    resolved (see ``_resolve_inputs``).
+
+    Submit-only: the process is handed to the daemon and this returns
+    immediately with ``state`` the initial state. The profile must have a broker
+    and a running daemon; if it has none, a clear error is raised rather than
+    blocking on an in-process run.
+
+    Args:
+        entry_point: AiiDA entry point string, e.g. ``"core.arithmetic.add"``.
+        inputs: Dict mapping port names to values or reference dicts.
+
+    Returns:
+        A ``SubmitResult`` with the new process PK, UUID, and initial state.
+
+    Raises:
+        ToolError: If inputs fail to resolve/validate or submission fails.
+    """
+    try:
+        process_class, resolved = _prepare_submission(entry_point, inputs)
+    except SubmissionInputError as exc:
+        raise ToolError(str(exc)) from exc
+
+    return _run_submission(entry_point, process_class, resolved)

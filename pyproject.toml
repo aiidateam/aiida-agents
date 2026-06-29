@@ -132,6 +132,16 @@ files = ["src", "tests"]
 strict = true
 mypy_path = "src"
 explicit_package_bases = true
+# Respect per-module ``follow_imports`` even for ``.pyi`` stubs (needed by the
+# numpy override below).
+follow_imports_for_stubs = true
+
+[[tool.mypy.overrides]]
+# numpy >= 2.5 ships PEP 695 ``type`` statements in its stubs, which mypy cannot
+# parse while we target python_version 3.10 (our minimum). We never use numpy's
+# types directly, so skip its stubs instead of bumping the whole target to 3.12.
+module = ["numpy", "numpy.*"]
+follow_imports = "skip"
 
 [[tool.mypy.overrides]]
 # AiiDA's ORM is only partially typed (``orm.Int()``, ``append_atom()``, ...),

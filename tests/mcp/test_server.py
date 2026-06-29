@@ -12,7 +12,7 @@ from aiida_agents.mcp.server import mcp
 
 
 def _tool_functions() -> set[str]:
-    """Public tool functions defined across every ``aiida_agents.mcp.tools`` module.
+    """Public tool functions defined across every ``aiida_agents.tools`` module.
 
     Discovers both the tool modules and their functions, so neither a new tool
     nor a whole new tool module needs to be listed by hand.
@@ -32,7 +32,20 @@ def _tool_functions() -> set[str]:
     return names
 
 
-def test_all_tools_registered() -> None:
-    """``register_all`` wires up exactly the public tool functions, no more, no less."""
+def test_server_registers_read_tools_only() -> None:
+    """The server exposes exactly the read tools, and never ``submit_workflow``.
+
+    ``submit_workflow`` writes to the database, so it must be reached only
+    through the HITL-gated agent (ADR-08), never the unauthenticated MCP
+    server. It lives in ``mcp/tools/submit.py`` and is imported directly by the
+    agent, deliberately kept out of the surface-agnostic ``aiida_agents.tools``
+    package, so the server neither discovers nor registers it.
+    """
+    from aiida_agents.mcp.tools import submit  # the write tool exists, kept separate
+
     registered = {tool.name for tool in asyncio.run(mcp.list_tools())}
-    assert registered == _tool_functions()
+    discovered = _tool_functions()
+    assert hasattr(submit, "submit_workflow")
+    assert registered == discovered  # the server exposes exactly the read tools
+    assert "submit_workflow" not in discovered  # not in the agnostic tools package
+    assert "submit_workflow" not in registered
