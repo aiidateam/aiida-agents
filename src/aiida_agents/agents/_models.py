@@ -36,10 +36,8 @@ def get_model(
     * ``openai-compatible``: any OpenAI-compatible endpoint (DeepSeek, Together,
       vLLM, etc.); requires ``AIIDA_AGENTS_BASE_URL``.
 
-    Every model is built with an output cap of ``model_settings.max_tokens``. For
-    ``ollama`` only, a non-``None`` ``model_settings.context_length`` is sent as
-    the per-request ``num_ctx`` (context window); other providers expose no such
-    knob and ignore it.
+    Every model gets ``max_tokens`` as its output cap; for ``ollama``,
+    ``context_length`` (if set) is sent as the per-request ``num_ctx``.
 
     Raises:
         ValidationError: When called without ``model_settings``, an
@@ -56,8 +54,7 @@ def get_model(
         )
         request_settings = OpenAIChatModelSettings(max_tokens=cfg.max_tokens)
         if cfg.context_length is not None:
-            # Ollama reads num_ctx as a top-level body field on its
-            # OpenAI-compatible endpoint; extra_body merges it into the request.
+            # Ollama reads num_ctx as a top-level body field; extra_body sends it.
             request_settings["extra_body"] = {"num_ctx": cfg.context_length}
         return OpenAIChatModel(
             cfg.model,

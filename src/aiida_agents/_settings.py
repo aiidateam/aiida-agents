@@ -88,28 +88,19 @@ class ModelSettings(_Base):
     base_url: str | None = None
     api_key: str = "api-key-not-set"
 
-    # Max output tokens per response, applied to every provider. Local models
-    # routinely produce substantial reasoning/thinking content across multi-step
-    # tool-calling runs (status -> docs -> evidence -> synthesis); too small an
-    # output budget truncates that and raises UnexpectedModelBehavior mid-run. On
-    # cloud providers this also caps output (and cost) below the model ceiling.
+    # Output cap (all providers). Too small truncates long tool-calling runs.
     max_tokens: int = Field(default=8192, gt=0)
 
-    # Ollama context window (``num_ctx``), sent per request so no server-side
-    # OLLAMA_CONTEXT_LENGTH / sudo is needed. ``None`` keeps Ollama's own default.
-    # Ollama-only: cloud providers expose no context-window knob (their window is
-    # fixed by the model), so a value set there is ignored (warned about below).
-    # Bigger windows cost more VRAM, so this is opt-in rather than auto-sized.
+    # Ollama context window (``num_ctx``), sent per request; Ollama-only. ``None``
+    # keeps Ollama's default. Larger windows cost more VRAM, so it is opt-in.
     context_length: int | None = Field(default=None, gt=0)
 
     @model_validator(mode="after")
     def _validate_token_budget(self) -> Self:
-        """Reject an output budget that cannot fit inside the context window.
+        """Reject an output budget too large for the context window.
 
-        ``num_ctx`` bounds prompt *and* output together, so ``max_tokens`` larger
-        than ``context_length`` is unsatisfiable. Caught here at load time rather
-        than as a silent truncation mid-run. Only meaningful for Ollama, the one
-        provider whose window we control; elsewhere ``context_length`` is inert.
+        ``num_ctx`` bounds prompt and output together, so ``max_tokens`` >=
+        ``context_length`` can never be met. Ollama-only; inert elsewhere.
         """
         if self.context_length is None:
             return self

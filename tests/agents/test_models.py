@@ -154,11 +154,7 @@ def test_get_model_applies_max_tokens(
     env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The configured output cap reaches every provider's model settings.
-
-    Pins the ``settings=`` wiring on each of the four branches; dropping it from
-    one would otherwise be a silent regression.
-    """
+    """The output cap reaches every provider's model settings (all 4 branches)."""
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", provider)
     monkeypatch.setenv("AIIDA_AGENTS_MAX_TOKENS", "4242")

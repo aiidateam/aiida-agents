@@ -365,9 +365,7 @@ def test_does_not_warn_on_recognized_keys(
         assert key not in caplog.text
 
 
-# Cross-field validation: the output budget (``max_tokens``) has to fit inside
-# the Ollama context window (``context_length`` -> ``num_ctx``), otherwise it is
-# a number the model can never honour. Caught at load time, not mid-run.
+# Cross-field check: max_tokens must fit inside the Ollama context window.
 
 
 @pytest.mark.parametrize(
@@ -403,13 +401,7 @@ def test_context_length_on_non_ollama_provider_warns(
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    """``context_length`` is an Ollama-only knob; setting it elsewhere warns.
-
-    Cloud providers expose no context-window control, so the value is silently
-    inert. Surface that instead of letting the user believe it took effect. The
-    ``max_tokens``/``context_length`` budget check does not apply here because
-    ``context_length`` is unused for non-Ollama providers.
-    """
+    """``context_length`` is Ollama-only; setting it elsewhere warns, not errors."""
     monkeypatch.chdir(tmp_path)
     with caplog.at_level(logging.WARNING, logger="aiida_agents._settings"):
         settings = ModelSettings(
