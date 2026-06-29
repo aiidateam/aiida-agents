@@ -18,33 +18,31 @@ Usage:
 from __future__ import annotations
 
 from aiida import load_profile, orm
+from aiida.common.exceptions import NotExistent
 
 PROFILE_NAME = "agent-test"
+CODE_LABEL = "bash"
+COMPUTER_LABEL = "localhost"
 
 
 def main() -> None:
     load_profile(PROFILE_NAME)
 
-    computer = orm.load_computer("localhost")
-
-    existing = orm.QueryBuilder()
-    existing.append(
-        orm.InstalledCode,
-        filters={"label": "bash"},
-        project=["id"],
-    )
-    rows = existing.all()
-    if rows:
-        print(f"bash code already exists, pk={rows[0][0]}")
-        return
-
-    code = orm.InstalledCode(
-        label="bash",
-        computer=computer,
-        filepath_executable="/bin/bash",
-        default_calc_job_plugin="core.arithmetic.add",
-    ).store()
-    print(f"created bash code, pk={code.pk}")
+    # NodeCollection has no get_or_create (only Computer/Group do), so the
+    # idempotent get-or-create for a code is load_code guarded by NotExistent.
+    full_label = f"{CODE_LABEL}@{COMPUTER_LABEL}"
+    try:
+        code = orm.load_code(full_label)
+    except NotExistent:
+        code = orm.InstalledCode(
+            label=CODE_LABEL,
+            computer=orm.load_computer(COMPUTER_LABEL),
+            filepath_executable="/bin/bash",
+            default_calc_job_plugin="core.arithmetic.add",
+        ).store()
+        print(f"created {full_label}, pk={code.pk}")
+    else:
+        print(f"{full_label} already exists, pk={code.pk}")
 
 
 if __name__ == "__main__":
