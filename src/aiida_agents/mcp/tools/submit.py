@@ -254,11 +254,14 @@ def _prepare_submission(
     """Resolve JSON inputs to unstored nodes and validate against the spec.
 
     Resolution turns the agent's JSON (bare values, reference dicts) into AiiDA
-    nodes; validation is delegated to AiiDA's own ``spec().inputs.validate()``,
-    which runs the full required/type/nested-namespace check pre-submit and
-    writes nothing. This is the single seam every submission passes through, and
-    the place to repoint at aiida-restapi once it grows a write endpoint
-    (ADR-02, docs/adr/02-mcp-tools-wrap-aiida-restapi.md).
+    nodes. Validation is delegated to AiiDA's own ``spec().inputs.validate()``,
+    run on the ``pre_process``-ed inputs so the process's port defaults (e.g.
+    ``metadata.options.resources``) are filled exactly as the engine fills them
+    at submit time; this is pre-submit and writes nothing. Validating the raw
+    inputs instead would reject submissions the engine accepts and make the user
+    supply boilerplate options by hand. This is the single seam every submission
+    passes through, and the place to repoint at aiida-restapi once it grows a
+    write endpoint (ADR-02, docs/adr/02-mcp-tools-wrap-aiida-restapi.md).
 
     Args:
         entry_point: AiiDA entry point string, e.g. ``"core.arithmetic.add"``.
@@ -279,10 +282,59 @@ def _prepare_submission(
         raise SubmissionInputError(f"Could not build inputs: {exc}") from exc
 
     process_class = _load_process_class(entry_point)
-    error = process_class.spec().inputs.validate(resolved)
+    spec_inputs = process_class.spec().inputs
+    # Validate against the engine's eventual view of the inputs: pre_process
+    # fills the process's own port defaults (scheduler resources, filenames,
+    # parser, ...) exactly as the engine does at submit time. Skipping it would
+    # reject submissions the engine accepts and force the user to hand-specify
+    # boilerplate options such as ``metadata.options.resources``. pre_process
+    # mutates its argument, so pass a copy and keep ``resolved`` (what the HITL
+    # preview shows) limited to what the user actually supplied.
+    try:
+        processed = spec_inputs.pre_process(dict(resolved))
+    except Exception as exc:
+        raise SubmissionInputError(f"Could not build inputs: {exc}") from exc
+    error = spec_inputs.validate(processed)
     if error is not None:
         raise SubmissionInputError(str(error))
     return process_class, resolved
+
+
+def _run_submission(
+    entry_point: str,
+    process_class: type[Process],
+    resolved: dict[str, Any],
+) -> SubmitResult:
+    """Hand pre-resolved, pre-validated inputs to the engine and submit.
+
+    Kept separate from ``submit_workflow`` so the CLI can call it on the main
+    thread after human approval. AiiDA's storage is thread-bound and pydantic-ai
+    runs sync tools on a worker thread, so doing the write there (while the
+    approval preview already bound the default user / nodes to the main-thread
+    session) raises a cross-thread SQLAlchemy error.
+
+    Raises:
+        ToolError: If the engine rejects the submission.
+    """
+    try:
+        manager = get_manager()
+        profile = manager.get_profile()
+        if profile and profile.process_control_backend:
+            node = submit(process_class, **resolved)
+        else:
+            # Brokerless profile (sqlite_dos) — run in-process
+            _, node = run_get_node(process_class, **resolved)
+    except Exception as exc:
+        raise ToolError(f"Submission failed: {exc}") from exc
+
+    logger.info("submitted %s → pk=%d", entry_point, node.pk)
+
+    return {
+        "pk": cast(int, node.pk),
+        "uuid": node.uuid,
+        "workflow": entry_point,
+        "state": node.process_state.value if node.process_state else "created",
+    }
 
 
 def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
@@ -322,22 +374,4 @@ def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
     except SubmissionInputError as exc:
         raise ToolError(str(exc)) from exc
 
-    try:
-        manager = get_manager()
-        profile = manager.get_profile()
-        if profile and profile.process_control_backend:
-            node = submit(process_class, **resolved)
-        else:
-            # Brokerless profile (sqlite_dos) — run in-process
-            _, node = run_get_node(process_class, **resolved)
-    except Exception as exc:
-        raise ToolError(f"Submission failed: {exc}") from exc
-
-    logger.info("submitted %s → pk=%d", entry_point, node.pk)
-
-    return {
-        "pk": cast(int, node.pk),
-        "uuid": node.uuid,
-        "workflow": entry_point,
-        "state": node.process_state.value if node.process_state else "created",
-    }
+    return _run_submission(entry_point, process_class, resolved)

@@ -102,8 +102,11 @@ class TestTriageSubmissions:
 
         assert auto == {}
         assert len(previews) == 1
-        preview_call, resolved = previews[0]
+        preview_call, process_class, resolved = previews[0]
         assert preview_call.tool_call_id == "c1"
+        from aiida.plugins import WorkflowFactory
+
+        assert process_class is WorkflowFactory(MULTIPLY_ADD)
         assert resolved is not None
         assert isinstance(resolved["x"], orm.Int) and resolved["x"].value == 2
 
@@ -113,4 +116,4 @@ class TestTriageSubmissions:
         auto, previews = _triage_submissions(self._pending(call))
 
         assert auto == {}
-        assert previews == [(call, None)]
+        assert previews == [(call, None, None)]

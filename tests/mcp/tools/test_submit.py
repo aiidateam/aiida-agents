@@ -167,6 +167,25 @@ class TestPrepareSubmission:
         assert isinstance(resolved["x"], orm.Int) and resolved["x"].value == 2
         assert resolved["code"].uuid == arithmetic_add_code.uuid
 
+    def test_option_defaults_are_applied_before_validation(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """A CalcJob option that is required but carries a spec default (here
+        ``metadata.options.resources``) must not force the user to supply it:
+        pre-processing fills it exactly as the engine does at submit time, so a
+        local submission validates without the user knowing the nested path. The
+        returned inputs stay limited to what the user gave (no metadata
+        boilerplate leaking into the HITL preview).
+        """
+        from aiida.plugins import CalculationFactory
+
+        process_class, resolved = _prepare_submission(
+            "core.arithmetic.add",
+            {"x": 2, "y": 3, "code": {"pk": arithmetic_add_code.pk}},
+        )
+        assert process_class is CalculationFactory("core.arithmetic.add")
+        assert "metadata" not in resolved
+
     @pytest.mark.parametrize(
         "entry_point, inputs, match",
         [
@@ -208,6 +227,21 @@ class TestSubmitWorkflow:
         }
         assert node.is_finished_ok
         assert node.outputs.result.value == 10
+
+    def test_calcjob_submits_without_user_supplied_resources(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """A local CalcJob runs to completion with no resources in the inputs:
+        the engine fills ``metadata.options.resources`` from the spec default,
+        so ``5 + 8 == 13`` without the user knowing the option exists.
+        """
+        result = submit_workflow(
+            "core.arithmetic.add",
+            {"x": 5, "y": 8, "code": {"pk": arithmetic_add_code.pk}},
+        )
+        node = orm.load_node(result["pk"])
+        assert node.is_finished_ok
+        assert node.outputs.sum.value == 13
 
     def test_validation_failure_writes_no_orphans(self) -> None:
         """Invalid inputs raise before any node is stored, so the wrapped

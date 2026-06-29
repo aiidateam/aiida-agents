@@ -38,9 +38,10 @@ def _parse_args(args: str | dict[str, Any] | None) -> dict[str, Any]:
 # inputs cannot spin forever.
 _MAX_APPROVAL_ROUNDS = 10
 
-# A pending submission awaiting the user's decision: the original tool call and
-# its resolved inputs (None for non-submit approval tools, shown with raw args).
-_Preview = tuple[Any, dict[str, Any] | None]
+# A pending submission awaiting the user's decision: the original tool call, its
+# loaded process class, and its resolved inputs. The latter two are None for any
+# non-submit approval tool (shown with raw args, not executable out of band).
+_Preview = tuple[Any, Any, dict[str, Any] | None]
 
 
 def _triage_submissions(
@@ -54,9 +55,11 @@ def _triage_submissions(
       ``submit_workflow`` whose inputs fail resolution or validation. These go
       straight back to the model so it can correct its own mistakes without
       bothering the user.
-    * ``previews`` lists ``(call, resolved)`` for the calls the user must
-      decide on: ``resolved`` is the resolved-inputs dict for a valid
-      ``submit_workflow``, or ``None`` for any other approval-gated tool.
+    * ``previews`` lists ``(call, process_class, resolved)`` for the calls the
+      user must decide on: ``process_class`` / ``resolved`` are the loaded
+      process class and resolved-inputs dict for a valid ``submit_workflow``
+      (so the caller can submit on the main thread), or ``None`` for any other
+      approval-gated tool.
     """
     from pydantic_ai.tools import ToolDenied
 
@@ -66,11 +69,11 @@ def _triage_submissions(
     previews: list[_Preview] = []
     for call in pending.approvals:
         if call.tool_name != "submit_workflow":
-            previews.append((call, None))
+            previews.append((call, None, None))
             continue
         args = _parse_args(call.args)
         try:
-            _, resolved = _prepare_submission(
+            process_class, resolved = _prepare_submission(
                 args.get("entry_point", ""), args.get("inputs", {})
             )
         except SubmissionInputError as exc:
@@ -79,7 +82,7 @@ def _triage_submissions(
                 "Correct the inputs and call submit_workflow again."
             )
             continue
-        previews.append((call, resolved))
+        previews.append((call, process_class, resolved))
     return auto, previews
 
 
@@ -88,7 +91,7 @@ def _print_previews(previews: list[_Preview]) -> None:  # pragma: no cover
     from aiida_agents.mcp.tools.submit import _format_resolved_inputs
 
     print("\n⚠️  The agent wants to perform the following submission(s):")
-    for call, resolved in previews:
+    for call, _, resolved in previews:
         print(f"   Tool  : {call.tool_name}")
         if resolved is None:
             print(f"   Inputs: {_parse_args(call.args)}")
@@ -99,47 +102,63 @@ def _print_previews(previews: list[_Preview]) -> None:  # pragma: no cover
 
 
 def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
-    """Resolve, validate, and confirm pending submissions, then continue the run.
+    """Confirm and run pending submissions, denying invalid ones to the model.
 
     Each round: invalid submissions are denied straight back to the model so it
-    retries with corrected inputs; valid ones are shown to the user, who
-    approves or cancels. Only confirmed, valid inputs reach the database
-    (ADR-08, docs/adr/08-human-in-the-loop-before-writes.md). The loop repeats
-    while the model keeps proposing submissions in response.
+    retries with corrected inputs; valid ones are previewed for the user, who
+    approves or cancels. Approved submissions are executed *here, on the main
+    thread*, not by re-running the agent: pydantic-ai runs sync tools on a worker
+    thread and AiiDA's storage is thread-bound, so writing from the worker thread
+    (reusing the default user / nodes the preview bound to the main-thread
+    session) raises a cross-thread SQLAlchemy error. Only confirmed, valid inputs
+    reach the database (ADR-08, docs/adr/08-human-in-the-loop-before-writes.md).
     """
-    from pydantic_ai.tools import ToolApproved, ToolDenied
+    from aiida_agents.mcp.tools.submit import _run_submission
 
     for _ in range(_MAX_APPROVAL_ROUNDS):
         pending = result.output
         auto, previews = _triage_submissions(pending)
-        approvals: dict[str, Any] = dict(auto)
 
         if previews:
             _print_previews(previews)
-            approved = input("\nProceed? [y/N]: ").strip().lower() == "y"
-            if approved:
-                decision: Any = ToolApproved()
-            else:
-                decision = ToolDenied("Cancelled by the user.")
+            if input("\nProceed? [y/N]: ").strip().lower() != "y":
                 print("Cancelled — nothing was submitted.")
-            for call, _ in previews:
-                approvals[call.tool_call_id] = decision
-        elif auto:
-            print("\n⚠️  Inputs were invalid; asking the agent to correct them.")
-
-        if not approvals:
+                return
+            for call, process_class, resolved in previews:
+                if process_class is None or resolved is None:
+                    print(
+                        f"   Skipping {call.tool_name}: not an executable submission."
+                    )
+                    continue
+                entry_point = _parse_args(call.args).get("entry_point", "")
+                try:
+                    res = _run_submission(entry_point, process_class, resolved)
+                except Exception as exc:
+                    print(f"\n❌ Submission failed: {exc}")
+                    continue
+                print(
+                    f"\n✅ Submitted {res['workflow']}: "
+                    f"pk={res['pk']}, state={res['state']}"
+                )
             return
 
+        if not auto:
+            return
+
+        # Only invalid submissions this round: deny them back to the model so it
+        # corrects its own inputs, then re-run. No DB write happens on the worker
+        # thread here (denied calls are never executed), so this is thread-safe.
+        print("\n⚠️  Inputs were invalid; asking the agent to correct them.")
         try:
             result = asyncio.run(
                 agent.run(
                     None,
                     message_history=result.all_messages(),
-                    deferred_tool_results=pending.build_results(approvals=approvals),
+                    deferred_tool_results=pending.build_results(approvals=auto),
                 )
             )
         except Exception as exc:
-            print(f"\n❌ Error during submission: {exc}")
+            print(f"\n❌ Error: {exc}")
             return
 
         if not isinstance(result.output, DeferredToolRequests):
