@@ -26,8 +26,9 @@ import os
 from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import BeforeValidator, Field
+from pydantic import BeforeValidator, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
 
@@ -87,11 +88,48 @@ class ModelSettings(_Base):
     base_url: str | None = None
     api_key: str = "api-key-not-set"
 
-    # Local models routinely produce substantial reasoning/thinking content
-    # across multi-step tool-calling runs (status -> docs -> evidence ->
-    # synthesis); the provider default output token budget is often too
-    # small to contain it, raising UnexpectedModelBehavior mid-run.
-    max_tokens: int = 8192
+    # Max output tokens per response, applied to every provider. Local models
+    # routinely produce substantial reasoning/thinking content across multi-step
+    # tool-calling runs (status -> docs -> evidence -> synthesis); too small an
+    # output budget truncates that and raises UnexpectedModelBehavior mid-run. On
+    # cloud providers this also caps output (and cost) below the model ceiling.
+    max_tokens: int = Field(default=8192, gt=0)
+
+    # Ollama context window (``num_ctx``), sent per request so no server-side
+    # OLLAMA_CONTEXT_LENGTH / sudo is needed. ``None`` keeps Ollama's own default.
+    # Ollama-only: cloud providers expose no context-window knob (their window is
+    # fixed by the model), so a value set there is ignored (warned about below).
+    # Bigger windows cost more VRAM, so this is opt-in rather than auto-sized.
+    context_length: int | None = Field(default=None, gt=0)
+
+    @model_validator(mode="after")
+    def _validate_token_budget(self) -> Self:
+        """Reject an output budget that cannot fit inside the context window.
+
+        ``num_ctx`` bounds prompt *and* output together, so ``max_tokens`` larger
+        than ``context_length`` is unsatisfiable. Caught here at load time rather
+        than as a silent truncation mid-run. Only meaningful for Ollama, the one
+        provider whose window we control; elsewhere ``context_length`` is inert.
+        """
+        if self.context_length is None:
+            return self
+        if self.provider != "ollama":
+            logger.warning(
+                "AIIDA_AGENTS_CONTEXT_LENGTH is set but only the 'ollama' provider "
+                "uses it (cloud models have a fixed context window); it is ignored "
+                "for provider %r.",
+                self.provider,
+            )
+            return self
+        if self.max_tokens >= self.context_length:
+            msg = (
+                f"max_tokens ({self.max_tokens}) must be smaller than context_length "
+                f"({self.context_length}): the output budget has to fit inside the "
+                f"context window, with room left for the prompt. Lower max_tokens or "
+                f"raise context_length (AIIDA_AGENTS_CONTEXT_LENGTH)."
+            )
+            raise ValueError(msg)
+        return self
 
 
 class AgentSettings(_Base):
