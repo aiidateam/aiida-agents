@@ -7,7 +7,7 @@ from typing import Any, cast
 
 from aiida import orm
 from aiida.common.exceptions import MissingEntryPointError
-from aiida.engine import Process, run_get_node, submit
+from aiida.engine import CalcJob, Process, submit
 from aiida.manage import get_manager
 from aiida.plugins.entry_point import load_entry_point
 from fastmcp.exceptions import ToolError
@@ -30,6 +30,13 @@ _COMPATIBLE_NODES: dict[type, tuple[type, ...]] = {
     list: (orm.List,),
     dict: (orm.Dict,),
 }
+
+# The node types a bare Python value can be wrapped into (the targets above). A
+# port accepting none of these (Code, StructureData, RemoteData, ...) cannot be
+# built from a plain value and needs an explicit reference (see _is_reference_type).
+_WRAPPABLE_TYPES: tuple[type, ...] = tuple(
+    dict.fromkeys(node for nodes in _COMPATIBLE_NODES.values() for node in nodes)
+)
 
 
 def _load_process_class(entry_point: str) -> type[Process]:
@@ -99,16 +106,18 @@ def _resolve_node_reference(ref: dict[str, Any], port_name: str) -> orm.Node:
 
 
 def _is_reference_type(expected_types: tuple[type, ...]) -> bool:
-    """Return True if the port expects a node type that cannot be created from a bare primitive.
+    """Return True if the port needs an explicit node reference (pk/uuid/label).
 
-    Ports expecting types like Code, AbstractCode, or StructureData require an
-    explicit node reference (pk/uuid/label) rather than a plain Python value.
+    A port is wrappable from a bare value only if at least one of its valid types
+    is a primitive-backed node (``_WRAPPABLE_TYPES``); anything else (``Code``,
+    ``StructureData``, ``RemoteData``, ...) needs a reference. Inverting the rule
+    this way (allow-list of wrappable types, not a block-list of one) means a bare
+    value handed to, e.g., a ``StructureData`` port gets the clean "expects a
+    reference" error instead of a confusing ``StructureData(value)`` failure.
+    An unconstrained port (no concrete valid_type) is left to spec validation.
     """
-    _REFERENCE_ONLY_TYPES = (orm.AbstractCode,)
-    return any(
-        issubclass(t, _REFERENCE_ONLY_TYPES)
-        for t in expected_types
-        if isinstance(t, type)
+    return bool(expected_types) and not any(
+        isinstance(t, type) and issubclass(t, _WRAPPABLE_TYPES) for t in expected_types
     )
 
 
@@ -132,9 +141,9 @@ def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
         Passed through as-is.
 
     Reference-only ports (e.g. ``code``)
-        Ports whose ``valid_type`` is ``AbstractCode`` or similar non-wrappable
-        types *require* an explicit reference dict. Passing a bare primitive
-        raises a clear ``ToolError``.
+        Ports whose ``valid_type`` is not a primitive-backed node (``Code``,
+        ``StructureData``, ``RemoteData``, ...) *require* an explicit reference
+        dict. Passing a bare primitive raises a clear ``ToolError``.
 
     Only top-level ports are resolved. A nested input namespace (e.g.
     ``pw.parameters`` on a real workchain) is passed through unchanged, so this
@@ -181,8 +190,8 @@ def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
         else:
             expected_types = (valid_type,) if valid_type is not type(None) else ()
 
-        # Reference-only ports require an explicit reference dict
-        if expected_types and _is_reference_type(expected_types):
+        # Ports that can't be built from a bare value require an explicit reference
+        if _is_reference_type(expected_types):
             raise ToolError(
                 f"Input {name!r} expects a node reference, not a plain value. "
                 f'Use one of: {{"pk": N}}, {{"uuid": "..."}}, '
@@ -297,6 +306,15 @@ def _prepare_submission(
     error = spec_inputs.validate(processed)
     if error is not None:
         raise SubmissionInputError(str(error))
+    # Agent-scope policy: a compute CalcJob always needs a code. AiiDA makes
+    # ``code`` optional on the base CalcJob on purpose (import/parse jobs ingest a
+    # RemoteData and run no code), but the agent only submits compute jobs, so
+    # require one and fail loudly rather than queue a job that cannot run.
+    if issubclass(process_class, CalcJob) and "code" not in resolved:
+        raise SubmissionInputError(
+            "This calculation needs a code to run. Provide one as a reference, "
+            'e.g. {"code": {"label": "bash@localhost"}}.'
+        )
     return process_class, resolved
 
 
@@ -305,25 +323,34 @@ def _run_submission(
     process_class: type[Process],
     resolved: dict[str, Any],
 ) -> SubmitResult:
-    """Hand pre-resolved, pre-validated inputs to the engine and submit.
+    """Submit pre-resolved, pre-validated inputs to the engine via the broker.
+
+    Submit-only by design: the agent's model is "submit, get a pk, check status
+    later", so we always hand the process to the daemon rather than ever blocking
+    the caller on an in-process run. A profile with no broker is refused with an
+    actionable error (the ZMQ broker needs no system services and bundles into
+    the daemon, so ``verdi daemon start`` is all it takes).
 
     Kept separate from ``submit_workflow`` so the CLI can call it on the main
-    thread after human approval. AiiDA's storage is thread-bound and pydantic-ai
-    runs sync tools on a worker thread, so doing the write there (while the
-    approval preview already bound the default user / nodes to the main-thread
-    session) raises a cross-thread SQLAlchemy error.
+    thread after human approval: AiiDA's storage is thread-bound and pydantic-ai
+    runs sync tools on a worker thread, so writing there (while the approval
+    preview bound the default user / nodes to the main-thread session) raises a
+    cross-thread SQLAlchemy error.
 
     Raises:
-        ToolError: If the engine rejects the submission.
+        ToolError: If the profile has no broker or the engine rejects submission.
     """
+    profile = get_manager().get_profile()
+    if profile is None or not profile.process_control_backend:
+        raise ToolError(
+            "This profile has no broker, so the agent cannot submit a workflow. "
+            "Use a profile with a broker and a running daemon: the ZMQ broker "
+            "needs no system services (it bundles into the daemon), so "
+            "`verdi daemon start` is enough."
+        )
+
     try:
-        manager = get_manager()
-        profile = manager.get_profile()
-        if profile and profile.process_control_backend:
-            node = submit(process_class, **resolved)
-        else:
-            # Brokerless profile (sqlite_dos) — run in-process
-            _, node = run_get_node(process_class, **resolved)
+        node = submit(process_class, **resolved)
     except Exception as exc:
         raise ToolError(f"Submission failed: {exc}") from exc
 
@@ -350,14 +377,15 @@ def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
     * **AiiDA node** — passed through unchanged.
 
     Inputs are resolved and validated against the process spec before
-    submission; nothing is written to the database unless they pass. The
-    caller (CLI) must obtain user confirmation (HITL) before calling this tool.
-    Only top-level inputs are resolved (see ``_resolve_inputs``).
+    submission; nothing is written to the database unless they pass, and a
+    compute CalcJob must include a ``code``. The caller (CLI) must obtain user
+    confirmation (HITL) before calling this tool. Only top-level inputs are
+    resolved (see ``_resolve_inputs``).
 
-    With a process-control broker the workflow is submitted and this returns
-    immediately, with ``state`` the initial state. On a brokerless profile
-    (e.g. ``core.sqlite_dos``) it runs in-process and *blocks* until the run
-    finishes, with ``state`` the final state.
+    Submit-only: the process is handed to the daemon and this returns
+    immediately with ``state`` the initial state. The profile must have a broker
+    and a running daemon; if it has none, a clear error is raised rather than
+    blocking on an in-process run.
 
     Args:
         entry_point: AiiDA entry point string, e.g. ``"core.arithmetic.add"``.

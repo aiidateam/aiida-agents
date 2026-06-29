@@ -120,6 +120,13 @@ subpackage.
 Trade-off accepted: `spec.inputs.validate()` reports the first error, not all
 at once. For an agent loop this is fine, arguably better: one fix per turn.
 
+Agent-scope policy: on top of the spec check, `_prepare_submission` requires a
+`code` for any compute CalcJob. AiiDA makes `code` optional on the base CalcJob
+on purpose, import/parse CalcJobs ingest a `RemoteData` and run no `Code`, but
+the agent only submits compute jobs, so requiring one is a deliberate
+agent-scope decision (not the duplicated workflow knowledge this ADR swears
+off) and fails loudly rather than queueing a job that cannot run.
+
 Scope: resolution and validation operate on top-level inputs only. A nested
 input namespace (a real multi-step workflow) is passed through unresolved,
 which suits the flat-input demo processes targeted here (arithmetic add /

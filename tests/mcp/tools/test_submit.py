@@ -9,11 +9,13 @@ Covers the value/reference convention in ``_resolve_inputs``:
   failure leaves no orphan in the database;
 - a reference-only port (``code`` → ``AbstractCode``) rejects a bare value.
 
-plus the full resolve → validate → submit path end to end.
+plus the resolve → validate → (submit-only) path.
 
-All tests run real AiiDA nodes against the session ``aiida_profile`` (brokerless
-and ``core.sqlite_dos``), so ``submit_workflow`` takes the in-process
-``run_get_node`` branch and a real workflow actually executes.
+All tests run real AiiDA nodes against the session ``aiida_profile`` (brokerless,
+``core.sqlite_dos``). ``submit_workflow`` is submit-only, so on this brokerless
+profile it raises a clear "no broker" error; the run-to-completion tests instead
+drive the engine through ``run_get_node`` (the daemonless local path) on the
+resolved inputs, proving our resolution feeds a real run without a daemon.
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from fastmcp.exceptions import ToolError
 from aiida_agents.mcp.tools.submit import (
     SubmissionInputError,
     _format_resolved_inputs,
+    _is_reference_type,
     _resolve_inputs,
     _prepare_submission,
     submit_workflow,
@@ -123,6 +126,30 @@ class TestReferenceOnlyPorts:
         ):
             _resolve_inputs(MULTIPLY_ADD_EP, {"code": 1})
 
+    @pytest.mark.parametrize(
+        "valid_types, needs_reference",
+        [
+            pytest.param((orm.Int,), False, id="int"),
+            pytest.param((orm.Str,), False, id="str"),
+            pytest.param((orm.Int, orm.Float), False, id="int-or-float"),
+            pytest.param((orm.AbstractCode,), True, id="code"),
+            pytest.param((orm.StructureData,), True, id="structure"),
+            pytest.param((orm.RemoteData,), True, id="remote-data"),
+            pytest.param((orm.Int, orm.StructureData), False, id="mixed-has-primitive"),
+            pytest.param((), False, id="unconstrained"),
+        ],
+    )
+    def test_only_non_primitive_ports_need_a_reference(
+        self, valid_types: tuple[type, ...], needs_reference: bool
+    ) -> None:
+        """A port needs an explicit reference iff none of its valid types can be
+        built from a bare primitive. The rule is an allow-list of wrappable node
+        types, not a block-list of one (``AbstractCode``), so a bare value to a
+        ``StructureData``/``RemoteData`` port gets the clean "expects a reference"
+        error rather than a confusing ``StructureData(value)`` failure.
+        """
+        assert _is_reference_type(valid_types) is needs_reference
+
 
 class TestNoStoreDuringResolution:
     def test_wrapped_nodes_are_unstored(
@@ -186,6 +213,15 @@ class TestPrepareSubmission:
         assert process_class is CalculationFactory("core.arithmetic.add")
         assert "metadata" not in resolved
 
+    def test_calcjob_requires_a_code(self) -> None:
+        """Agent-scope policy: a compute CalcJob must be given a code. AiiDA makes
+        ``code`` optional on the base CalcJob on purpose (import/parse jobs ingest
+        a RemoteData and run no code), but the agent only submits compute jobs, so
+        require one and fail loudly rather than submit a job that cannot run.
+        """
+        with pytest.raises(SubmissionInputError, match=r"needs a code"):
+            _prepare_submission("core.arithmetic.add", {"x": 5, "y": 8})
+
     @pytest.mark.parametrize(
         "entry_point, inputs, match",
         [
@@ -208,38 +244,51 @@ class TestPrepareSubmission:
 
 
 class TestSubmitWorkflow:
-    def test_submit_runs_workflow_end_to_end(
+    def test_workchain_resolution_runs_to_completion(
         self, arithmetic_add_code: orm.InstalledCode
     ) -> None:
-        """The bare-value convention flows through validation into a real run:
-        ``(2 * 3) + 4 == 10``.
+        """The bare-value convention resolves through a WorkChain and runs:
+        ``(2 * 3) + 4 == 10``. ``submit_workflow`` is submit-only (it needs a
+        broker + daemon), so this drives the engine via ``run_get_node`` -- the
+        daemonless local path AiiDA points to -- to prove the resolved inputs run.
         """
-        result = submit_workflow(
+        from aiida.engine import run_get_node
+
+        process_class, resolved = _prepare_submission(
             MULTIPLY_ADD_EP,
             {"x": 2, "y": 3, "z": 4, "code": {"pk": arithmetic_add_code.pk}},
         )
-        node = orm.load_node(result["pk"])
-        assert result == {
-            "pk": node.pk,
-            "uuid": node.uuid,
-            "workflow": MULTIPLY_ADD_EP,
-            "state": "finished",
-        }
+        _, node = run_get_node(process_class, **resolved)
         assert node.is_finished_ok
         assert node.outputs.result.value == 10
 
-    def test_calcjob_submits_without_user_supplied_resources(
+    def test_submit_requires_a_broker(
         self, arithmetic_add_code: orm.InstalledCode
     ) -> None:
-        """A local CalcJob runs to completion with no resources in the inputs:
-        the engine fills ``metadata.options.resources`` from the spec default,
-        so ``5 + 8 == 13`` without the user knowing the option exists.
+        """Submit-only: on a brokerless profile (the test profile) the tool
+        refuses with a clear, actionable error instead of running in-process.
         """
-        result = submit_workflow(
+        with pytest.raises(ToolError, match=r"no broker"):
+            submit_workflow(
+                "core.arithmetic.add",
+                {"x": 5, "y": 8, "code": {"pk": arithmetic_add_code.pk}},
+            )
+
+    def test_calcjob_resolution_runs_without_user_supplied_resources(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """A CalcJob runs to completion with no resources in the inputs: the
+        engine fills ``metadata.options.resources`` from the spec default, so
+        ``5 + 8 == 13`` without the user knowing the option exists. Driven via
+        ``run_get_node`` since ``submit_workflow`` is submit-only.
+        """
+        from aiida.engine import run_get_node
+
+        process_class, resolved = _prepare_submission(
             "core.arithmetic.add",
             {"x": 5, "y": 8, "code": {"pk": arithmetic_add_code.pk}},
         )
-        node = orm.load_node(result["pk"])
+        _, node = run_get_node(process_class, **resolved)
         assert node.is_finished_ok
         assert node.outputs.sum.value == 13
 
@@ -262,17 +311,14 @@ class TestSubmitWorkflow:
     def test_invalid_inputs_never_reach_the_engine(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """The validation gate runs before either engine entry point, so a bad
-        submission cannot touch the database (the ADR-08 write guarantee).
+        """Validation runs before the engine, so a bad submission never calls
+        ``submit`` (the ADR-08 write guarantee).
         """
         from aiida_agents.mcp.tools import submit as submit_mod
 
         called: list[str] = []
         monkeypatch.setattr(
             submit_mod, "submit", lambda *a, **k: called.append("submit")
-        )
-        monkeypatch.setattr(
-            submit_mod, "run_get_node", lambda *a, **k: called.append("run_get_node")
         )
 
         with pytest.raises(ToolError):
