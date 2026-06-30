@@ -57,16 +57,16 @@ Key design decisions:
 
 The Analysis Agent exposes seven tools:
 
-| Tool                 | Source                    | Type                             |
-| -------------------- | ------------------------- | -------------------------------- |
-| `get_process_status` | `mcp/tools/processes.py`  | Read                             |
-| `list_processes`     | `mcp/tools/processes.py`  | Read                             |
-| `query_nodes`        | `mcp/tools/nodes.py`      | Read                             |
-| `get_node_inputs`    | `mcp/tools/nodes.py`      | Read                             |
-| `get_node_outputs`   | `mcp/tools/nodes.py`      | Read                             |
-| `search_structures`  | `mcp/tools/structures.py` | Read                             |
-| `search_aiida_docs`  | `rag/__init__.py`         | Read (RAG)                       |
-| `submit_workflow`    | `mcp/tools/submit.py`     | Write — `requires_approval=True` |
+| Tool                 | Source                | Type                             |
+| -------------------- | --------------------- | -------------------------------- |
+| `get_process_status` | `tools/processes.py`  | Read                             |
+| `list_processes`     | `tools/processes.py`  | Read                             |
+| `query_nodes`        | `tools/nodes.py`      | Read                             |
+| `get_node_inputs`    | `tools/nodes.py`      | Read                             |
+| `get_node_outputs`   | `tools/nodes.py`      | Read                             |
+| `search_structures`  | `tools/structures.py` | Read                             |
+| `search_aiida_docs`  | `rag/__init__.py`     | Read (RAG)                       |
+| `submit_workflow`    | `tools/submit.py`     | Write — `requires_approval=True` |
 
 `submit_workflow` is registered with Pydantic AI's native `requires_approval=True`,
 which pauses the agent run and returns a `DeferredToolRequests` object for the

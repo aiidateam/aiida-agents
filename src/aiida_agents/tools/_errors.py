@@ -1,12 +1,7 @@
-"""Surface-agnostic AiiDA exception helpers.
+"""Surface-agnostic AiiDA exception helpers, shared by both surfaces.
 
-This module owns the shared error-description logic used by both the MCP
-server surface and the pydantic-ai agent surface. It depends only on AiiDA,
-never on a surface framework (fastmcp, pydantic-ai, etc.).
-
-Surface-specific adapters live in their own modules:
-- MCP server: ``aiida_agents.mcp._errors`` (``to_mcp_tool_error``, ``register_tool``)
-- Agent:       ``aiida_agents.agents._errors`` (``RetryOnToolError``)
+``describe_aiida_error`` depends only on AiiDA. The surface adapters that use it
+live in ``aiida_agents.mcp._errors`` and ``aiida_agents.agents._errors``.
 """
 
 from __future__ import annotations

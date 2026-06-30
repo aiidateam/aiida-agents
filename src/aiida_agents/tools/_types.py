@@ -1,8 +1,7 @@
-"""Shared types for the MCP layer (tools, resources, ...).
+"""Shared return-shape types for the surface-agnostic tool functions.
 
-The ``TypedDict``s below are the tools' return shapes. FastMCP turns them into
-each tool's ``outputSchema``, so the agent sees named, typed fields rather than
-an opaque object of ``str | int | null`` values.
+Both surfaces turn these ``TypedDict``s into the tool's output schema, so the
+client sees named, typed fields instead of an opaque blob.
 """
 
 from __future__ import annotations

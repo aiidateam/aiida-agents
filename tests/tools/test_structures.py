@@ -1,4 +1,4 @@
-"""Tests for ``aiida_agents.mcp.tools.structures``.
+"""Tests for ``aiida_agents.tools.structures``.
 
 Unlike the other tools, ``search_structures`` carries real logic of its own:
 formula parsing, element-symbol mapping and Python-side filtering. The tests

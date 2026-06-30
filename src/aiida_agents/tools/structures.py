@@ -1,4 +1,4 @@
-"""MCP tools for AiiDA structure data queries."""
+"""Surface-agnostic tools for AiiDA structure data queries."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ import typing as t
 
 from aiida import orm
 from aiida.common.constants import elements
-
 
 from ._types import StructureRecord
 

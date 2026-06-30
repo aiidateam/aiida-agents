@@ -1,4 +1,4 @@
-"""Tests for ``aiida_agents.mcp.tools.nodes``.
+"""Tests for ``aiida_agents.tools.nodes``.
 
 These tools wrap the ORM thinly, so the tests target only what is *ours*: the
 ``node_type`` mapping (both the alias and substring-fallback branches), the

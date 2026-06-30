@@ -1,4 +1,4 @@
-"""MCP tools for AiiDA process nodes."""
+"""Surface-agnostic tools for inspecting AiiDA process nodes."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-"""MCP tools for generic AiiDA node queries."""
+"""Surface-agnostic tools for generic AiiDA node queries."""
 
 from __future__ import annotations
 

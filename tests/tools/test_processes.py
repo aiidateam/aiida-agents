@@ -1,4 +1,4 @@
-"""Tests for ``aiida_agents.mcp.tools.processes``.
+"""Tests for ``aiida_agents.tools.processes``.
 
 These tools wrap the ORM / ``aiida-restapi`` thinly, so the tests target only
 what is *ours*: the output-dict contract, pk/uuid acceptance, the missing-node
