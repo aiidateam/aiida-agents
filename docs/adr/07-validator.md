@@ -106,7 +106,7 @@ database. It is pre-submit, not submit-time, so it meets the "catch before any
 DB write" requirement that drove this ADR while honoring its own stated
 principle: there is no reason to duplicate the spec's knowledge.
 
-Validation now lives in `_prepare_submission` (`mcp/tools/submit.py`), the
+Validation now lives in `_prepare_submission` (`tools/submit.py`), the
 single seam every submission passes through: resolve the agent's JSON inputs to
 unstored nodes, then call `spec.inputs.validate()`; on failure raise
 `SubmissionInputError`. The CLI (`_triage_submissions`) runs this before the

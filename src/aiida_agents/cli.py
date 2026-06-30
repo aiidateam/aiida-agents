@@ -63,7 +63,7 @@ def _triage_submissions(
     """
     from pydantic_ai.tools import ToolDenied
 
-    from aiida_agents.mcp.tools.submit import SubmissionInputError, _prepare_submission
+    from aiida_agents.tools.submit import SubmissionInputError, _prepare_submission
 
     auto: dict[str, Any] = {}
     previews: list[_Preview] = []
@@ -88,7 +88,7 @@ def _triage_submissions(
 
 def _print_previews(previews: list[_Preview]) -> None:  # pragma: no cover
     """Print the resolved submissions awaiting the user's confirmation."""
-    from aiida_agents.mcp.tools.submit import _format_resolved_inputs
+    from aiida_agents.tools.submit import _format_resolved_inputs
 
     print("\n⚠️  The agent wants to perform the following submission(s):")
     for call, _, resolved in previews:
@@ -113,7 +113,7 @@ def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
     session) raises a cross-thread SQLAlchemy error. Only confirmed, valid inputs
     reach the database (ADR-08, docs/adr/08-human-in-the-loop-before-writes.md).
     """
-    from aiida_agents.mcp.tools.submit import _run_submission
+    from aiida_agents.tools.submit import _run_submission
 
     for _ in range(_MAX_APPROVAL_ROUNDS):
         pending = result.output

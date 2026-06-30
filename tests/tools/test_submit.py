@@ -22,9 +22,9 @@ from __future__ import annotations
 
 import pytest
 from aiida import orm
-from fastmcp.exceptions import ToolError
 
-from aiida_agents.mcp.tools.submit import (
+from aiida_agents.tools.submit import (
+    SubmissionError,
     SubmissionInputError,
     _format_resolved_inputs,
     _is_reference_type,
@@ -114,7 +114,7 @@ class TestReferenceResolution:
         self, bad_ref: dict[str, object], match: str
     ) -> None:
         """A reference to a non-existent node names the form and the port."""
-        with pytest.raises(ToolError, match=match):
+        with pytest.raises(SubmissionInputError, match=match):
             _resolve_inputs(MULTIPLY_ADD_EP, {"code": bad_ref})
 
 
@@ -122,7 +122,8 @@ class TestReferenceOnlyPorts:
     def test_code_port_rejects_bare_value(self) -> None:
         """``code`` (AbstractCode) cannot be built from a plain value."""
         with pytest.raises(
-            ToolError, match=r"Input 'code' expects a node reference, not a plain value"
+            SubmissionInputError,
+            match=r"Input 'code' expects a node reference, not a plain value",
         ):
             _resolve_inputs(MULTIPLY_ADD_EP, {"code": 1})
 
@@ -268,7 +269,7 @@ class TestSubmitWorkflow:
         """Submit-only: on a brokerless profile (the test profile) the tool
         refuses with a clear, actionable error instead of running in-process.
         """
-        with pytest.raises(ToolError, match=r"no broker"):
+        with pytest.raises(SubmissionError, match=r"no broker"):
             submit_workflow(
                 "core.arithmetic.add",
                 {"x": 5, "y": 8, "code": {"pk": arithmetic_add_code.pk}},
@@ -298,7 +299,7 @@ class TestSubmitWorkflow:
         first missing port ('z' here); the point is that nothing was written.
         """
         sentinel = 987654321  # distinctive value to detect a leaked node
-        with pytest.raises(ToolError, match=r"'z'"):
+        with pytest.raises(SubmissionInputError, match=r"'z'"):
             submit_workflow(MULTIPLY_ADD_EP, {"x": sentinel, "y": 2})  # missing z, code
 
         leaked = (
@@ -314,14 +315,14 @@ class TestSubmitWorkflow:
         """Validation runs before the engine, so a bad submission never calls
         ``submit`` (the ADR-08 write guarantee).
         """
-        from aiida_agents.mcp.tools import submit as submit_mod
+        from aiida_agents.tools import submit as submit_mod
 
         called: list[str] = []
         monkeypatch.setattr(
             submit_mod, "submit", lambda *a, **k: called.append("submit")
         )
 
-        with pytest.raises(ToolError):
+        with pytest.raises(SubmissionInputError):
             submit_workflow("core.arithmetic.add", {})
 
         assert called == []

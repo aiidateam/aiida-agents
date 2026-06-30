@@ -21,7 +21,7 @@ from aiida.common.exceptions import AiidaException
 from pydantic_ai import ModelRetry, RunContext
 from pydantic_ai.toolsets import ToolsetTool, WrapperToolset
 
-from aiida_agents.mcp._errors import describe_aiida_error
+from aiida_agents.tools._errors import describe_aiida_error
 
 logger = logging.getLogger(__name__)
 

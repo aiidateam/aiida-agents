@@ -1,4 +1,4 @@
-"""Shared ORM helpers for the MCP tools."""
+"""Shared ORM helpers for the surface-agnostic tool functions."""
 
 from __future__ import annotations
 

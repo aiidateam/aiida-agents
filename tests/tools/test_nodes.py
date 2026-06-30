@@ -1,4 +1,4 @@
-"""Tests for ``aiida_agents.mcp.tools.nodes``.
+"""Tests for ``aiida_agents.tools.nodes``.
 
 These tools wrap the ORM thinly, so the tests target only what is *ours*: the
 ``node_type`` mapping (both the alias and substring-fallback branches), the
@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 from aiida import orm
 
-from aiida_agents.mcp.tools.nodes import get_node_inputs, get_node_outputs, query_nodes
+from aiida_agents.tools.nodes import get_node_inputs, get_node_outputs, query_nodes
 
 
 @pytest.mark.usefixtures("add_calc", "multiply_add_workchain")

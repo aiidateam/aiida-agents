@@ -1,4 +1,9 @@
-"""MCP tool for submitting AiiDA workflows."""
+"""Surface-agnostic tool for submitting AiiDA workflows.
+
+Failures raise ``SubmissionError`` / ``SubmissionInputError`` (no surface
+exception), which each surface adapts. Not registered on the MCP server: a write
+goes only through the HITL-gated agent (ADR-08), which imports it directly.
+"""
 
 from __future__ import annotations
 
@@ -10,12 +15,28 @@ from aiida.common.exceptions import MissingEntryPointError
 from aiida.engine import CalcJob, Process, submit
 from aiida.manage import get_manager
 from aiida.plugins.entry_point import load_entry_point
-from fastmcp.exceptions import ToolError
 
-from aiida_agents.mcp._types import SubmitResult
-
+from ._types import SubmitResult
 
 logger = logging.getLogger(__name__)
+
+
+class SubmissionError(Exception):
+    """A workflow submission could not be completed.
+
+    Not an ``AiidaException``: it carries its own submission-specific message,
+    not the generic node-lookup hints ``describe_aiida_error`` would add.
+    """
+
+
+class SubmissionInputError(SubmissionError):
+    """Inputs could not be resolved or failed the process spec.
+
+    Carries a model-facing message and is raised *before* anything is written
+    to the database, so the caller can route it back to the agent as a
+    correctable error (or show it to the user) without leaving orphan nodes.
+    """
+
 
 # Node types a bare Python value may be wrapped into. A value is wrapped only
 # into a type it can faithfully represent: ``int`` widens to ``Float`` (an int
@@ -53,7 +74,7 @@ def _load_process_class(entry_point: str) -> type[Process]:
         except MissingEntryPointError:
             continue
     msg = f"Entry point not found: {entry_point!r}"
-    raise ToolError(msg)
+    raise SubmissionInputError(msg)
 
 
 def _resolve_node_reference(ref: dict[str, Any], port_name: str) -> orm.Node:
@@ -72,13 +93,14 @@ def _resolve_node_reference(ref: dict[str, Any], port_name: str) -> orm.Node:
         The loaded AiiDA node.
 
     Raises:
-        ToolError: If the reference form is unrecognised or the node is not found.
+        SubmissionInputError: If the reference form is unrecognised or the node
+            is not found.
     """
     if "pk" in ref:
         try:
             return orm.load_node(ref["pk"])
         except Exception as exc:
-            raise ToolError(
+            raise SubmissionInputError(
                 f"No node found with pk={ref['pk']!r} for input {port_name!r}"
             ) from exc
 
@@ -86,7 +108,7 @@ def _resolve_node_reference(ref: dict[str, Any], port_name: str) -> orm.Node:
         try:
             return orm.load_node(ref["uuid"])
         except Exception as exc:
-            raise ToolError(
+            raise SubmissionInputError(
                 f"No node found with uuid={ref['uuid']!r} for input {port_name!r}"
             ) from exc
 
@@ -94,12 +116,12 @@ def _resolve_node_reference(ref: dict[str, Any], port_name: str) -> orm.Node:
         try:
             return orm.load_code(ref["label"])
         except Exception as exc:
-            raise ToolError(
+            raise SubmissionInputError(
                 f"No Code found with label={ref['label']!r} for input {port_name!r}. "
                 f"Use the format 'name@computer', e.g. 'bash@localhost'."
             ) from exc
 
-    raise ToolError(
+    raise SubmissionInputError(
         f"Unrecognised node reference for input {port_name!r}: {ref!r}. "
         f'Use one of: {{"pk": N}}, {{"uuid": "..."}}, {{"label": "name@computer"}}.'
     )
@@ -143,7 +165,7 @@ def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
     Reference-only ports (e.g. ``code``)
         Ports whose ``valid_type`` is not a primitive-backed node (``Code``,
         ``StructureData``, ``RemoteData``, ...) *require* an explicit reference
-        dict. Passing a bare primitive raises a clear ``ToolError``.
+        dict. Passing a bare primitive raises a clear ``SubmissionInputError``.
 
     Only top-level ports are resolved. A nested input namespace (e.g.
     ``pw.parameters`` on a real workchain) is passed through unchanged, so this
@@ -160,8 +182,8 @@ def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
         ``run_get_node()``.
 
     Raises:
-        ToolError: If a reference cannot be resolved or a reference-only port
-            receives a bare primitive.
+        SubmissionInputError: If a reference cannot be resolved or a
+            reference-only port receives a bare primitive.
     """
     process_class = _load_process_class(entry_point)
     spec = process_class.spec()
@@ -192,7 +214,7 @@ def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
 
         # Ports that can't be built from a bare value require an explicit reference
         if _is_reference_type(expected_types):
-            raise ToolError(
+            raise SubmissionInputError(
                 f"Input {name!r} expects a node reference, not a plain value. "
                 f'Use one of: {{"pk": N}}, {{"uuid": "..."}}, '
                 f'{{"label": "name@computer"}}.'
@@ -248,15 +270,6 @@ def _format_resolved_inputs(resolved: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-class SubmissionInputError(Exception):
-    """Inputs could not be resolved or failed the process spec.
-
-    Carries a model-facing message and is raised *before* anything is written
-    to the database, so the caller can route it back to the agent as a
-    correctable error (or show it to the user) without leaving orphan nodes.
-    """
-
-
 def _prepare_submission(
     entry_point: str, inputs: dict[str, Any]
 ) -> tuple[type[Process], dict[str, Any]]:
@@ -285,8 +298,8 @@ def _prepare_submission(
     """
     try:
         resolved = _resolve_inputs(entry_point, inputs)
-    except ToolError as exc:
-        raise SubmissionInputError(str(exc)) from exc
+    except SubmissionInputError:
+        raise  # already a clean, model-facing message; don't re-wrap it
     except Exception as exc:
         raise SubmissionInputError(f"Could not build inputs: {exc}") from exc
 
@@ -338,11 +351,12 @@ def _run_submission(
     cross-thread SQLAlchemy error.
 
     Raises:
-        ToolError: If the profile has no broker or the engine rejects submission.
+        SubmissionError: If the profile has no broker or the engine rejects
+            submission.
     """
     profile = get_manager().get_profile()
     if profile is None or not profile.process_control_backend:
-        raise ToolError(
+        raise SubmissionError(
             "This profile has no broker, so the agent cannot submit a workflow. "
             "Use a profile with a broker and a running daemon: the ZMQ broker "
             "needs no system services (it bundles into the daemon), so "
@@ -352,7 +366,7 @@ def _run_submission(
     try:
         node = submit(process_class, **resolved)
     except Exception as exc:
-        raise ToolError(f"Submission failed: {exc}") from exc
+        raise SubmissionError(f"Submission failed: {exc}") from exc
 
     logger.info("submitted %s → pk=%d", entry_point, node.pk)
 
@@ -395,11 +409,9 @@ def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
         A ``SubmitResult`` with the new process PK, UUID, and initial state.
 
     Raises:
-        ToolError: If inputs fail to resolve/validate or submission fails.
+        SubmissionInputError: If inputs fail to resolve or validate (correctable
+            by the caller; nothing is written).
+        SubmissionError: If submission fails (e.g. the profile has no broker).
     """
-    try:
-        process_class, resolved = _prepare_submission(entry_point, inputs)
-    except SubmissionInputError as exc:
-        raise ToolError(str(exc)) from exc
-
+    process_class, resolved = _prepare_submission(entry_point, inputs)
     return _run_submission(entry_point, process_class, resolved)

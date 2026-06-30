@@ -1,4 +1,4 @@
-"""MCP tools for AiiDA process nodes."""
+"""Surface-agnostic tools for inspecting AiiDA process nodes."""
 
 from __future__ import annotations
 
@@ -6,11 +6,10 @@ import logging
 import typing as t
 
 from aiida import orm
-from fastmcp import FastMCP
 
-from .._orm import WrongNodeType, load_node
-from .._types import Identifier, ProcessRecord, ProcessStatus
-from .._errors import register_tool
+from ._orm import WrongNodeType, load_node
+from ._types import Identifier, ProcessRecord, ProcessStatus
+
 
 logger = logging.getLogger(__name__)
 
@@ -73,9 +72,3 @@ def list_processes(limit: int = 10) -> list[ProcessRecord]:
     ]
     logger.debug("list_processes: returned %d records", len(records))
     return records
-
-
-def register(mcp: FastMCP) -> None:
-    """Register process tools on the MCP server."""
-    register_tool(mcp, get_process_status)
-    register_tool(mcp, list_processes)
