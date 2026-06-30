@@ -3,20 +3,29 @@
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import logging
+import sys
+import threading
+import time
 from typing import Any
 
 from pydantic_ai import Agent
+from pydantic_ai.messages import ModelMessage
 from pydantic_ai.tools import DeferredToolRequests
 
 logger = logging.getLogger(__name__)
 
 
-async def ask(agent: Agent, question: str) -> Any:  # pragma: no cover
+async def ask(
+    agent: Agent,
+    question: str,
+    message_history: list[ModelMessage] | None = None,
+) -> Any:  # pragma: no cover
     """Run a single query through the agent, returning the result."""
     logger.info("agent query: %s", question)
-    return await agent.run(question)
+    return await agent.run(question, message_history=message_history)
 
 
 def _parse_args(args: str | dict[str, Any] | None) -> dict[str, Any]:
@@ -42,6 +51,10 @@ _MAX_APPROVAL_ROUNDS = 10
 # loaded process class, and its resolved inputs. The latter two are None for any
 # non-submit approval tool (shown with raw args, not executable out of band).
 _Preview = tuple[Any, Any, dict[str, Any] | None]
+
+# Keep only the last N messages of context per turn so the window does not grow
+# without bound across a long session.
+_MAX_HISTORY = 20
 
 
 def _triage_submissions(
@@ -101,7 +114,11 @@ def _print_previews(previews: list[_Preview]) -> None:  # pragma: no cover
         print(f"   Inputs (resolved):\n{_format_resolved_inputs(resolved)}")
 
 
-def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
+def _handle_deferred(
+    agent: Agent,
+    result: Any,
+    history: list[ModelMessage],
+) -> list[ModelMessage]:  # pragma: no cover
     """Confirm and run pending submissions, denying invalid ones to the model.
 
     Each round: invalid submissions are denied straight back to the model so it
@@ -112,6 +129,13 @@ def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
     (reusing the default user / nodes the preview bound to the main-thread
     session) raises a cross-thread SQLAlchemy error. Only confirmed, valid inputs
     reach the database (ADR-08, docs/adr/08-human-in-the-loop-before-writes.md).
+
+    Returns the message history to carry into the next turn. A submission is run
+    out of band, so its deferred approval call stays unresolved in ``result``'s
+    messages; returning ``result.all_messages()`` there would carry an unanswered
+    tool call that pydantic-ai rejects on the next turn. The pre-turn ``history``
+    is returned instead, except on the all-denied path that ends in a normal text
+    answer (where the deferred calls were resolved via ``build_results``).
     """
     from aiida_agents.tools.submit import _run_submission
 
@@ -122,8 +146,8 @@ def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
         if previews:
             _print_previews(previews)
             if input("\nProceed? [y/N]: ").strip().lower() != "y":
-                print("Cancelled — nothing was submitted.")
-                return
+                print("Cancelled - nothing was submitted.")
+                return history
             for call, process_class, resolved in previews:
                 if process_class is None or resolved is None:
                     print(
@@ -140,10 +164,10 @@ def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
                     f"\n✅ Submitted {res['workflow']}: "
                     f"pk={res['pk']}, state={res['state']}"
                 )
-            return
+            return history
 
         if not auto:
-            return
+            return history
 
         # Only invalid submissions this round: deny them back to the model so it
         # corrects its own inputs, then re-run. No DB write happens on the worker
@@ -159,13 +183,42 @@ def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
             )
         except Exception as exc:
             print(f"\n❌ Error: {exc}")
-            return
+            return history
 
         if not isinstance(result.output, DeferredToolRequests):
             print(f"Agent: {result.output}")
-            return
+            messages: list[ModelMessage] = result.all_messages()
+            return messages
 
     print("\n⚠️  Too many correction rounds; stopping without submitting.")
+    return history
+
+
+def _spinner(stop: threading.Event) -> None:  # pragma: no cover
+    """Animate a spinner on stdout until stop is set."""
+    for frame in itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]):
+        if stop.is_set():
+            break
+        sys.stdout.write(f"\r{frame} thinking...")
+        sys.stdout.flush()
+        time.sleep(0.1)
+    sys.stdout.write("\r" + " " * 20 + "\r")
+    sys.stdout.flush()
+
+
+def _read_input() -> str:  # pragma: no cover
+    """Read one user turn, allowing line continuation with a trailing backslash."""
+    lines = []
+    prompt = "You: "
+    while True:
+        line = input(prompt)
+        if line.endswith("\\"):
+            lines.append(line[:-1])
+            prompt = "... "
+        else:
+            lines.append(line)
+            break
+    return "\n".join(lines)
 
 
 def main() -> None:  # pragma: no cover
@@ -179,22 +232,44 @@ def main() -> None:  # pragma: no cover
     load_profile()
     agent = get_agent()
 
-    print(f"AiiDA Agent [{settings.provider}:{settings.model}] - type 'quit' to exit\n")
+    print(
+        f"AiiDA Agent [{settings.provider}:{settings.model}] - "
+        "type 'quit' to exit, '/clear' to reset memory\n"
+    )
+
+    history: list[ModelMessage] = []
 
     while True:
         try:
-            question = input("You: ").strip()
+            question = _read_input().strip()
         except (KeyboardInterrupt, EOFError):
             break
 
         if not question or question.lower() in ("quit", "exit", "q"):
             break
 
+        if question.lower() == "/clear":
+            history = []
+            print("Memory cleared.\n")
+            continue
+
+        stop = threading.Event()
+        spinner_thread = threading.Thread(target=_spinner, args=(stop,), daemon=True)
+        spinner_thread.start()
+
         try:
-            result = asyncio.run(ask(agent, question))
-            if isinstance(result.output, DeferredToolRequests):
-                _handle_deferred(agent, result)
-            else:
-                print(f"Agent: {result.output}")
+            result = asyncio.run(ask(agent, question, history[-_MAX_HISTORY:] or None))
         except Exception as exc:
+            stop.set()
+            spinner_thread.join()
             print(f"❌ Error: {exc}")
+            continue
+
+        stop.set()
+        spinner_thread.join()
+
+        if isinstance(result.output, DeferredToolRequests):
+            history = _handle_deferred(agent, result, history)
+        else:
+            print(f"Agent: {result.output}")
+            history = result.all_messages()
