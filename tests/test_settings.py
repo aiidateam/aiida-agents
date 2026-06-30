@@ -39,8 +39,20 @@ from aiida_agents._settings import (
 _GROUP_DEFAULTS = [
     pytest.param(
         ModelSettings,
-        ("AIIDA_AGENTS_PROVIDER", "AIIDA_AGENTS_MODEL", "AIIDA_AGENTS_BASE_URL"),
-        {"provider": "ollama", "model": "qwen3.5:2b", "base_url": None},
+        (
+            "AIIDA_AGENTS_PROVIDER",
+            "AIIDA_AGENTS_MODEL",
+            "AIIDA_AGENTS_BASE_URL",
+            "AIIDA_AGENTS_MAX_TOKENS",
+            "AIIDA_AGENTS_CONTEXT_LENGTH",
+        ),
+        {
+            "provider": "ollama",
+            "model": "qwen3.5:2b",
+            "base_url": None,
+            "max_tokens": 8192,
+            "context_length": None,
+        },
         id="model",
     ),
     pytest.param(
@@ -143,6 +155,20 @@ def test_falls_back_to_declared_defaults(
             "-1",
             "greater_than_equal",
             id="tool-retries-negative",
+        ),
+        pytest.param(
+            ModelSettings,
+            "AIIDA_AGENTS_MAX_TOKENS",
+            "0",
+            "greater_than",
+            id="max-tokens-zero",
+        ),
+        pytest.param(
+            ModelSettings,
+            "AIIDA_AGENTS_CONTEXT_LENGTH",
+            "0",
+            "greater_than",
+            id="context-length-zero",
         ),
     ],
 )
@@ -337,3 +363,50 @@ def test_does_not_warn_on_recognized_keys(
 
     for key in ("AIIDA_AGENTS_PROVIDER", "AIIDA_AGENTS_PORT", "OLLAMA_BASE_URL"):
         assert key not in caplog.text
+
+
+# Cross-field check: max_tokens must fit inside the Ollama context window.
+
+
+@pytest.mark.parametrize(
+    ("max_tokens", "context_length", "raises"),
+    [
+        pytest.param(8192, 4096, True, id="output-exceeds-window"),
+        pytest.param(4096, 4096, True, id="output-equals-window"),
+        pytest.param(2048, 8192, False, id="output-fits-window"),
+        pytest.param(8192, None, False, id="no-context-length-set"),
+    ],
+)
+def test_output_budget_must_fit_context_window(
+    max_tokens: int,
+    context_length: int | None,
+    raises: bool,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``max_tokens`` must be strictly smaller than a set ``context_length``."""
+    monkeypatch.chdir(tmp_path)
+    kwargs: dict[str, object] = {"provider": "ollama", "max_tokens": max_tokens}
+    if context_length is not None:
+        kwargs["context_length"] = context_length
+    if raises:
+        with pytest.raises(ValidationError, match="context_length"):
+            ModelSettings(**kwargs)  # type: ignore[arg-type]
+    else:
+        ModelSettings(**kwargs)  # type: ignore[arg-type]
+
+
+def test_context_length_on_non_ollama_provider_warns(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """``context_length`` is Ollama-only; setting it elsewhere warns, not errors."""
+    monkeypatch.chdir(tmp_path)
+    with caplog.at_level(logging.WARNING, logger="aiida_agents._settings"):
+        settings = ModelSettings(
+            provider="openai", max_tokens=8192, context_length=4096
+        )
+    assert settings.context_length == 4096  # kept, just unused
+    assert "context_length" in caplog.text.lower()
+    assert "ollama" in caplog.text.lower()

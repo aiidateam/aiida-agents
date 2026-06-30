@@ -130,6 +130,68 @@ def test_get_model_rejects_bad_config(
 
 
 # ---------------------------------------------------------------------------
+# Token budget: max_tokens (all providers) and context_length (Ollama num_ctx)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("provider", "env"),
+    [
+        ("ollama", {}),
+        ("openai", {"OPENAI_API_KEY": "x"}),
+        ("anthropic", {"ANTHROPIC_API_KEY": "x"}),
+        (
+            "openai-compatible",
+            {
+                "AIIDA_AGENTS_BASE_URL": "https://api.deepseek.com/v1",
+                "AIIDA_AGENTS_API_KEY": "x",
+            },
+        ),
+    ],
+)
+def test_get_model_applies_max_tokens(
+    provider: str,
+    env: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The output cap reaches every provider's model settings (all 4 branches)."""
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", provider)
+    monkeypatch.setenv("AIIDA_AGENTS_MAX_TOKENS", "4242")
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    model = get_model()
+    assert model.settings is not None
+    assert model.settings["max_tokens"] == 4242
+
+
+def test_get_model_sets_ollama_num_ctx_from_context_length(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``context_length`` is sent to Ollama as the ``num_ctx`` body field."""
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    model = get_model(
+        model_settings=ModelSettings(
+            provider="ollama", context_length=16384, max_tokens=8192
+        )
+    )
+    assert isinstance(model, OpenAIChatModel)
+    assert model.settings is not None
+    assert model.settings["extra_body"] == {"num_ctx": 16384}
+
+
+def test_get_model_omits_num_ctx_when_context_length_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With no ``context_length``, no ``num_ctx`` is sent (Ollama's default holds)."""
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    model = get_model(model_settings=ModelSettings(provider="ollama"))
+    assert isinstance(model, OpenAIChatModel)
+    assert model.settings is not None
+    assert "extra_body" not in model.settings
+
+
+# ---------------------------------------------------------------------------
 # Dependency injection
 # ---------------------------------------------------------------------------
 
