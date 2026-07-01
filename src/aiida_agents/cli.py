@@ -3,19 +3,22 @@
 from __future__ import annotations
 
 import asyncio
-import itertools
 import json
 import logging
-import sys
-import threading
-import time
 from typing import Any
 
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.tools import DeferredToolRequests
+from rich.console import Console
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 
 async def ask(
@@ -52,9 +55,22 @@ _MAX_APPROVAL_ROUNDS = 10
 # non-submit approval tool (shown with raw args, not executable out of band).
 _Preview = tuple[Any, Any, dict[str, Any] | None]
 
-# Keep only the last N messages of context per turn so the window does not grow
-# without bound across a long session.
-_MAX_HISTORY = 20
+
+def _cap_history(messages: list[ModelMessage], max_turns: int) -> list[ModelMessage]:
+    """Trim ``messages`` to the last ``max_turns`` user turns.
+
+    A user turn starts with a ``ModelRequest`` carrying a ``UserPromptPart``;
+    tool call/return rounds live inside a turn, so cutting on these boundaries
+    never splits a tool-call/return pair. A raw ``messages[-N:]`` slice can,
+    and providers then reject the unpaired ``tool_use``/``tool_result``.
+    """
+    starts = [
+        i
+        for i, m in enumerate(messages)
+        if isinstance(m, ModelRequest)
+        and any(isinstance(p, UserPromptPart) for p in m.parts)
+    ]
+    return messages[starts[-max_turns] :] if len(starts) > max_turns else messages
 
 
 def _triage_submissions(
@@ -130,12 +146,12 @@ def _handle_deferred(
     session) raises a cross-thread SQLAlchemy error. Only confirmed, valid inputs
     reach the database (ADR-08, docs/adr/08-human-in-the-loop-before-writes.md).
 
-    Returns the message history to carry into the next turn. A submission is run
-    out of band, so its deferred approval call stays unresolved in ``result``'s
-    messages; returning ``result.all_messages()`` there would carry an unanswered
-    tool call that pydantic-ai rejects on the next turn. The pre-turn ``history``
-    is returned instead, except on the all-denied path that ends in a normal text
-    answer (where the deferred calls were resolved via ``build_results``).
+    Returns the message history to carry into the next turn. Submissions run out
+    of band (not through pydantic-ai), so it never records their tool returns; we
+    splice each approval's outcome back in as a ``ToolReturnPart`` before
+    returning, which keeps the submission in context and leaves no unanswered
+    tool call for pydantic-ai to reject next turn. Cancelling or exhausting the
+    retry budget returns the pre-turn ``history`` unchanged.
     """
     from aiida_agents.tools.submit import _run_submission
 
@@ -148,23 +164,51 @@ def _handle_deferred(
             if input("\nProceed? [y/N]: ").strip().lower() != "y":
                 print("Cancelled - nothing was submitted.")
                 return history
+
+            # Outcome per approval tool-call id. Auto-denied invalid submissions
+            # were never executed, so they carry their denial message.
+            outcomes: dict[str, Any] = {
+                call_id: {"rejected": denied.message}
+                for call_id, denied in auto.items()
+            }
             for call, process_class, resolved in previews:
                 if process_class is None or resolved is None:
                     print(
                         f"   Skipping {call.tool_name}: not an executable submission."
                     )
+                    outcomes[call.tool_call_id] = {"skipped": call.tool_name}
                     continue
                 entry_point = _parse_args(call.args).get("entry_point", "")
                 try:
                     res = _run_submission(entry_point, process_class, resolved)
                 except Exception as exc:
                     print(f"\n❌ Submission failed: {exc}")
+                    outcomes[call.tool_call_id] = {"error": str(exc)}
                     continue
                 print(
                     f"\n✅ Submitted {res['workflow']}: "
                     f"pk={res['pk']}, state={res['state']}"
                 )
-            return history
+                outcomes[call.tool_call_id] = res
+
+            # Splice each approval's outcome back as its tool return so the
+            # submission survives in history and no unanswered tool call is left
+            # to reject the next turn (the calls ran out of band, so pydantic-ai
+            # never recorded returns itself).
+            updated: list[ModelMessage] = result.all_messages()
+            updated.append(
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name=call.tool_name,
+                            content=outcomes[call.tool_call_id],
+                            tool_call_id=call.tool_call_id,
+                        )
+                        for call in pending.approvals
+                    ]
+                )
+            )
+            return updated
 
         if not auto:
             return history
@@ -194,18 +238,6 @@ def _handle_deferred(
     return history
 
 
-def _spinner(stop: threading.Event) -> None:  # pragma: no cover
-    """Animate a spinner on stdout until stop is set."""
-    for frame in itertools.cycle(["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]):
-        if stop.is_set():
-            break
-        sys.stdout.write(f"\r{frame} thinking...")
-        sys.stdout.flush()
-        time.sleep(0.1)
-    sys.stdout.write("\r" + " " * 20 + "\r")
-    sys.stdout.flush()
-
-
 def _read_input() -> str:  # pragma: no cover
     """Read one user turn, allowing line continuation with a trailing backslash."""
     lines = []
@@ -225,10 +257,15 @@ def main() -> None:  # pragma: no cover
     """Interactive REPL for the AiiDA agent."""
     from aiida import load_profile
     from aiida_agents.agents import get_agent
-    from aiida_agents._settings import ModelSettings, warn_on_unrecognized_settings
+    from aiida_agents._settings import (
+        AgentSettings,
+        ModelSettings,
+        warn_on_unrecognized_settings,
+    )
 
     warn_on_unrecognized_settings()
     settings = ModelSettings()
+    agent_cfg = AgentSettings()
     load_profile()
     agent = get_agent()
 
@@ -253,20 +290,18 @@ def main() -> None:  # pragma: no cover
             print("Memory cleared.\n")
             continue
 
-        stop = threading.Event()
-        spinner_thread = threading.Thread(target=_spinner, args=(stop,), daemon=True)
-        spinner_thread.start()
-
         try:
-            result = asyncio.run(ask(agent, question, history[-_MAX_HISTORY:] or None))
+            with console.status("[dim]thinking…[/]", spinner="dots"):
+                result = asyncio.run(
+                    ask(
+                        agent,
+                        question,
+                        _cap_history(history, agent_cfg.history_max_turns) or None,
+                    )
+                )
         except Exception as exc:
-            stop.set()
-            spinner_thread.join()
             print(f"❌ Error: {exc}")
             continue
-
-        stop.set()
-        spinner_thread.join()
 
         if isinstance(result.output, DeferredToolRequests):
             history = _handle_deferred(agent, result, history)

@@ -134,6 +134,11 @@ class AgentSettings(_Base):
     # error aborts immediately); a negative value is meaningless, so reject it.
     tool_retries: int = Field(default=3, ge=0)
 
+    # How many recent user turns of conversation the REPL replays as context per
+    # query. Capped on turn boundaries (never mid tool-call/return) so the window
+    # cannot grow without bound across a long session; must keep at least one.
+    history_max_turns: int = Field(default=10, ge=1)
+
 
 class OllamaSettings(_Base):
     """Local Ollama server endpoint.

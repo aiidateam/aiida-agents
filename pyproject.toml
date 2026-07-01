@@ -26,6 +26,7 @@ dependencies = [
     "fastmcp>=3.0.0",
     "pydantic-ai-slim[openai,anthropic]>=0.1",
     "pydantic-settings>=2.14.1",
+    "rich>=13",
     "typing-extensions>=4.12",
     "uvicorn>=0.33",
 ]

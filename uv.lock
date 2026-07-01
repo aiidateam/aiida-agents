@@ -18,6 +18,7 @@ dependencies = [
     { name = "fastmcp" },
     { name = "pydantic-ai-slim", extra = ["anthropic", "openai"] },
     { name = "pydantic-settings" },
+    { name = "rich" },
     { name = "typing-extensions" },
     { name = "uvicorn" },
 ]
@@ -68,6 +69,7 @@ requires-dist = [
     { name = "pydantic-settings", specifier = ">=2.14.1" },
     { name = "pytest", marker = "extra == 'tests'" },
     { name = "pytest-cov", marker = "extra == 'tests'" },
+    { name = "rich", specifier = ">=13" },
     { name = "ruff", marker = "extra == 'lint'" },
     { name = "ruff", marker = "extra == 'pre-commit'" },
     { name = "sentence-transformers", marker = "extra == 'rag-fallback'", specifier = ">=5.5.1" },
