@@ -1,12 +1,13 @@
 """Tests for the shared model factory (agents/_models.py).
 
-Pure unit tests — no agent construction, no fixtures, no LLM calls.
+Pure unit tests — no agent construction, no AiiDA fixtures, no LLM calls.
 One parametrized row per provider, so adding a provider is a one-line
 change rather than a new test function.
 """
 
 from __future__ import annotations
 
+import pathlib
 from collections.abc import Callable
 from typing import Any, Literal
 
@@ -18,6 +19,23 @@ from pydantic_ai.models.openai import OpenAIChatModel
 
 from aiida_agents._settings import ModelSettings, OllamaSettings
 from aiida_agents.agents._models import get_model
+
+# OpenRouter model ids are ``vendor/model``; its provider splits on ``/`` to pick
+# a model profile, so any test that builds an OpenRouter model needs a real id,
+# not the ollama-style default (``qwen3.5:2b``), which fails to unpack.
+_OPENROUTER_MODEL = "anthropic/claude-sonnet-4-6"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dotenv(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run each test in an empty dir so a stray repo ``.env`` can't leak in.
+
+    Otherwise a dogfooding ``.env`` at the repo root (e.g. one setting a valid
+    ``AIIDA_AGENTS_MODEL``) silently supplies config and masks defaults-based
+    failures that CI, running with no ``.env``, would hit.
+    """
+    monkeypatch.chdir(tmp_path)
+
 
 # ---------------------------------------------------------------------------
 # Provider selection
@@ -38,7 +56,7 @@ _PROVIDER_CASES = [
     ),
     pytest.param(
         "openrouter",
-        {"OPENROUTER_API_KEY": "x"},
+        {"OPENROUTER_API_KEY": "x", "AIIDA_AGENTS_MODEL": _OPENROUTER_MODEL},
         OpenAIChatModel,
         "https://openrouter.ai/api/v1",
         id="openrouter",
@@ -175,7 +193,10 @@ def test_get_model_rejects_bad_config(
         ("ollama", {}),
         ("openai", {"OPENAI_API_KEY": "x"}),
         ("anthropic", {"ANTHROPIC_API_KEY": "x"}),
-        ("openrouter", {"OPENROUTER_API_KEY": "x"}),
+        (
+            "openrouter",
+            {"OPENROUTER_API_KEY": "x", "AIIDA_AGENTS_MODEL": _OPENROUTER_MODEL},
+        ),
         (
             "openai-compatible",
             {
@@ -233,14 +254,24 @@ def test_get_model_omits_num_ctx_when_context_length_unset(
 
 
 @pytest.mark.parametrize(
-    ("provider", "key_field", "env_var"),
+    ("provider", "key_field", "env_var", "model_id"),
     [
-        pytest.param("openai", "openai_api_key", "OPENAI_API_KEY", id="openai"),
         pytest.param(
-            "anthropic", "anthropic_api_key", "ANTHROPIC_API_KEY", id="anthropic"
+            "openai", "openai_api_key", "OPENAI_API_KEY", "gpt-4o", id="openai"
         ),
         pytest.param(
-            "openrouter", "openrouter_api_key", "OPENROUTER_API_KEY", id="openrouter"
+            "anthropic",
+            "anthropic_api_key",
+            "ANTHROPIC_API_KEY",
+            "claude-sonnet-4-6",
+            id="anthropic",
+        ),
+        pytest.param(
+            "openrouter",
+            "openrouter_api_key",
+            "OPENROUTER_API_KEY",
+            _OPENROUTER_MODEL,
+            id="openrouter",
         ),
     ],
 )
@@ -248,6 +279,7 @@ def test_cloud_key_comes_from_settings(
     provider: Literal["openai", "anthropic", "openrouter"],
     key_field: str,
     env_var: str,
+    model_id: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The provider's key is taken from ModelSettings, not the SDK's env fallback.
@@ -260,6 +292,6 @@ def test_cloud_key_comes_from_settings(
     # ``Any`` value type: the single dynamic key is unpacked into ModelSettings,
     # which also has int-typed fields, so a ``dict[str, str]`` would not type-check.
     key_override: dict[str, Any] = {key_field: "secret"}
-    settings = ModelSettings(provider=provider, **key_override)
+    settings = ModelSettings(provider=provider, model=model_id, **key_override)
     model = get_model(model_settings=settings)
     assert getattr(model, "provider").client.api_key == "secret"
