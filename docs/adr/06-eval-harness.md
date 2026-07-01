@@ -24,8 +24,12 @@ and asserts on tool selection and output structure.
 without any LLM call or DB fixture:
 
 - `get_agent()` returns an agent with exactly the expected tool set
-- `get_model()` selects the correct provider class per `AIIDA_AGENTS_PROVIDER`
-- Unsupported providers raise `ValueError` with a clear message
+
+Provider selection lives in `tests/agents/test_models.py`: `get_model()` builds
+the right class per `AIIDA_AGENTS_PROVIDER`, and bad config fails fast — an
+unsupported provider raises `ValidationError` at settings load, while a missing
+`AIIDA_AGENTS_BASE_URL` for `openai-compatible` raises `ValueError` in
+`get_model()`.
 
 **Tool-execution tests** (same module) — use
 `pydantic_ai.models.function.FunctionModel` to script tool calls deterministically,

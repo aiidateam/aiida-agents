@@ -1,96 +1,149 @@
 """Tests for the shared model factory (agents/_models.py).
 
-Pure unit tests — no agent construction, no fixtures, no LLM calls.
-Parametrized over all supported providers so adding a new provider
-means adding one row to the table, not a new test function.
+Pure unit tests — no agent construction, no AiiDA fixtures, no LLM calls.
+One parametrized row per provider, so adding a provider is a one-line
+change rather than a new test function.
 """
 
 from __future__ import annotations
 
+import pathlib
+from collections.abc import Callable
+from typing import Any, Literal
+
 import pytest
 from pydantic import ValidationError
+from pydantic_ai.models import Model
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.models.openai import OpenAIChatModel
 
 from aiida_agents._settings import ModelSettings, OllamaSettings
 from aiida_agents.agents._models import get_model
 
+# OpenRouter model ids are ``vendor/model``; its provider splits on ``/`` to pick
+# a model profile, so any test that builds an OpenRouter model needs a real id,
+# not the ollama-style default (``qwen3.5:2b``), which fails to unpack.
+_OPENROUTER_MODEL = "anthropic/claude-sonnet-4-6"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_dotenv(tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run each test in an empty dir so a stray repo ``.env`` can't leak in.
+
+    Otherwise a dogfooding ``.env`` at the repo root (e.g. one setting a valid
+    ``AIIDA_AGENTS_MODEL``) silently supplies config and masks defaults-based
+    failures that CI, running with no ``.env``, would hit.
+    """
+    monkeypatch.chdir(tmp_path)
+
 
 # ---------------------------------------------------------------------------
 # Provider selection
+#
+# One row per provider: the model class it builds and, where the endpoint is
+# ours to wire, the base URL it resolves to. ``base_url=None`` marks the cloud
+# SDKs whose endpoint is the SDK's own default (asserting it would test the
+# library, not our factory).
 # ---------------------------------------------------------------------------
 
+_PROVIDER_CASES = [
+    pytest.param(
+        "ollama", {}, OpenAIChatModel, "http://localhost:11434/v1", id="ollama"
+    ),
+    pytest.param("openai", {"OPENAI_API_KEY": "x"}, OpenAIChatModel, None, id="openai"),
+    pytest.param(
+        "anthropic", {"ANTHROPIC_API_KEY": "x"}, AnthropicModel, None, id="anthropic"
+    ),
+    pytest.param(
+        "openrouter",
+        {"OPENROUTER_API_KEY": "x", "AIIDA_AGENTS_MODEL": _OPENROUTER_MODEL},
+        OpenAIChatModel,
+        "https://openrouter.ai/api/v1",
+        id="openrouter",
+    ),
+    pytest.param(
+        "openai-compatible",
+        {
+            "AIIDA_AGENTS_BASE_URL": "https://api.deepseek.com/v1",
+            "AIIDA_AGENTS_API_KEY": "x",
+        },
+        OpenAIChatModel,
+        "https://api.deepseek.com/v1",
+        id="openai-compatible",
+    ),
+]
 
-@pytest.mark.parametrize(
-    ("provider", "env", "model_cls"),
-    [
-        ("ollama", {}, OpenAIChatModel),
-        ("openai", {"OPENAI_API_KEY": "x"}, OpenAIChatModel),
-        ("anthropic", {"ANTHROPIC_API_KEY": "x"}, AnthropicModel),
-        (
-            "openai-compatible",
-            {
-                "AIIDA_AGENTS_BASE_URL": "https://api.deepseek.com/v1",
-                "AIIDA_AGENTS_API_KEY": "x",
-            },
-            OpenAIChatModel,
-        ),
-    ],
-)
+
+@pytest.mark.parametrize(("provider", "env", "model_cls", "base_url"), _PROVIDER_CASES)
 def test_get_model_builds_expected_model(
     provider: str,
     env: dict[str, str],
     model_cls: type,
+    base_url: str | None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Each supported provider builds the correct model class."""
-    monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", provider)
-    for key, value in env.items():
-        monkeypatch.setenv(key, value)
-    assert isinstance(get_model(), model_cls)
-
-
-# ---------------------------------------------------------------------------
-# Base URL resolution
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.parametrize(
-    ("provider", "env", "expected_base_url"),
-    [
-        ("ollama", {}, "http://localhost:11434/v1"),
-        (
-            "ollama",
-            {"OLLAMA_BASE_URL": "http://remote:11434/v1"},
-            "http://remote:11434/v1",
-        ),
-        (
-            "openai-compatible",
-            {
-                "AIIDA_AGENTS_BASE_URL": "https://api.deepseek.com/v1",
-                "AIIDA_AGENTS_API_KEY": "x",
-            },
-            "https://api.deepseek.com/v1",
-        ),
-    ],
-)
-def test_get_model_resolves_base_url(
-    provider: str,
-    env: dict[str, str],
-    expected_base_url: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Base URL is read from the correct environment variable per provider."""
+    """Each provider builds the correct model class wired to the right endpoint."""
+    # Clean slate so a developer's own OLLAMA_BASE_URL / AIIDA_AGENTS_BASE_URL
+    # can't leak into the default-endpoint rows.
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     monkeypatch.delenv("AIIDA_AGENTS_BASE_URL", raising=False)
     monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", provider)
     for key, value in env.items():
         monkeypatch.setenv(key, value)
+
     model = get_model()
+
+    assert isinstance(model, model_cls)
+    if base_url is not None:
+        # All endpoint-bearing providers wrap OpenAIChatModel; narrow for ``.provider``.
+        assert isinstance(model, OpenAIChatModel)
+        assert model.provider is not None
+        assert str(getattr(model.provider, "base_url")).rstrip("/") == base_url
+
+
+# ---------------------------------------------------------------------------
+# Ollama endpoint configuration
+# ---------------------------------------------------------------------------
+
+
+def _ollama_from_env(monkeypatch: pytest.MonkeyPatch, base_url: str) -> Model:
+    monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", "ollama")
+    monkeypatch.setenv("OLLAMA_BASE_URL", base_url)
+    return get_model()
+
+
+def _ollama_from_injection(monkeypatch: pytest.MonkeyPatch, base_url: str) -> Model:
+    return get_model(
+        model_settings=ModelSettings(provider="ollama"),
+        ollama_settings=OllamaSettings(base_url=base_url),
+    )
+
+
+@pytest.mark.parametrize(
+    "build_model",
+    [
+        pytest.param(_ollama_from_env, id="from-env"),
+        pytest.param(_ollama_from_injection, id="from-injection"),
+    ],
+)
+def test_ollama_endpoint_is_configurable(
+    build_model: Callable[[pytest.MonkeyPatch, str], Model],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The Ollama endpoint comes from ``OllamaSettings``, via env var or injection.
+
+    Regression guard: the ``ollama`` branch must honor an injected
+    ``OllamaSettings`` rather than re-reading ``OllamaSettings()`` from the
+    environment, so explicit configuration is never silently ignored.
+    """
+    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
+    endpoint = "http://configured:9999/v1"
+
+    model = build_model(monkeypatch, endpoint)
+
     assert isinstance(model, OpenAIChatModel)
-    provider_obj = model.provider
-    assert provider_obj is not None
-    assert str(getattr(provider_obj, "base_url")).rstrip("/") == expected_base_url
+    assert model.provider is not None
+    assert str(getattr(model.provider, "base_url")).rstrip("/") == endpoint
 
 
 # ---------------------------------------------------------------------------
@@ -141,6 +194,10 @@ def test_get_model_rejects_bad_config(
         ("openai", {"OPENAI_API_KEY": "x"}),
         ("anthropic", {"ANTHROPIC_API_KEY": "x"}),
         (
+            "openrouter",
+            {"OPENROUTER_API_KEY": "x", "AIIDA_AGENTS_MODEL": _OPENROUTER_MODEL},
+        ),
+        (
             "openai-compatible",
             {
                 "AIIDA_AGENTS_BASE_URL": "https://api.deepseek.com/v1",
@@ -154,7 +211,7 @@ def test_get_model_applies_max_tokens(
     env: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The output cap reaches every provider's model settings (all 4 branches)."""
+    """The output cap reaches every provider's model settings."""
     monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
     monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", provider)
     monkeypatch.setenv("AIIDA_AGENTS_MAX_TOKENS", "4242")
@@ -192,27 +249,49 @@ def test_get_model_omits_num_ctx_when_context_length_unset(
 
 
 # ---------------------------------------------------------------------------
-# Dependency injection
+# Cloud credential plumbing
 # ---------------------------------------------------------------------------
 
 
-def test_get_model_uses_injected_ollama_settings(
+@pytest.mark.parametrize(
+    ("provider", "key_field", "env_var", "model_id"),
+    [
+        pytest.param(
+            "openai", "openai_api_key", "OPENAI_API_KEY", "gpt-4o", id="openai"
+        ),
+        pytest.param(
+            "anthropic",
+            "anthropic_api_key",
+            "ANTHROPIC_API_KEY",
+            "claude-sonnet-4-6",
+            id="anthropic",
+        ),
+        pytest.param(
+            "openrouter",
+            "openrouter_api_key",
+            "OPENROUTER_API_KEY",
+            _OPENROUTER_MODEL,
+            id="openrouter",
+        ),
+    ],
+)
+def test_cloud_key_comes_from_settings(
+    provider: Literal["openai", "anthropic", "openrouter"],
+    key_field: str,
+    env_var: str,
+    model_id: str,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The Ollama endpoint is taken from an injected ``OllamaSettings``.
+    """The provider's key is taken from ModelSettings, not the SDK's env fallback.
 
-    Regression for the half-DI gap: the ``ollama`` branch used to hard-read
-    ``OllamaSettings()`` from the environment even when ``get_model`` was given
-    explicit configuration, so the endpoint could not be injected.
+    The matching env var is removed first, so a client that still carries the
+    key proves get_model passed it through rather than the SDK reading it from
+    the environment itself.
     """
-    monkeypatch.delenv("OLLAMA_BASE_URL", raising=False)
-    model = get_model(
-        model_settings=ModelSettings(provider="ollama"),
-        ollama_settings=OllamaSettings(base_url="http://injected:9999/v1"),
-    )
-    assert isinstance(model, OpenAIChatModel)
-    provider_obj = model.provider
-    assert provider_obj is not None
-    assert (
-        str(getattr(provider_obj, "base_url")).rstrip("/") == "http://injected:9999/v1"
-    )
+    monkeypatch.delenv(env_var, raising=False)
+    # ``Any`` value type: the single dynamic key is unpacked into ModelSettings,
+    # which also has int-typed fields, so a ``dict[str, str]`` would not type-check.
+    key_override: dict[str, Any] = {key_field: "secret"}
+    settings = ModelSettings(provider=provider, model=model_id, **key_override)
+    model = get_model(model_settings=settings)
+    assert getattr(model, "provider").client.api_key == "secret"

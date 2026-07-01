@@ -12,11 +12,13 @@ the lone exception to the ``AIIDA_AGENTS_`` prefix: it keeps its conventional
 unprefixed ``OLLAMA_BASE_URL`` name so an existing Ollama setup works out of
 the box.
 
-Provider SDK keys (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``) stay on the
-environment rail and are never read here; the SDKs pick them up themselves.
+Cloud provider SDK keys (``OPENAI_API_KEY``, ``ANTHROPIC_API_KEY``,
+``OPENROUTER_API_KEY``) are read here too, under their conventional unprefixed
+names (like ``OLLAMA_BASE_URL``), and the model factory hands the matching one
+to the provider. Like the openai-compatible ``api_key`` they are secrets and
+must never be persisted to a committed config file.
 
-pydantic-settings reads both the process environment and a ``.env`` file, so
-``python-dotenv`` is not a dependency.
+pydantic-settings reads both the process environment and a ``.env`` file.
 """
 
 from __future__ import annotations
@@ -63,7 +65,7 @@ class _Base(BaseSettings):
 # check, so mixed-case input (``Ollama``, ``debug``) is accepted while a
 # genuinely invalid value still fails fast with a ``literal_error``.
 _Provider: TypeAlias = Annotated[
-    Literal["ollama", "openai", "anthropic", "openai-compatible"],
+    Literal["ollama", "openai", "anthropic", "openrouter", "openai-compatible"],
     BeforeValidator(str.lower),
 ]
 _EmbedBackend: TypeAlias = Annotated[
@@ -87,6 +89,19 @@ class ModelSettings(_Base):
     # rail and must never be persisted to a committed config file.
     base_url: str | None = None
     api_key: str = "api-key-not-set"
+
+    # Cloud provider SDK keys, read under their conventional unprefixed names
+    # (not ``AIIDA_AGENTS_*``) so they work in ``.env`` as well as the real
+    # environment. The model factory passes the active provider's key through;
+    # ``None`` lets the SDK fall back to its own env lookup. Secrets: never
+    # persist to a committed config file.
+    openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    anthropic_api_key: str | None = Field(
+        default=None, validation_alias="ANTHROPIC_API_KEY"
+    )
+    openrouter_api_key: str | None = Field(
+        default=None, validation_alias="OPENROUTER_API_KEY"
+    )
 
     # Output cap (all providers). Too small truncates long tool-calling runs.
     max_tokens: int = Field(default=8192, gt=0)
