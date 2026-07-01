@@ -32,15 +32,23 @@ avoiding unnecessary SDK bloat.
 
 ### Provider support
 
-Four providers are supported via `agents/_models.py`, selected at runtime
+Five providers are supported via `agents/_models.py`, selected at runtime
 from `AIIDA_AGENTS_PROVIDER`:
 
-| Provider            | Model class                          | Notes                                                                                             |
-| ------------------- | ------------------------------------ | ------------------------------------------------------------------------------------------------- |
-| `ollama` (default)  | `OpenAIChatModel` + `OllamaProvider` | Local; `OLLAMA_BASE_URL` sets endpoint                                                            |
-| `openai`            | `OpenAIChatModel`                    | Reads `OPENAI_API_KEY`                                                                            |
-| `anthropic`         | `AnthropicModel`                     | Reads `ANTHROPIC_API_KEY`                                                                         |
-| `openai-compatible` | `OpenAIChatModel` + `OpenAIProvider` | Any OpenAI-compatible endpoint (DeepSeek, Together, vLLM, etc.); requires `AIIDA_AGENTS_BASE_URL` |
+| Provider            | Model class                              | Notes                                                                                             |
+| ------------------- | ---------------------------------------- | ------------------------------------------------------------------------------------------------- |
+| `ollama` (default)  | `OpenAIChatModel` + `OllamaProvider`     | Local; `OLLAMA_BASE_URL` sets endpoint                                                            |
+| `openai`            | `OpenAIChatModel`                        | Reads `OPENAI_API_KEY`                                                                            |
+| `anthropic`         | `AnthropicModel`                         | Reads `ANTHROPIC_API_KEY`                                                                         |
+| `openrouter`        | `OpenAIChatModel` + `OpenRouterProvider` | Cloud aggregator: one key for many providers, with built-in failover; reads `OPENROUTER_API_KEY`  |
+| `openai-compatible` | `OpenAIChatModel` + `OpenAIProvider`     | Any OpenAI-compatible endpoint (DeepSeek, Together, vLLM, etc.); requires `AIIDA_AGENTS_BASE_URL` |
+
+`openrouter` reaches any provider's models from a single account and key, which
+is mainly useful for the cloud-vs-local eval study where one would otherwise
+juggle one key per provider. It is cloud-only and routes through a third party,
+so it is never used for sensitive or local data (Ollama stays that path). Its
+OpenAI-compatible surface can drop provider-native features such as prompt
+caching, so direct `anthropic` / `openai` are kept alongside it.
 
 ### Model strategy: local + cloud, dual-path
 
@@ -59,9 +67,10 @@ not a code change.
 ### No module-level side effects
 
 The model is constructed in a `get_model()` factory called from `get_agent()`,
-which is called from `cli.main()` after `load_dotenv()`. Importing the agents
-package is inert — no filesystem access, no environment mutation, no model
-construction at import time.
+which is called from `cli.main()`; configuration (including the provider SDK
+keys) is read there by `ModelSettings`, which pydantic-settings populates from
+the environment and `.env`. Importing the agents package is inert — no
+filesystem access, no environment mutation, no model construction at import time.
 
 ## Consequences
 

@@ -11,6 +11,7 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.ollama import OllamaProvider
 from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.providers.openrouter import OpenRouterProvider
 from pydantic_ai.settings import ModelSettings as PydanticModelSettings
 
 from aiida_agents._settings import ModelSettings, OllamaSettings
@@ -33,6 +34,9 @@ def get_model(
     * ``ollama``: local Ollama server; ``OLLAMA_BASE_URL`` sets the endpoint.
     * ``openai``: OpenAI cloud; reads ``OPENAI_API_KEY``.
     * ``anthropic``: Anthropic cloud; reads ``ANTHROPIC_API_KEY``.
+    * ``openrouter``: OpenRouter cloud aggregator (one key for many providers);
+      reads ``OPENROUTER_API_KEY``. Cloud-only: routes through a third party, so
+      never use it for sensitive or local data.
     * ``openai-compatible``: any OpenAI-compatible endpoint (DeepSeek, Together,
       vLLM, etc.); requires ``AIIDA_AGENTS_BASE_URL``.
 
@@ -45,6 +49,9 @@ def get_model(
             constructed; a pre-built ``model_settings`` would already have
             failed on construction upstream.
         ValueError: If ``openai-compatible`` is selected without ``base_url``.
+        UserError: If ``anthropic`` or ``openrouter`` is selected with no API
+            key resolvable (from settings, ``.env``, or the environment);
+            pydantic-ai's provider raises it at construction.
     """
     cfg = model_settings if model_settings is not None else ModelSettings()
 
@@ -64,14 +71,26 @@ def get_model(
 
     if cfg.provider == "openai":
         return OpenAIChatModel(
-            cfg.model, settings=OpenAIChatModelSettings(max_tokens=cfg.max_tokens)
+            cfg.model,
+            provider=OpenAIProvider(api_key=cfg.openai_api_key),
+            settings=OpenAIChatModelSettings(max_tokens=cfg.max_tokens),
         )
 
     if cfg.provider == "anthropic":
         from pydantic_ai.models.anthropic import AnthropicModel
+        from pydantic_ai.providers.anthropic import AnthropicProvider
 
         return AnthropicModel(
-            cfg.model, settings=PydanticModelSettings(max_tokens=cfg.max_tokens)
+            cfg.model,
+            provider=AnthropicProvider(api_key=cfg.anthropic_api_key),
+            settings=PydanticModelSettings(max_tokens=cfg.max_tokens),
+        )
+
+    if cfg.provider == "openrouter":
+        return OpenAIChatModel(
+            cfg.model,
+            provider=OpenRouterProvider(api_key=cfg.openrouter_api_key),
+            settings=OpenAIChatModelSettings(max_tokens=cfg.max_tokens),
         )
 
     if cfg.provider == "openai-compatible":

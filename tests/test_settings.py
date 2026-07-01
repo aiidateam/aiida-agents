@@ -1,11 +1,11 @@
 """Tests for the centralized settings (aiida_agents/_settings.py).
 
 ``ModelSettings``, ``OllamaSettings``, ``RagSettings``, and ``ServerSettings``
-own the ``AIIDA_AGENTS_*`` configuration and replace the old ``python-dotenv`` +
-``os.getenv`` reads. These tests pin the settings contract: declared defaults,
-the conventional unprefixed ``OLLAMA_BASE_URL`` alias, ``.env`` file loading,
-``str -> int``/``str -> Path`` coercion, case normalization, and failing fast
-at load time on an unsupported provider / embedding backend / log level.
+own the ``AIIDA_AGENTS_*`` configuration. These tests pin the settings contract:
+declared defaults, the conventional unprefixed ``OLLAMA_BASE_URL`` alias,
+``.env`` file loading, ``str -> int``/``str -> Path`` coercion, case
+normalization, and failing fast at load time on an unsupported provider /
+embedding backend / log level.
 
 The tests are parametrized across the settings groups by behavior (defaults,
 fail-fast, normalization, coercion) rather than duplicated per class. Each test
@@ -282,7 +282,7 @@ def test_env_value_is_coerced(
 def test_reads_dot_env_file(
     tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Config is read from a ``.env`` file in the CWD, replacing python-dotenv."""
+    """Config is read from a ``.env`` file in the CWD."""
     monkeypatch.delenv("AIIDA_AGENTS_PROVIDER", raising=False)
     monkeypatch.delenv("AIIDA_AGENTS_MODEL", raising=False)
     (tmp_path / ".env").write_text(
@@ -294,14 +294,51 @@ def test_reads_dot_env_file(
     assert settings.model == "gpt-x"
 
 
-def test_ollama_base_url_uses_unprefixed_alias(
-    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("settings_cls", "env_var", "field", "value"),
+    [
+        pytest.param(
+            OllamaSettings,
+            "OLLAMA_BASE_URL",
+            "base_url",
+            "http://remote:11434/v1",
+            id="ollama-base-url",
+        ),
+        pytest.param(
+            ModelSettings, "OPENAI_API_KEY", "openai_api_key", "sk-x", id="openai-key"
+        ),
+        pytest.param(
+            ModelSettings,
+            "ANTHROPIC_API_KEY",
+            "anthropic_api_key",
+            "sk-x",
+            id="anthropic-key",
+        ),
+        pytest.param(
+            ModelSettings,
+            "OPENROUTER_API_KEY",
+            "openrouter_api_key",
+            "sk-x",
+            id="openrouter-key",
+        ),
+    ],
+)
+def test_unprefixed_alias_is_read_from_env(
+    settings_cls: type[_Base],
+    env_var: str,
+    field: str,
+    value: str,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The endpoint reads ``OLLAMA_BASE_URL``, no ``AIIDA_AGENTS_`` prefix."""
+    """Fields with a conventional unprefixed name read it verbatim, no AIIDA_AGENTS_.
+
+    Covers the Ollama endpoint and the cloud SDK keys: a typo in any
+    ``validation_alias`` would leave the field at its default and break here.
+    """
     monkeypatch.chdir(tmp_path)
-    monkeypatch.delenv("AIIDA_AGENTS_OLLAMA_BASE_URL", raising=False)
-    monkeypatch.setenv("OLLAMA_BASE_URL", "http://remote:11434/v1")
-    assert OllamaSettings().base_url == "http://remote:11434/v1"
+    monkeypatch.setenv(env_var, value)
+    assert getattr(settings_cls(), field) == value
 
 
 def test_ollama_base_url_accepts_field_name_kwarg(
