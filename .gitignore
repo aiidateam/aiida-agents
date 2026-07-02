@@ -142,6 +142,9 @@ celerybeat.pid
 env/
 venv/
 ENV/
+
+# aiida-agents RAG vector store (regenerable via `aiida-agents rag init`)
+.aiida_agents_vector_db/
 env.bak/
 venv.bak/
 

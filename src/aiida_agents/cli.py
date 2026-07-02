@@ -5,8 +5,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from pydantic_ai import Agent
 from pydantic_ai.messages import (
     ModelMessage,
@@ -16,6 +23,7 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.tools import DeferredToolRequests
 from rich.console import Console
+from rich.markdown import Markdown
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -191,6 +199,8 @@ def _handle_deferred(
                 )
                 outcomes[call.tool_call_id] = res
 
+            print()  # separate the submission summary from the next prompt
+
             # Splice each approval's outcome back as its tool return so the
             # submission survives in history and no unanswered tool call is left
             # to reject the next turn (the calls ran out of band, so pydantic-ai
@@ -230,7 +240,7 @@ def _handle_deferred(
             return history
 
         if not isinstance(result.output, DeferredToolRequests):
-            print(f"Agent: {result.output}")
+            _print_agent(result.output)
             messages: list[ModelMessage] = result.all_messages()
             return messages
 
@@ -238,19 +248,56 @@ def _handle_deferred(
     return history
 
 
-def _read_input() -> str:  # pragma: no cover
-    """Read one user turn, allowing line continuation with a trailing backslash."""
-    lines = []
-    prompt = "You: "
-    while True:
-        line = input(prompt)
-        if line.endswith("\\"):
-            lines.append(line[:-1])
-            prompt = "... "
-        else:
-            lines.append(line)
-            break
-    return "\n".join(lines)
+def _history_file() -> Path:
+    """Persistent location for the REPL's input history.
+
+    Follows the XDG base-directory spec so recalled prompts survive across
+    sessions without cluttering ``$HOME``.
+    """
+    data_home = os.environ.get("XDG_DATA_HOME")
+    base = Path(data_home) if data_home else Path.home() / ".local" / "share"
+    return base / "aiida-agents" / "repl-history"
+
+
+def _key_bindings() -> KeyBindings:
+    """Bind Enter to submit and Alt/Esc+Enter to insert a newline.
+
+    prompt_toolkit's multiline default is the reverse (Enter inserts a
+    newline, Meta+Enter submits), which is wrong for a chat REPL where
+    single-line turns dominate. Flipping it keeps the common case a single
+    keystroke while still allowing a multi-line turn on demand.
+    """
+    bindings = KeyBindings()
+
+    @bindings.add("enter")
+    def _submit(event: KeyPressEvent) -> None:  # pragma: no cover
+        event.current_buffer.validate_and_handle()
+
+    @bindings.add("escape", "enter")
+    def _newline(event: KeyPressEvent) -> None:  # pragma: no cover
+        event.current_buffer.insert_text("\n")
+
+    return bindings
+
+
+def _prompt_continuation(width: int, line_number: int, wrap_count: int) -> str:
+    """Continuation prefix for a multi-line turn, padded to the prompt width.
+
+    prompt_toolkit passes the width of the main prompt (``You: ``), so the
+    dotted marker lines wrapped input up under the first line's text.
+    """
+    return "." * (width - 1) + " "
+
+
+def _print_agent(text: str) -> None:  # pragma: no cover
+    """Print an agent reply, blank-line padded so it stands clear of the ``You:``
+    turns on either side: a highlighted label, then the body as markdown so
+    tables and formatting render.
+    """
+    console.print()
+    console.print("Agent:", style="bold green")
+    console.print(Markdown(text))
+    console.print()
 
 
 def main() -> None:  # pragma: no cover
@@ -258,31 +305,52 @@ def main() -> None:  # pragma: no cover
     from aiida import load_profile
     from aiida_agents.agents import get_agent
     from aiida_agents._settings import (
-        AgentSettings,
         ModelSettings,
+        ReplSettings,
         warn_on_unrecognized_settings,
     )
 
     warn_on_unrecognized_settings()
     settings = ModelSettings()
-    agent_cfg = AgentSettings()
+    repl_cfg = ReplSettings()
     load_profile()
     agent = get_agent()
 
+    history_file = _history_file()
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    session: PromptSession[str] = PromptSession(
+        history=FileHistory(str(history_file)),
+        key_bindings=_key_bindings(),
+        multiline=True,
+        vi_mode=repl_cfg.vi_mode,
+    )
+
     print(
         f"AiiDA Agent [{settings.provider}:{settings.model}] - "
-        "type 'quit' to exit, '/clear' to reset memory\n"
+        "type 'quit' to exit, '/clear' to reset memory, "
+        "Esc then Enter (Alt+Enter) for a new line\n"
     )
 
     history: list[ModelMessage] = []
 
     while True:
+        # Ctrl-C aborts the current line (like a shell); Ctrl-D at an empty
+        # prompt exits. prompt_toolkit raises KeyboardInterrupt / EOFError.
         try:
-            question = _read_input().strip()
-        except (KeyboardInterrupt, EOFError):
+            question = session.prompt(
+                HTML("<ansicyan><b>You:</b></ansicyan> "),
+                prompt_continuation=_prompt_continuation,
+            ).strip()
+        except KeyboardInterrupt:
+            continue
+        except EOFError:
             break
 
-        if not question or question.lower() in ("quit", "exit", "q"):
+        # Empty input re-prompts (shell-like); only an explicit word or Ctrl-D exits.
+        if not question:
+            continue
+
+        if question.lower() in ("quit", "exit", "q"):
             break
 
         if question.lower() == "/clear":
@@ -296,9 +364,12 @@ def main() -> None:  # pragma: no cover
                     ask(
                         agent,
                         question,
-                        _cap_history(history, agent_cfg.history_max_turns) or None,
+                        _cap_history(history, repl_cfg.history_max_turns) or None,
                     )
                 )
+        except KeyboardInterrupt:
+            print("(interrupted)")
+            continue
         except Exception as exc:
             print(f"❌ Error: {exc}")
             continue
@@ -306,5 +377,5 @@ def main() -> None:  # pragma: no cover
         if isinstance(result.output, DeferredToolRequests):
             history = _handle_deferred(agent, result, history)
         else:
-            print(f"Agent: {result.output}")
+            _print_agent(result.output)
             history = result.all_messages()

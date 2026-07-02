@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
+from prompt_toolkit.keys import Keys
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -13,7 +16,12 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from aiida_agents.cli import _cap_history
+from aiida_agents.cli import (
+    _cap_history,
+    _history_file,
+    _key_bindings,
+    _prompt_continuation,
+)
 
 
 def _turn(i: int) -> list[ModelMessage]:
@@ -73,3 +81,43 @@ def test_cap_history_returns_input_when_within_budget() -> None:
     """Under the turn budget, the history is returned untouched."""
     messages = [m for i in range(2) for m in _turn(i)]
     assert _cap_history(messages, max_turns=5) is messages
+
+
+@pytest.mark.parametrize(
+    "xdg, expected",
+    [
+        pytest.param(
+            "/custom/data",
+            Path("/custom/data/aiida-agents/repl-history"),
+            id="xdg-set",
+        ),
+        pytest.param(
+            None,
+            Path.home() / ".local" / "share" / "aiida-agents" / "repl-history",
+            id="xdg-unset",
+        ),
+    ],
+)
+def test_history_file_location(
+    monkeypatch: pytest.MonkeyPatch, xdg: str | None, expected: Path
+) -> None:
+    """History lives under ``$XDG_DATA_HOME``, falling back to ``~/.local/share``."""
+    if xdg is None:
+        monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    else:
+        monkeypatch.setenv("XDG_DATA_HOME", xdg)
+    assert _history_file() == expected
+
+
+def test_key_bindings_flip_enter_and_newline() -> None:
+    """Exactly Enter and Esc+Enter are bound (the deliberate flip of
+    prompt_toolkit's multiline default; see ``_key_bindings``). ``Keys.Enter``
+    is the ``ControlM`` alias prompt_toolkit stores for a bare ``"enter"``.
+    """
+    bound = {binding.keys for binding in _key_bindings().bindings}
+    assert bound == {(Keys.Enter,), (Keys.Escape, Keys.Enter)}
+
+
+def test_prompt_continuation_aligns_under_prompt() -> None:
+    """The continuation fills the prompt width so wrapped lines line up under it."""
+    assert _prompt_continuation(len("You: "), 0, 0) == ".... "

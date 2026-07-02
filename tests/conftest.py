@@ -9,6 +9,8 @@ node identity (the pk/uuid they created) rather than against global counts.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from aiida import orm
 from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
@@ -20,6 +22,19 @@ from aiida.workflows.arithmetic.multiply_add import MultiplyAddWorkChain
 # ``core.sqlite_dos`` profile that needs no external services, so the MCP tools
 # run against a real database, not mocks.
 pytest_plugins = ["aiida.tools.pytest_fixtures"]
+
+
+@pytest.fixture(autouse=True)
+def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Run each test from a clean temp directory.
+
+    pydantic-settings reads a ``.env`` from the CWD, so running from the repo
+    root leaks a developer's local ``.env`` (e.g. a cloud provider selected
+    without an exported key) into ``ModelSettings`` / ``get_agent`` and breaks
+    otherwise-hermetic tests. A test that needs a ``.env`` writes its own and
+    chdirs to it, overriding this.
+    """
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.fixture(scope="session")

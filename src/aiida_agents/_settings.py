@@ -149,10 +149,23 @@ class AgentSettings(_Base):
     # error aborts immediately); a negative value is meaningless, so reject it.
     tool_retries: int = Field(default=3, ge=0)
 
+
+class ReplSettings(_Base):
+    """Interactive REPL configuration (``AIIDA_AGENTS_*``).
+
+    Knobs that apply only to the interactive ``aiida-agents`` REPL, not to the
+    agent itself: a one-shot or programmatic run neither replays capped history
+    nor reads key bindings.
+    """
+
     # How many recent user turns of conversation the REPL replays as context per
     # query. Capped on turn boundaries (never mid tool-call/return) so the window
     # cannot grow without bound across a long session; must keep at least one.
     history_max_turns: int = Field(default=10, ge=1)
+
+    # Use vi keybindings for REPL line editing instead of the default emacs
+    # bindings. For users migrating from a vi-based workflow; off by default.
+    vi_mode: bool = False
 
 
 class OllamaSettings(_Base):
@@ -215,6 +228,7 @@ class LoggingSettings(_Base):
 _SETTINGS_GROUPS: tuple[type[_Base], ...] = (
     ModelSettings,
     AgentSettings,
+    ReplSettings,
     OllamaSettings,
     RagSettings,
     ServerSettings,
