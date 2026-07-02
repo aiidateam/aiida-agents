@@ -25,7 +25,7 @@ pytest_plugins = ["aiida.tools.pytest_fixtures"]
 
 
 @pytest.fixture(autouse=True)
-def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolate_cwd(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:  # pyright: ignore[reportUnusedFunction]
     """Run each test from a clean temp directory.
 
     pydantic-settings reads a ``.env`` from the CWD, so running from the repo

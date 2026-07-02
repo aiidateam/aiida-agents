@@ -269,17 +269,21 @@ def _key_bindings() -> KeyBindings:
     """
     bindings = KeyBindings()
 
-    def _submit(event: KeyPressEvent) -> None:  # pragma: no cover
+    # ``# pyright: ignore[reportUnusedFunction]``: the ``@bindings.add`` decorator
+    # registers each handler, so it is used, but a static analyser sees no
+    # reference to the name.
+    @bindings.add("enter")
+    def _submit(
+        event: KeyPressEvent,
+    ) -> None:  # pragma: no cover  # pyright: ignore[reportUnusedFunction]
         event.current_buffer.validate_and_handle()
 
-    def _newline(event: KeyPressEvent) -> None:  # pragma: no cover
+    @bindings.add("escape", "enter")
+    def _newline(
+        event: KeyPressEvent,
+    ) -> None:  # pragma: no cover  # pyright: ignore[reportUnusedFunction]
         event.current_buffer.insert_text("\n")
 
-    # Register imperatively rather than with ``@bindings.add`` so the handlers
-    # are referenced by name; the decorator form reads as an unused function to
-    # static analysers that don't track the registration side effect.
-    bindings.add("enter")(_submit)
-    bindings.add("escape", "enter")(_newline)
     return bindings
 
 
