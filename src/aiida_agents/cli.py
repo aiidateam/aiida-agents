@@ -269,14 +269,17 @@ def _key_bindings() -> KeyBindings:
     """
     bindings = KeyBindings()
 
-    @bindings.add("enter")
     def _submit(event: KeyPressEvent) -> None:  # pragma: no cover
         event.current_buffer.validate_and_handle()
 
-    @bindings.add("escape", "enter")
     def _newline(event: KeyPressEvent) -> None:  # pragma: no cover
         event.current_buffer.insert_text("\n")
 
+    # Register imperatively rather than with ``@bindings.add`` so the handlers
+    # are referenced by name; the decorator form reads as an unused function to
+    # static analysers that don't track the registration side effect.
+    bindings.add("enter")(_submit)
+    bindings.add("escape", "enter")(_newline)
     return bindings
 
 
@@ -327,7 +330,7 @@ def main() -> None:  # pragma: no cover
 
     print(
         f"AiiDA Agent [{settings.provider}:{settings.model}] - "
-        "type 'quit' to exit, '/clear' to reset memory, "
+        "type 'quit' to exit, '/clear' to start a new conversation, "
         "Esc then Enter (Alt+Enter) for a new line\n"
     )
 
@@ -355,7 +358,7 @@ def main() -> None:  # pragma: no cover
 
         if question.lower() == "/clear":
             history = []
-            print("Memory cleared.\n")
+            print("Conversation cleared.\n")
             continue
 
         try:

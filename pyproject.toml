@@ -165,6 +165,10 @@ ignore_missing_imports = true
 # (e.g. in-editor) aligned with the mypy baseline. Its default "recommended"
 # mode floods on `Any` from AiiDA's untyped ORM, which mypy does not flag.
 typeCheckingMode = "standard"
+# reportUnusedFunction fires on decorator-registered functions (pytest fixtures,
+# prompt_toolkit key handlers, future click commands) that are never referenced
+# by name. mypy has no equivalent check, so disable it to stay aligned.
+reportUnusedFunction = false
 
 [tool.pytest.ini_options]
 # Warnings raised by our own code are errors; third-party warnings only show.
