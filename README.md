@@ -15,6 +15,14 @@ Local models are a first-class target, not an afterthought.
 This started as a [Google Summer of Code 2026](https://summerofcode.withgoogle.com/) project under NumFOCUS / AiiDA.
 It is exploratory — we're finding out what works first — but the goal is to grow it into a production-quality tool, not to stop at a prototype.
 
+## Demo
+
+Where we stand at the beginning of July 2026:
+
+<p align="center">
+  <video src="https://github.com/user-attachments/assets/393907f2-2079-4ab7-a5eb-c45c2dcccdd8" width="100%" controls></video>
+</p>
+
 ## Status
 
 **Alpha / work in progress.**
