@@ -19,6 +19,7 @@ from aiida_agents._settings import (
     ModelSettings,
     OllamaSettings,
     RagSettings,
+    ReplSettings,
     ServerSettings,
 )
 
@@ -28,5 +29,6 @@ __all__ = [
     "ModelSettings",
     "OllamaSettings",
     "RagSettings",
+    "ReplSettings",
     "ServerSettings",
 ]

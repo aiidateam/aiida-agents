@@ -5,18 +5,38 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
+from pathlib import Path
 from typing import Any
 
+from prompt_toolkit import PromptSession
+from prompt_toolkit.formatted_text import HTML
+from prompt_toolkit.history import FileHistory
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 from pydantic_ai import Agent
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ToolReturnPart,
+    UserPromptPart,
+)
 from pydantic_ai.tools import DeferredToolRequests
+from rich.console import Console
+from rich.markdown import Markdown
 
 logger = logging.getLogger(__name__)
+console = Console()
 
 
-async def ask(agent: Agent, question: str) -> Any:  # pragma: no cover
+async def ask(
+    agent: Agent,
+    question: str,
+    message_history: list[ModelMessage] | None = None,
+) -> Any:  # pragma: no cover
     """Run a single query through the agent, returning the result."""
     logger.info("agent query: %s", question)
-    return await agent.run(question)
+    return await agent.run(question, message_history=message_history)
 
 
 def _parse_args(args: str | dict[str, Any] | None) -> dict[str, Any]:
@@ -42,6 +62,23 @@ _MAX_APPROVAL_ROUNDS = 10
 # loaded process class, and its resolved inputs. The latter two are None for any
 # non-submit approval tool (shown with raw args, not executable out of band).
 _Preview = tuple[Any, Any, dict[str, Any] | None]
+
+
+def _cap_history(messages: list[ModelMessage], max_turns: int) -> list[ModelMessage]:
+    """Trim ``messages`` to the last ``max_turns`` user turns.
+
+    A user turn starts with a ``ModelRequest`` carrying a ``UserPromptPart``;
+    tool call/return rounds live inside a turn, so cutting on these boundaries
+    never splits a tool-call/return pair. A raw ``messages[-N:]`` slice can,
+    and providers then reject the unpaired ``tool_use``/``tool_result``.
+    """
+    starts = [
+        i
+        for i, m in enumerate(messages)
+        if isinstance(m, ModelRequest)
+        and any(isinstance(p, UserPromptPart) for p in m.parts)
+    ]
+    return messages[starts[-max_turns] :] if len(starts) > max_turns else messages
 
 
 def _triage_submissions(
@@ -101,7 +138,11 @@ def _print_previews(previews: list[_Preview]) -> None:  # pragma: no cover
         print(f"   Inputs (resolved):\n{_format_resolved_inputs(resolved)}")
 
 
-def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
+def _handle_deferred(
+    agent: Agent,
+    result: Any,
+    history: list[ModelMessage],
+) -> list[ModelMessage]:  # pragma: no cover
     """Confirm and run pending submissions, denying invalid ones to the model.
 
     Each round: invalid submissions are denied straight back to the model so it
@@ -112,6 +153,13 @@ def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
     (reusing the default user / nodes the preview bound to the main-thread
     session) raises a cross-thread SQLAlchemy error. Only confirmed, valid inputs
     reach the database (ADR-08, docs/adr/08-human-in-the-loop-before-writes.md).
+
+    Returns the message history to carry into the next turn. Submissions run out
+    of band (not through pydantic-ai), so it never records their tool returns; we
+    splice each approval's outcome back in as a ``ToolReturnPart`` before
+    returning, which keeps the submission in context and leaves no unanswered
+    tool call for pydantic-ai to reject next turn. Cancelling or exhausting the
+    retry budget returns the pre-turn ``history`` unchanged.
     """
     from aiida_agents.tools.submit import _run_submission
 
@@ -122,28 +170,58 @@ def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
         if previews:
             _print_previews(previews)
             if input("\nProceed? [y/N]: ").strip().lower() != "y":
-                print("Cancelled — nothing was submitted.")
-                return
+                print("Cancelled - nothing was submitted.")
+                return history
+
+            # Outcome per approval tool-call id. Auto-denied invalid submissions
+            # were never executed, so they carry their denial message.
+            outcomes: dict[str, Any] = {
+                call_id: {"rejected": denied.message}
+                for call_id, denied in auto.items()
+            }
             for call, process_class, resolved in previews:
                 if process_class is None or resolved is None:
                     print(
                         f"   Skipping {call.tool_name}: not an executable submission."
                     )
+                    outcomes[call.tool_call_id] = {"skipped": call.tool_name}
                     continue
                 entry_point = _parse_args(call.args).get("entry_point", "")
                 try:
                     res = _run_submission(entry_point, process_class, resolved)
                 except Exception as exc:
                     print(f"\n❌ Submission failed: {exc}")
+                    outcomes[call.tool_call_id] = {"error": str(exc)}
                     continue
                 print(
                     f"\n✅ Submitted {res['workflow']}: "
                     f"pk={res['pk']}, state={res['state']}"
                 )
-            return
+                outcomes[call.tool_call_id] = res
+
+            print()  # separate the submission summary from the next prompt
+
+            # Splice each approval's outcome back as its tool return so the
+            # submission survives in history and no unanswered tool call is left
+            # to reject the next turn (the calls ran out of band, so pydantic-ai
+            # never recorded returns itself).
+            updated: list[ModelMessage] = result.all_messages()
+            updated.append(
+                ModelRequest(
+                    parts=[
+                        ToolReturnPart(
+                            tool_name=call.tool_name,
+                            content=outcomes[call.tool_call_id],
+                            tool_call_id=call.tool_call_id,
+                        )
+                        for call in pending.approvals
+                    ]
+                )
+            )
+            return updated
 
         if not auto:
-            return
+            return history
 
         # Only invalid submissions this round: deny them back to the model so it
         # corrects its own inputs, then re-run. No DB write happens on the worker
@@ -159,42 +237,152 @@ def _handle_deferred(agent: Agent, result: Any) -> None:  # pragma: no cover
             )
         except Exception as exc:
             print(f"\n❌ Error: {exc}")
-            return
+            return history
 
         if not isinstance(result.output, DeferredToolRequests):
-            print(f"Agent: {result.output}")
-            return
+            _print_agent(result.output)
+            messages: list[ModelMessage] = result.all_messages()
+            return messages
 
     print("\n⚠️  Too many correction rounds; stopping without submitting.")
+    return history
+
+
+def _history_file() -> Path:
+    """Persistent location for the REPL's input history.
+
+    Follows the XDG base-directory spec so recalled prompts survive across
+    sessions without cluttering ``$HOME``.
+    """
+    data_home = os.environ.get("XDG_DATA_HOME")
+    base = Path(data_home) if data_home else Path.home() / ".local" / "share"
+    return base / "aiida-agents" / "repl-history"
+
+
+def _key_bindings() -> KeyBindings:
+    """Bind Enter to submit and Alt/Esc+Enter to insert a newline.
+
+    prompt_toolkit's multiline default is the reverse (Enter inserts a
+    newline, Meta+Enter submits), which is wrong for a chat REPL where
+    single-line turns dominate. Flipping it keeps the common case a single
+    keystroke while still allowing a multi-line turn on demand.
+    """
+    bindings = KeyBindings()
+
+    # ``# pyright: ignore[reportUnusedFunction]``: the ``@bindings.add`` decorator
+    # registers each handler, so it is used, but a static analyser sees no
+    # reference to the name.
+    @bindings.add("enter")
+    def _submit(
+        event: KeyPressEvent,
+    ) -> None:  # pragma: no cover  # pyright: ignore[reportUnusedFunction]
+        event.current_buffer.validate_and_handle()
+
+    @bindings.add("escape", "enter")
+    def _newline(
+        event: KeyPressEvent,
+    ) -> None:  # pragma: no cover  # pyright: ignore[reportUnusedFunction]
+        event.current_buffer.insert_text("\n")
+
+    return bindings
+
+
+def _prompt_continuation(width: int, _line_number: int, _wrap_count: int) -> str:
+    """Continuation prefix for a multi-line turn, padded to the prompt width.
+
+    prompt_toolkit passes the width of the main prompt (``You: ``), so the
+    dotted marker lines wrapped input up under the first line's text.
+    """
+    return "." * (width - 1) + " "
+
+
+def _print_agent(text: str) -> None:  # pragma: no cover
+    """Print an agent reply, blank-line padded so it stands clear of the ``You:``
+    turns on either side: a highlighted label, then the body as markdown so
+    tables and formatting render.
+    """
+    console.print()
+    console.print("Agent:", style="bold green")
+    console.print(Markdown(text))
+    console.print()
 
 
 def main() -> None:  # pragma: no cover
     """Interactive REPL for the AiiDA agent."""
     from aiida import load_profile
     from aiida_agents.agents import get_agent
-    from aiida_agents._settings import ModelSettings, warn_on_unrecognized_settings
+    from aiida_agents._settings import (
+        ModelSettings,
+        ReplSettings,
+        warn_on_unrecognized_settings,
+    )
 
     warn_on_unrecognized_settings()
     settings = ModelSettings()
+    repl_cfg = ReplSettings()
     load_profile()
     agent = get_agent()
 
-    print(f"AiiDA Agent [{settings.provider}:{settings.model}] - type 'quit' to exit\n")
+    history_file = _history_file()
+    history_file.parent.mkdir(parents=True, exist_ok=True)
+    session: PromptSession[str] = PromptSession(
+        history=FileHistory(str(history_file)),
+        key_bindings=_key_bindings(),
+        multiline=True,
+        vi_mode=repl_cfg.vi_mode,
+    )
+
+    print(
+        f"AiiDA Agent [{settings.provider}:{settings.model}] - "
+        "type 'quit' to exit, '/clear' to start a new conversation, "
+        "Esc then Enter (Alt+Enter) for a new line\n"
+    )
+
+    history: list[ModelMessage] = []
 
     while True:
+        # Ctrl-C aborts the current line (like a shell); Ctrl-D at an empty
+        # prompt exits. prompt_toolkit raises KeyboardInterrupt / EOFError.
         try:
-            question = input("You: ").strip()
-        except (KeyboardInterrupt, EOFError):
+            question = session.prompt(
+                HTML("<ansicyan><b>You:</b></ansicyan> "),
+                prompt_continuation=_prompt_continuation,
+            ).strip()
+        except KeyboardInterrupt:
+            continue
+        except EOFError:
             break
 
-        if not question or question.lower() in ("quit", "exit", "q"):
+        # Empty input re-prompts (shell-like); only an explicit word or Ctrl-D exits.
+        if not question:
+            continue
+
+        if question.lower() in ("quit", "exit", "q"):
             break
 
+        if question.lower() == "/clear":
+            history = []
+            print("Conversation cleared.\n")
+            continue
+
         try:
-            result = asyncio.run(ask(agent, question))
-            if isinstance(result.output, DeferredToolRequests):
-                _handle_deferred(agent, result)
-            else:
-                print(f"Agent: {result.output}")
+            with console.status("[dim]thinking…[/]", spinner="dots"):
+                result = asyncio.run(
+                    ask(
+                        agent,
+                        question,
+                        _cap_history(history, repl_cfg.history_max_turns) or None,
+                    )
+                )
+        except KeyboardInterrupt:
+            print("(interrupted)")
+            continue
         except Exception as exc:
             print(f"❌ Error: {exc}")
+            continue
+
+        if isinstance(result.output, DeferredToolRequests):
+            history = _handle_deferred(agent, result, history)
+        else:
+            _print_agent(result.output)
+            history = result.all_messages()

@@ -150,6 +150,18 @@ class AgentSettings(_Base):
     tool_retries: int = Field(default=3, ge=0)
 
 
+class ReplSettings(_Base):
+    """Interactive REPL configuration (``AIIDA_AGENTS_*``)."""
+
+    # How many recent user turns of conversation the REPL replays as context per
+    # query. Capped on turn boundaries (never mid tool-call/return) so the window
+    # cannot grow without bound across a long session; must keep at least one.
+    history_max_turns: int = Field(default=10, ge=1)
+
+    # Use vi keybindings for REPL line editing instead of the default emacs bindings.
+    vi_mode: bool = False
+
+
 class OllamaSettings(_Base):
     """Local Ollama server endpoint.
 
@@ -210,6 +222,7 @@ class LoggingSettings(_Base):
 _SETTINGS_GROUPS: tuple[type[_Base], ...] = (
     ModelSettings,
     AgentSettings,
+    ReplSettings,
     OllamaSettings,
     RagSettings,
     ServerSettings,
