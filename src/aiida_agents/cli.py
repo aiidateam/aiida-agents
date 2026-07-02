@@ -280,7 +280,7 @@ def _key_bindings() -> KeyBindings:
     return bindings
 
 
-def _prompt_continuation(width: int, line_number: int, wrap_count: int) -> str:
+def _prompt_continuation(width: int, _line_number: int, _wrap_count: int) -> str:
     """Continuation prefix for a multi-line turn, padded to the prompt width.
 
     prompt_toolkit passes the width of the main prompt (``You: ``), so the
