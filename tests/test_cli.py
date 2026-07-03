@@ -121,3 +121,75 @@ def test_key_bindings_flip_enter_and_newline() -> None:
 def test_prompt_continuation_aligns_under_prompt() -> None:
     """The continuation fills the prompt width so wrapped lines line up under it."""
     assert _prompt_continuation(len("You: "), 0, 0) == ".... "
+
+
+def test_log_tool_calls_debug(capsys: pytest.CaptureFixture[str]) -> None:
+    """_log_tool_calls_debug logs tool calls and return parts using Console at DEBUG level."""
+    import logging
+    from rich.console import Console
+    from pydantic_ai.messages import (
+        ModelRequest,
+        ModelResponse,
+        ToolCallPart,
+        ToolReturnPart,
+    )
+    from aiida_agents._logging import _log_tool_calls_debug
+
+    messages: list[ModelMessage] = [
+        ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="test_tool", args={"x": 42}, tool_call_id="call-1"
+                )
+            ]
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="test_tool",
+                    content={"status": "ok"},
+                    tool_call_id="call-1",
+                )
+            ]
+        ),
+    ]
+
+    console = Console(color_system=None)
+    root_logger = logging.getLogger()
+    initial_level = root_logger.level
+
+    try:
+        # If log level is INFO or higher, nothing should be printed to the console
+        root_logger.setLevel(logging.INFO)
+        _log_tool_calls_debug(messages, console)
+        captured = capsys.readouterr()
+        assert captured.out == ""
+
+        # If log level is DEBUG, it should print the formatted tool calls and returns
+        root_logger.setLevel(logging.DEBUG)
+        _log_tool_calls_debug(messages, console)
+        captured = capsys.readouterr()
+        assert "→ TOOL CALLED: test_tool" in captured.out
+        assert "ID: call-1" in captured.out
+        assert "Args: {'x': 42}" in captured.out
+        assert "← TOOL RETURNED: test_tool" in captured.out
+        assert "{'status': 'ok'}" in captured.out
+    finally:
+        # Restore the initial log level
+        root_logger.setLevel(initial_level)
+
+
+def test_suppress_noisy_loggers() -> None:
+    """_suppress_noisy_loggers sets noisy loggers to WARNING level."""
+    import logging
+    from aiida_agents._logging import _suppress_noisy_loggers
+
+    # Set them to DEBUG first
+    loggers = ["asyncio", "openai", "httpcore", "chromadb", "markdown_it"]
+    for name in loggers:
+        logging.getLogger(name).setLevel(logging.DEBUG)
+
+    _suppress_noisy_loggers()
+
+    for name in loggers:
+        assert logging.getLogger(name).level == logging.WARNING

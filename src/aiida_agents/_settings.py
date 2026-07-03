@@ -207,6 +207,8 @@ class LoggingSettings(_Base):
     """
 
     log_level: _LogLevel = "INFO"
+    log_to_file: bool = False
+    log_file: str = "aiida_agents_debug.log"
 
 
 # ---------------------------------------------------------------------------

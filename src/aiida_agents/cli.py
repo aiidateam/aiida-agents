@@ -23,7 +23,14 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.tools import DeferredToolRequests
 from rich.console import Console
-from rich.markdown import Markdown
+from rich.live import Live
+from rich.spinner import Spinner
+
+from aiida_agents._logging import (
+    _log_tool_calls_debug,
+    _print_agent,
+    _suppress_noisy_loggers,
+)
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -36,7 +43,9 @@ async def ask(
 ) -> Any:  # pragma: no cover
     """Run a single query through the agent, returning the result."""
     logger.info("agent query: %s", question)
-    return await agent.run(question, message_history=message_history)
+    result = await agent.run(question, message_history=message_history)
+    _log_tool_calls_debug(result.new_messages(), console)
+    return result
 
 
 def _parse_args(args: str | dict[str, Any] | None) -> dict[str, Any]:
@@ -235,6 +244,7 @@ def _handle_deferred(
                     deferred_tool_results=pending.build_results(approvals=auto),
                 )
             )
+            _log_tool_calls_debug(result.new_messages(), console)
         except Exception as exc:
             print(f"\n❌ Error: {exc}")
             return history
@@ -296,28 +306,49 @@ def _prompt_continuation(width: int, _line_number: int, _wrap_count: int) -> str
     return "." * (width - 1) + " "
 
 
-def _print_agent(text: str) -> None:  # pragma: no cover
-    """Print an agent reply, blank-line padded so it stands clear of the ``You:``
-    turns on either side: a highlighted label, then the body as markdown so
-    tables and formatting render.
-    """
-    console.print()
-    console.print("Agent:", style="bold green")
-    console.print(Markdown(text))
-    console.print()
+class ConsoleFilter(logging.Filter):
+    """Filter out tool and agent response logs from the console StreamHandler."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.name.startswith(
+            ("aiida_agents.file_debug", "aiida_agents.responses_debug")
+        )
 
 
 def main() -> None:  # pragma: no cover
     """Interactive REPL for the AiiDA agent."""
+    import sys
     from aiida import load_profile
     from aiida_agents.agents import get_agent
     from aiida_agents._settings import (
+        LoggingSettings,
         ModelSettings,
         ReplSettings,
         warn_on_unrecognized_settings,
     )
 
     warn_on_unrecognized_settings()
+    log_cfg = LoggingSettings()
+
+    # Setup logging to both console and file
+    if logging.getLogger().hasHandlers():
+        logging.getLogger().handlers.clear()
+
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.addFilter(ConsoleFilter())
+    handlers: list[logging.Handler] = [console_handler]
+    if log_cfg.log_to_file:
+        handlers.append(logging.FileHandler(log_cfg.log_file))
+
+    logging.basicConfig(
+        level=log_cfg.log_level,
+        format="%(levelname)s:%(name)s:%(message)s",
+        handlers=handlers,
+    )
+
+    if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
+        _suppress_noisy_loggers()
+
     settings = ModelSettings()
     repl_cfg = ReplSettings()
     load_profile()
@@ -366,7 +397,25 @@ def main() -> None:  # pragma: no cover
             continue
 
         try:
-            with console.status("[dim]thinking…[/]", spinner="dots"):
+            # Only show spinner in non-debug mode
+            if logging.getLogger().getEffectiveLevel() > logging.DEBUG:
+                status_renderable = Spinner("dots", text="[dim]thinking…[/]")
+                with Live(
+                    status_renderable,
+                    console=console,
+                    refresh_per_second=12,
+                    transient=False,
+                ) as live_status:
+                    result = asyncio.run(
+                        ask(
+                            agent,
+                            question,
+                            _cap_history(history, repl_cfg.history_max_turns) or None,
+                        )
+                    )
+                    live_status.stop()
+            else:
+                # Debug mode: no spinner, just run
                 result = asyncio.run(
                     ask(
                         agent,
