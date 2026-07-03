@@ -24,7 +24,7 @@ from pydantic_ai.tools import DeferredToolRequests, ToolDenied
 from aiida_agents.agents import get_agent
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents.analysis import _READ_TOOLS
-from aiida_agents.cli import _triage_submissions
+from aiida_agents.cli.hitl import _triage_submissions
 
 # Derived from the single source of truth in analysis.get_agent, so this tracks
 # the registered read tools instead of duplicating their names by hand.

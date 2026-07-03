@@ -6,6 +6,7 @@ import logging
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
 from prompt_toolkit.keys import Keys
 from pydantic_ai.messages import (
     ModelMessage,
@@ -19,11 +20,15 @@ from pydantic_ai.messages import (
 from rich.console import Console
 
 from aiida_agents._logging import TRACE_LOGGER_NAMES
-from aiida_agents.cli import (
+from aiida_agents.cli import cli
+from aiida_agents.cli.session import _resolve_model_settings
+from aiida_agents.cli.ollama import _ollama_lists_model, _ollama_model_names
+from aiida_agents.cli.config import _config_rows
+from aiida_agents.cli.output import _format_duration, _log_tool_calls_debug
+from aiida_agents.cli.repl import (
     _cap_history,
     _history_file,
     _key_bindings,
-    _log_tool_calls_debug,
     _prompt_continuation,
 )
 
@@ -184,3 +189,182 @@ def test_log_tool_calls_debug(
             assert "{'status': 'ok'}" in captured.out
     finally:
         root_logger.setLevel(initial_level)
+
+
+@pytest.mark.parametrize(
+    "seconds, expected",
+    [
+        pytest.param(0.0, "0.0s", id="zero"),
+        pytest.param(12.34, "12.3s", id="sub-minute"),
+        pytest.param(59.9, "59.9s", id="just-under-a-minute"),
+        pytest.param(60.0, "1m 0s", id="exactly-a-minute"),
+        pytest.param(132.0, "2m 12s", id="minutes"),
+    ],
+)
+def test_format_duration(seconds: float, expected: str) -> None:
+    """Sub-minute times read as seconds; a minute or more as ``Xm Ys``."""
+    assert _format_duration(seconds) == expected
+
+
+@pytest.mark.parametrize(
+    "flag_model, env_model, expected",
+    [
+        pytest.param("flag-model", "env-model", "flag-model", id="flag-beats-env"),
+        pytest.param(None, "env-model", "env-model", id="env-when-no-flag"),
+        pytest.param(None, None, "qwen3.5:2b", id="default-when-neither"),
+    ],
+)
+def test_resolve_model_settings_precedence(
+    monkeypatch: pytest.MonkeyPatch,
+    flag_model: str | None,
+    env_model: str | None,
+    expected: str,
+) -> None:
+    """A ``--model`` flag beats ``AIIDA_AGENTS_MODEL``, which beats the default."""
+    if env_model is None:
+        monkeypatch.delenv("AIIDA_AGENTS_MODEL", raising=False)
+    else:
+        monkeypatch.setenv("AIIDA_AGENTS_MODEL", env_model)
+    assert _resolve_model_settings(None, flag_model).model == expected
+
+
+def test_cli_exposes_expected_commands() -> None:
+    """The top-level group lists every subcommand we ship."""
+    result = CliRunner().invoke(cli, ["--help"])
+    assert result.exit_code == 0
+    for command in ("ask", "chat", "check", "config", "rag"):
+        assert command in result.output
+
+
+def test_dash_h_is_a_help_alias() -> None:
+    """`-h` works as a help alias at the group and on subcommands."""
+    assert CliRunner().invoke(cli, ["-h"]).exit_code == 0
+    assert CliRunner().invoke(cli, ["config", "-h"]).exit_code == 0
+    assert CliRunner().invoke(cli, ["ask", "-h"]).exit_code == 0
+    assert CliRunner().invoke(cli, ["rag", "build", "-h"]).exit_code == 0
+
+
+@pytest.mark.parametrize(
+    "exc",
+    [
+        pytest.param(RuntimeError("sphinx build failed"), id="sphinx"),
+        pytest.param(OSError("embedder unreachable"), id="embedder"),
+    ],
+)
+def test_rag_build_reports_index_failure_cleanly(
+    monkeypatch: pytest.MonkeyPatch, exc: Exception
+) -> None:
+    """A build failure (sphinx, or the embedder over the network) surfaces as a
+    clean CLI error, not a traceback."""
+    monkeypatch.setattr("aiida_agents.cli.commands._module_missing", lambda name: False)
+    # No real Ollama pull during the test if the embed model is absent.
+    monkeypatch.setattr(
+        "aiida_agents.cli.commands._prompt_pull_ollama_model", lambda model: None
+    )
+
+    def _boom(force: bool, progress: object = None) -> None:
+        raise exc
+
+    monkeypatch.setattr("aiida_agents.rag.index_docs", _boom)
+    result = CliRunner().invoke(cli, ["rag", "build"])
+    assert result.exit_code == 1
+    assert "RAG build failed" in result.output
+    # Converted, not leaked as an uncaught traceback.
+    assert not isinstance(result.exception, (RuntimeError, OSError))
+
+
+def test_rag_build_declining_toolchain_install_is_clean(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Missing sphinx plus a declined install gives a clean, actionable error."""
+    monkeypatch.setattr(
+        "aiida_agents.cli.commands._module_missing", lambda name: name == "sphinx"
+    )
+    result = CliRunner().invoke(cli, ["rag", "build"], input="n\n")
+    assert result.exit_code == 1
+    assert "not installed" in result.output
+    assert "aiida-core[docs]" in result.output
+
+
+def test_config_show_command_runs() -> None:
+    """``config show`` renders without touching AiiDA or a model."""
+    result = CliRunner().invoke(cli, ["config", "show"])
+    assert result.exit_code == 0
+
+
+def test_build_agent_reports_missing_api_key_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A missing cloud API key surfaces as a clean CLI error, not a traceback."""
+    from pydantic_ai.exceptions import UserError
+
+    monkeypatch.setattr("aiida.load_profile", lambda profile=None: None)
+
+    def _no_key(**kwargs: object) -> object:
+        raise UserError("Set the `OPENROUTER_API_KEY` environment variable")
+
+    monkeypatch.setattr("aiida_agents.agents.get_agent", _no_key)
+    result = CliRunner().invoke(
+        cli, ["--provider", "openrouter", "--model", "openrouter/free", "ask", "hi"]
+    )
+    assert result.exit_code == 1
+    assert "OPENROUTER_API_KEY" in result.output
+    assert not isinstance(result.exception, UserError)
+
+
+def test_config_rows_report_value_and_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Each row carries the resolved value, its env var, and where it came from."""
+    monkeypatch.setenv("AIIDA_AGENTS_MODEL", "some-model")
+    monkeypatch.delenv("AIIDA_AGENTS_PROVIDER", raising=False)
+
+    from_env = {row[0]: row for row in _config_rows(provider=None, model=None)}
+    assert from_env["model"][1:] == ("some-model", "AIIDA_AGENTS_MODEL", "env")
+    assert from_env["provider"][3] == "default"
+
+    from_flag = {row[0]: row for row in _config_rows(provider="openai", model=None)}
+    assert from_flag["provider"][1] == "openai"
+    assert from_flag["provider"][3] == "flag"
+
+
+def test_config_rows_mask_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
+    """API keys are reported as set/unset, never echoed."""
+    monkeypatch.setenv("OPENROUTER_API_KEY", "sk-super-secret")
+    rows = {row[0]: row for row in _config_rows(None, None)}
+    assert rows["openrouter_api_key"][1] == "set"
+    assert "sk-super-secret" not in str(rows)
+
+
+def test_ollama_model_names_parses_list_output() -> None:
+    """Names come from the first column, with the header row skipped."""
+    out = (
+        "NAME                                            ID    SIZE\n"
+        "qwen3.5:9b                                      abc   6.6 GB\n"
+        "MichelRosselli/apertus:8b-instruct-2509-q4_k_m  def   5.1 GB\n"
+    )
+    assert _ollama_model_names(out) == {
+        "qwen3.5:9b",
+        "MichelRosselli/apertus:8b-instruct-2509-q4_k_m",
+    }
+
+
+def test_ollama_model_names_empty_when_no_models() -> None:
+    """A header-only listing yields no names (nothing pulled)."""
+    assert _ollama_model_names("NAME  ID  SIZE  MODIFIED\n") == set()
+
+
+@pytest.mark.parametrize(
+    "model, present",
+    [
+        pytest.param("mxbai-embed-large", True, id="untagged-matches-latest"),
+        pytest.param("qwen3.5:9b", True, id="tagged-exact"),
+        pytest.param("not-there", False, id="absent"),
+    ],
+)
+def test_ollama_lists_model_normalizes_latest_tag(model: str, present: bool) -> None:
+    """An untagged configured name matches the ':latest' `ollama list` shows."""
+    out = (
+        "NAME                        ID   SIZE\n"
+        "mxbai-embed-large:latest    abc  669 MB\n"
+        "qwen3.5:9b                  def  6.6 GB\n"
+    )
+    assert _ollama_lists_model(model, out) is present

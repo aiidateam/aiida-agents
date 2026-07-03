@@ -1,8 +1,9 @@
 """Build the RAG corpus and index it into ChromaDB.
 
-Runs the one-time :func:`index_docs` pipeline: sparse-clone the pinned aiida-core
-docs, render them to fenced text (``rag._textbuild``), chunk, embed, and persist.
-Heavy and network-bound, so it is a deliberate one-shot, not part of querying.
+Runs the one-time pipeline behind ``aiida-agents rag build``: sparse-clone the
+pinned aiida-core docs, render them to fenced text (``rag._textbuild``), chunk,
+embed, and persist. Heavy and network-bound, so it is a deliberate one-shot, not
+part of querying.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 
 from aiida_agents._settings import RagSettings
@@ -143,7 +145,10 @@ def _clone_and_build_text(target_dir: str) -> None:
     logger.info("text corpus ready at %s", target_dir)
 
 
-def index_docs(force: bool = False) -> None:
+def index_docs(
+    force: bool = False,
+    progress: Callable[[int, int], None] | None = None,
+) -> None:
     """Build or rebuild the ChromaDB collection from aiida-core docs.
 
     The collection is keyed by docs version and embedding model (see
@@ -165,6 +170,8 @@ def index_docs(force: bool = False) -> None:
         force: If True, re-render the corpus and rebuild the collection even if a
             populated one already exists. A rebuild that yields no chunks leaves
             the existing index untouched.
+        progress: Optional ``(done, total)`` callback invoked after each embed
+            batch, so a caller (e.g. the CLI) can render a progress bar.
     """
     cfg = RagSettings()
     client = _get_client(cfg)
@@ -211,20 +218,21 @@ def index_docs(force: bool = False) -> None:
     texts = [c["text"] for c in chunks]
     metadatas = [{"source": c["source"], "section": c["section"]} for c in chunks]
 
+    total = len(texts)
+    if progress is not None:
+        progress(0, total)  # signal embed start (with the total) so a UI can init
     batch = 50
     completed = False
     try:
-        for i in range(0, len(texts), batch):
+        for i in range(0, total, batch):
             collection.add(
                 ids=ids[i : i + batch],
                 documents=texts[i : i + batch],
                 metadatas=metadatas[i : i + batch],
             )
-            logger.debug(
-                "indexed batch %d/%d",
-                i // batch + 1,
-                -(-len(texts) // batch),
-            )
+            if progress is not None:
+                progress(min(i + batch, total), total)
+            logger.debug("indexed batch %d/%d", i // batch + 1, -(-total // batch))
         completed = True
     finally:
         # Ctrl-C or an embed error mid-loop would otherwise leave a partial
