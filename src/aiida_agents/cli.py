@@ -22,9 +22,9 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 from pydantic_ai.tools import DeferredToolRequests
+from contextlib import nullcontext
+
 from rich.console import Console
-from rich.live import Live
-from rich.spinner import Spinner
 
 from aiida_agents._logging import (
     _log_tool_calls_debug,
@@ -336,15 +336,17 @@ def main() -> None:  # pragma: no cover
 
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.addFilter(ConsoleFilter())
-    handlers: list[logging.Handler] = [console_handler]
-    if log_cfg.log_to_file:
-        handlers.append(logging.FileHandler(log_cfg.log_file))
 
     logging.basicConfig(
         level=log_cfg.log_level,
         format="%(levelname)s:%(name)s:%(message)s",
-        handlers=handlers,
+        handlers=[console_handler],
     )
+
+    if log_cfg.log_file:
+        file_handler = logging.FileHandler(log_cfg.log_file)
+        file_handler.setLevel(logging.DEBUG)
+        logging.getLogger().addHandler(file_handler)
 
     if logging.getLogger().getEffectiveLevel() == logging.DEBUG:
         _suppress_noisy_loggers()
@@ -397,25 +399,13 @@ def main() -> None:  # pragma: no cover
             continue
 
         try:
-            # Only show spinner in non-debug mode
+            # Only show spinner if NOT in debug mode
             if logging.getLogger().getEffectiveLevel() > logging.DEBUG:
-                status_renderable = Spinner("dots", text="[dim]thinking…[/]")
-                with Live(
-                    status_renderable,
-                    console=console,
-                    refresh_per_second=12,
-                    transient=False,
-                ) as live_status:
-                    result = asyncio.run(
-                        ask(
-                            agent,
-                            question,
-                            _cap_history(history, repl_cfg.history_max_turns) or None,
-                        )
-                    )
-                    live_status.stop()
+                status_ctx = console.status("[dim]thinking…[/]", spinner="dots")
             else:
-                # Debug mode: no spinner, just run
+                status_ctx = nullcontext()
+
+            with status_ctx:
                 result = asyncio.run(
                     ask(
                         agent,

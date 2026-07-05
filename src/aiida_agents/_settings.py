@@ -207,8 +207,10 @@ class LoggingSettings(_Base):
     """
 
     log_level: _LogLevel = "INFO"
-    log_to_file: bool = False
-    log_file: str = "aiida_agents_debug.log"
+    log_file: Path | None = Field(
+        default=None,
+        description="Optional file path for debug logs. If set, logs go to both console and file.",
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -91,13 +91,11 @@ _GROUP_DEFAULTS = [
         LoggingSettings,
         (
             "AIIDA_AGENTS_LOG_LEVEL",
-            "AIIDA_AGENTS_LOG_TO_FILE",
             "AIIDA_AGENTS_LOG_FILE",
         ),
         {
             "log_level": "INFO",
-            "log_to_file": False,
-            "log_file": "aiida_agents_debug.log",
+            "log_file": None,
         },
         id="logging",
     ),

@@ -54,9 +54,4 @@ def search_aiida_docs(query: str) -> str:
         header = f"[{source}  §  {section}]" if section else f"[{source}]"
         formatted.append(f"{header}\n{text}")
 
-    res = "\n\n---\n\n".join(formatted)
-    # Wrap code blocks in explicit tags
-    res = res.replace("```python", "__OPEN_CODE__")
-    res = res.replace("```", "```</CODE_BLOCK>")
-    res = res.replace("__OPEN_CODE__", "<CODE_BLOCK>```python")
-    return res
+    return "\n\n---\n\n".join(formatted)
