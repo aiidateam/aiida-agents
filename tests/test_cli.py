@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
@@ -15,11 +16,17 @@ from pydantic_ai.messages import (
     ToolReturnPart,
     UserPromptPart,
 )
+from rich.console import Console
 
+from aiida_agents._logging import TRACE_LOGGER_NAMES
+from aiida_agents._settings import LoggingSettings
 from aiida_agents.cli import (
     _cap_history,
+    _configure_logging,
+    _ConsoleFilter,
     _history_file,
     _key_bindings,
+    _log_tool_calls_debug,
     _prompt_continuation,
 )
 
@@ -123,19 +130,9 @@ def test_prompt_continuation_aligns_under_prompt() -> None:
     assert _prompt_continuation(len("You: "), 0, 0) == ".... "
 
 
-def test_log_tool_calls_debug(capsys: pytest.CaptureFixture[str]) -> None:
-    """_log_tool_calls_debug logs tool calls and return parts using Console at DEBUG level."""
-    import logging
-    from rich.console import Console
-    from pydantic_ai.messages import (
-        ModelRequest,
-        ModelResponse,
-        ToolCallPart,
-        ToolReturnPart,
-    )
-    from aiida_agents._logging import _log_tool_calls_debug
-
-    messages: list[ModelMessage] = [
+def _tool_round() -> list[ModelMessage]:
+    """One tool call/return pair."""
+    return [
         ModelResponse(
             parts=[
                 ToolCallPart(
@@ -154,42 +151,83 @@ def test_log_tool_calls_debug(capsys: pytest.CaptureFixture[str]) -> None:
         ),
     ]
 
+
+def test_log_tool_calls_debug(
+    capsys: pytest.CaptureFixture[str],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Console rendering is gated on DEBUG; the trace log always records.
+
+    Regression: the file trace must not depend on the console log level,
+    otherwise a log file written at INFO holds agent responses but no tool
+    calls.
+    """
     console = Console(color_system=None)
     root_logger = logging.getLogger()
     initial_level = root_logger.level
 
     try:
-        # If log level is INFO or higher, nothing should be printed to the console
-        root_logger.setLevel(logging.INFO)
-        _log_tool_calls_debug(messages, console)
-        captured = capsys.readouterr()
-        assert captured.out == ""
+        with caplog.at_level(logging.DEBUG, logger=TRACE_LOGGER_NAMES[0]):
+            # At INFO, nothing goes to the console, but the trace logger still
+            # records both the call and the return.
+            root_logger.setLevel(logging.INFO)
+            _log_tool_calls_debug(_tool_round(), console)
+            assert capsys.readouterr().out == ""
+            assert "→ TOOL CALLED: test_tool" in caplog.text
+            assert "← TOOL RETURNED: test_tool" in caplog.text
 
-        # If log level is DEBUG, it should print the formatted tool calls and returns
-        root_logger.setLevel(logging.DEBUG)
-        _log_tool_calls_debug(messages, console)
-        captured = capsys.readouterr()
-        assert "→ TOOL CALLED: test_tool" in captured.out
-        assert "ID: call-1" in captured.out
-        assert "Args: {'x': 42}" in captured.out
-        assert "← TOOL RETURNED: test_tool" in captured.out
-        assert "{'status': 'ok'}" in captured.out
+            # At DEBUG, the formatted tool calls and returns are printed too.
+            root_logger.setLevel(logging.DEBUG)
+            _log_tool_calls_debug(_tool_round(), console)
+            captured = capsys.readouterr()
+            assert "→ TOOL CALLED: test_tool" in captured.out
+            assert "ID: call-1" in captured.out
+            assert "Args: {'x': 42}" in captured.out
+            assert "← TOOL RETURNED: test_tool" in captured.out
+            assert "{'status': 'ok'}" in captured.out
     finally:
-        # Restore the initial log level
         root_logger.setLevel(initial_level)
 
 
-def test_suppress_noisy_loggers() -> None:
-    """_suppress_noisy_loggers sets noisy loggers to WARNING level."""
-    import logging
-    from aiida_agents._logging import _suppress_noisy_loggers
+def _record(name: str) -> logging.LogRecord:
+    return logging.LogRecord(name, logging.DEBUG, "path", 0, "msg", None, None)
 
-    # Set them to DEBUG first
-    loggers = ["asyncio", "openai", "httpcore", "chromadb", "markdown_it"]
-    for name in loggers:
-        logging.getLogger(name).setLevel(logging.DEBUG)
 
-    _suppress_noisy_loggers()
+def test_console_filter_blocks_trace_records() -> None:
+    """The console filter drops trace-logger records and passes all others."""
+    filt = _ConsoleFilter()
+    assert filt.filter(_record("aiida_agents.cli")) is True
+    assert filt.filter(_record("httpx")) is True
+    for name in TRACE_LOGGER_NAMES:
+        assert filt.filter(_record(name)) is False
 
-    for name in loggers:
-        assert logging.getLogger(name).level == logging.WARNING
+
+def test_configure_logging_wires_handlers(tmp_path: Path) -> None:
+    """With ``log_file`` set: a filtered console handler plus a file handler."""
+    root = logging.getLogger()
+    saved_handlers, saved_level = root.handlers[:], root.level
+
+    try:
+        _configure_logging(
+            LoggingSettings(log_level="INFO", log_file=tmp_path / "agents.log")
+        )
+
+        file_handlers = [h for h in root.handlers if isinstance(h, logging.FileHandler)]
+        other_handlers = [
+            h for h in root.handlers if not isinstance(h, logging.FileHandler)
+        ]
+        assert len(file_handlers) == 1
+        assert not any(
+            isinstance(f, _ConsoleFilter) for h in file_handlers for f in h.filters
+        )
+        assert any(
+            isinstance(f, _ConsoleFilter) for h in other_handlers for f in h.filters
+        )
+    finally:
+        for handler in root.handlers[:]:
+            root.removeHandler(handler)
+            if handler not in saved_handlers:
+                handler.close()
+        for handler in saved_handlers:
+            root.addHandler(handler)
+        root.setLevel(saved_level)

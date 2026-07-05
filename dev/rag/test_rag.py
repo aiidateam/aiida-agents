@@ -2,8 +2,8 @@
 """Manual verification script for the RAG pipeline.
 
 Run from the repo root:
-    uv run python dev/test_rag.py --reindex    # first time — force a full rebuild
-    uv run python dev/test_rag.py              # subsequent runs — use cached index
+    uv run python dev/rag/test_rag.py --reindex    # first time — force a full rebuild
+    uv run python dev/rag/test_rag.py              # subsequent runs — use cached index
 """
 
 from __future__ import annotations
