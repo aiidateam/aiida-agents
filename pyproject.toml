@@ -55,7 +55,8 @@ tests = [
 ]
 lint = [
   "mypy",
-  "ruff"
+  "ruff",
+  "types-docutils"  # stubs for docutils, imported by rag._textbuild
 ]
 pre-commit = [
   "pre-commit",

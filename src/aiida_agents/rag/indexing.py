@@ -19,6 +19,7 @@ from pathlib import Path
 
 from aiida_agents._settings import RagSettings
 from aiida_agents.rag.store import (
+    _CORPUS_FORMAT,
     _DOCS_TAG,
     _collection_name,
     _get_client,
@@ -88,26 +89,16 @@ def _clone_and_build_text(target_dir: str) -> None:
         docs_dir = repo_dir / "docs"
         text_out = tmp_path / "text_build"
 
-        # Step 2: run the sphinx text builder under THIS interpreter
-        # (sys.executable), so it uses the environment that has aiida installed,
-        # not a stray system sphinx-build on PATH.
-        # -E = don't use cached environment (fresh build)
-        # -D nb_execution_mode=off = don't execute notebooks
-        # -q = quiet (suppress most output)
-        logger.info("running sphinx -b text (this takes ~30–60s)…")
+        # Step 2: run the fenced text builder (sphinx text output with
+        # ```lang fences around code blocks; see rag._textbuild) under THIS
+        # interpreter (sys.executable), so it uses the environment that has
+        # aiida installed, not a stray system sphinx-build on PATH.
+        logger.info("running sphinx text build…")
         result = subprocess.run(
             [
                 sys.executable,
                 "-m",
-                "sphinx",
-                "-b",
-                "text",
-                "-E",
-                "-q",
-                "-D",
-                "nb_execution_mode=off",
-                "-D",
-                "jupyter_execute_notebooks=off",
+                "aiida_agents.rag._textbuild",
                 str(docs_dir / "source"),
                 str(text_out),
             ],
@@ -176,7 +167,9 @@ def index_docs(force: bool = False) -> None:
         },
     )
 
-    text_dir = str(cfg.vector_db_path / "aiida_text_corpus")
+    # The corpus format is part of the directory name, so a format bump
+    # regenerates the corpus instead of reusing a stale cached rendering.
+    text_dir = str(cfg.vector_db_path / f"aiida_text_corpus__{_CORPUS_FORMAT}")
     # Skip clone if text corpus already exists
     if not os.path.exists(text_dir) or not list(Path(text_dir).rglob("*.txt")):
         _clone_and_build_text(text_dir)

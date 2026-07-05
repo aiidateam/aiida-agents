@@ -11,12 +11,20 @@ chunking keys off the headings.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
 _TARGET_CHUNK_CHARS = 2000  # ~512 tokens; 2026 benchmark sweet spot
 _MIN_CHUNK_CHARS = 150  # discard stubs shorter than this
+
+# Corpus files excluded from the searchable index (posix-relative to the
+# corpus root). The changelog is release notes, not conceptual prose, yet its
+# chunks repeatedly out-ranked concept pages for questions like "what is a
+# CalcJobNode" — noise a researcher never wants back. The corpus directory
+# still mirrors the full docs; this only curates what gets embedded.
+_EXCLUDED_SOURCES: frozenset[str] = frozenset({"reference/_changelog.txt"})
 
 
 def _extract_text_sections(text: str) -> list[tuple[str, str]]:
@@ -37,9 +45,17 @@ def _extract_text_sections(text: str) -> list[tuple[str, str]]:
     lines = text.splitlines(keepends=True)
 
     # Find all heading positions: line i is a heading title if line i+1
-    # is an underline of the same length (or longer)
+    # is an underline of the same length (or longer). Lines inside a fenced
+    # code block never count: console output frequently contains
+    # heading-lookalikes, and a section cut there would split the fence.
     heading_positions: list[int] = []  # index of the TITLE line
+    in_fence = False
     for i in range(len(lines) - 1):
+        if _FENCE_RE.match(lines[i]):
+            in_fence = not in_fence
+            continue
+        if in_fence:
+            continue
         title_line = lines[i].rstrip("\n")
         next_line = lines[i + 1].rstrip("\n")
         if (
@@ -76,6 +92,71 @@ def _extract_text_sections(text: str) -> list[tuple[str, str]]:
         sections.append((title, body))
 
     return sections
+
+
+_FENCE_RE = re.compile(r"^\s*```")
+
+
+def _fence_segments(text: str) -> list[tuple[str, bool]]:
+    """Split ``text`` into ``(segment, is_fenced)`` pieces, in order.
+
+    A fenced segment runs from a line starting with ``` to the next such
+    line, inclusive (the corpus format emitted by ``rag._textbuild``). An
+    unterminated fence extends to the end of the text.
+    """
+    segments: list[tuple[str, bool]] = []
+    buf: list[str] = []
+    in_fence = False
+    for line in text.splitlines(keepends=True):
+        if _FENCE_RE.match(line):
+            if in_fence:
+                buf.append(line)
+                segments.append(("".join(buf), True))
+                buf = []
+            else:
+                if buf:
+                    segments.append(("".join(buf), False))
+                buf = [line]
+            in_fence = not in_fence
+        else:
+            buf.append(line)
+    if buf:
+        segments.append(("".join(buf), in_fence))
+    return segments
+
+
+def _split_fence_aware(text: str, max_chars: int) -> list[str]:
+    """Split like ``_split_large_text``, but never inside a fenced code block.
+
+    Fenced blocks are atomic: they merge with neighbouring prose when the
+    combination fits ``max_chars``, and otherwise stand as their own chunk,
+    kept whole even when they alone exceed the limit. Splitting a fence in
+    two would leave both halves unparseable as code.
+    """
+    if "```" not in text:
+        return _split_large_text(text, max_chars)
+
+    atoms: list[str] = []
+    for segment, fenced in _fence_segments(text):
+        if fenced:
+            atoms.append(segment.strip("\n"))
+        else:
+            atoms.extend(_split_large_text(segment, max_chars))
+
+    chunks: list[str] = []
+    current = ""
+    for atom in atoms:
+        if not atom.strip():
+            continue
+        candidate = f"{current}\n{atom}" if current else atom
+        if len(candidate) <= max_chars or not current:
+            current = candidate
+        else:
+            chunks.append(current)
+            current = atom
+    if current:
+        chunks.append(current)
+    return chunks
 
 
 def _split_large_text(text: str, max_chars: int) -> list[str]:
@@ -150,7 +231,7 @@ def _chunk_text(text: str, source: str) -> list[dict[str, str]]:
             f"{title} — AiiDA {topic_label}" if title else f"AiiDA {topic_label}"
         )
 
-        for sub in _split_large_text(body, _TARGET_CHUNK_CHARS):
+        for sub in _split_fence_aware(body, _TARGET_CHUNK_CHARS):
             if len(sub.strip()) < _MIN_CHUNK_CHARS:
                 continue
             chunks.append(
@@ -175,12 +256,19 @@ def _chunk_text(text: str, source: str) -> list[dict[str, str]]:
 
 
 def _load_docs(text_dir: str) -> list[dict[str, str]]:
-    """Walk text_dir and return all chunks from .txt files."""
+    """Walk text_dir and return all chunks from .txt files.
+
+    Files in ``_EXCLUDED_SOURCES`` are skipped so their content never reaches
+    the index.
+    """
     chunks: list[dict[str, str]] = []
     for path in Path(text_dir).rglob("*.txt"):
+        rel = path.relative_to(text_dir).as_posix()
+        if rel in _EXCLUDED_SOURCES:
+            logger.debug("excluding %s from the index", rel)
+            continue
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
-            rel = str(path.relative_to(text_dir))
             chunks.extend(_chunk_text(text, source=rel))
         except Exception as exc:
             logger.warning("skipping %s: %s", path, exc)
