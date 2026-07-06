@@ -17,7 +17,11 @@ from unittest.mock import MagicMock
 import chromadb
 import pytest
 
-from aiida_agents.rag.indexing import _clone_and_build_text, index_docs
+from aiida_agents.rag.indexing import (
+    IndexOutcome,
+    _clone_and_build_text,
+    index_docs,
+)
 from aiida_agents.rag.store import (
     _CORPUS_FORMAT,
     _collection_name,
@@ -121,7 +125,7 @@ def test_index_docs_skips_when_already_populated(
         embed=embed,
         chunks=[{"text": "new", "source": "a.txt", "section": "A"}],
     )
-    index_docs(force=False)
+    assert index_docs(force=False) is IndexOutcome.ALREADY_PRESENT
     clone.assert_not_called()
     assert client.get_collection(name).count() == 1  # untouched
 
@@ -141,7 +145,7 @@ def test_index_docs_rebuilds_empty_stub(
         embed=embed,
         chunks=[{"text": "c", "source": "a.txt", "section": "A"}],
     )
-    index_docs(force=False)
+    assert index_docs(force=False) is IndexOutcome.BUILT
     clone.assert_called_once()
     assert _collection_populated(client, name) is True
 
@@ -157,7 +161,7 @@ def test_index_docs_empty_corpus_leaves_existing_index(
         ids=["seed"], documents=["seed"], metadatas=[{"source": "s", "section": "S"}]
     )
     _wire_index_docs(monkeypatch, tmp_path, client=client, embed=embed, chunks=[])
-    index_docs(force=True)
+    assert index_docs(force=True) is IndexOutcome.EMPTY_CORPUS
     assert client.get_collection(name).count() == 1  # untouched
 
 
@@ -190,6 +194,6 @@ def test_index_docs_force_reclones_and_rebuilds(
             {"text": f"new {i}", "source": "a.txt", "section": "A"} for i in range(3)
         ],
     )
-    index_docs(force=True)
+    assert index_docs(force=True) is IndexOutcome.BUILT
     clone.assert_called_once()  # force re-clones despite the cached corpus
     assert client.get_collection(name).count() == 3  # rebuilt with the new chunks

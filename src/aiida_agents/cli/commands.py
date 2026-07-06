@@ -122,15 +122,22 @@ def config() -> None:
 @click.pass_context
 def config_show(ctx: click.Context) -> None:
     """Print the effective settings and where each value comes from."""
+    # `config show` is where a user goes to debug their configuration, so a
+    # typo'd AIIDA_AGENTS_* key (silently ignored elsewhere) must surface here.
+    warn_on_unrecognized_settings()
     table = Table(title="aiida-agents configuration")
+    table.add_column("Group", style="dim")
     table.add_column("Setting", style="bold")
     table.add_column("Value")
-    table.add_column("Env var", style="dim")
+    # ``fold`` (not the table default ``ellipsis``) so a long env var wraps
+    # instead of truncating: this column is meant to be copied verbatim to
+    # ``export`` a setting, and ``AIIDA_AGENTS_MAX_TOK…`` is not actionable.
+    table.add_column("Env var", style="dim", overflow="fold")
     table.add_column("Source", style="cyan")
-    for setting, value, env_var, src in _config_rows(
+    for group, setting, value, env_var, src in _config_rows(
         ctx.obj["provider"], ctx.obj["model"]
     ):
-        table.add_row(setting, value, env_var, src)
+        table.add_row(group, setting, value, env_var, src)
     console.print(table)
 
 
@@ -194,7 +201,7 @@ def rag() -> None:
 def rag_build(force: bool) -> None:  # pragma: no cover
     """Build (or rebuild) the AiiDA docs RAG index."""
     from aiida_agents._settings import RagSettings
-    from aiida_agents.rag import index_docs
+    from aiida_agents.rag import IndexOutcome, index_docs
 
     # Provision what the build needs before starting: the docs toolchain and,
     # for the default local embedder, the Ollama embedding model.
@@ -237,11 +244,19 @@ def rag_build(force: bool) -> None:  # pragma: no cover
                     total=total,
                 )
 
-            index_docs(force=force, progress=_report)
+            outcome = index_docs(force=force, progress=_report)
     except (RuntimeError, OSError) as exc:
         # Any operational failure during the build becomes a clean CLI error
         # rather than a traceback: a failed sphinx build (RuntimeError), or the
         # embedder being unreachable / its model not pulled (urllib
         # HTTPError/URLError, both OSError subclasses).
         raise click.ClickException(f"RAG build failed: {exc}") from exc
-    click.echo("✓ RAG index ready.")
+
+    # Report what actually happened, so re-running on an up-to-date index reads
+    # as a deliberate no-op rather than a fresh build.
+    if outcome is IndexOutcome.ALREADY_PRESENT:
+        click.echo("✓ RAG index already built (pass --force to rebuild).")
+    elif outcome is IndexOutcome.EMPTY_CORPUS:
+        click.echo("⚠ No documentation chunks were produced; index left unchanged.")
+    else:
+        click.echo("✓ RAG index ready.")

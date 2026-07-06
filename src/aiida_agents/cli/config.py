@@ -44,10 +44,20 @@ def _dotenv_keys(path: Path) -> set[str]:
     return keys
 
 
+def _group_name(obj: BaseSettings) -> str:
+    """Short label for a settings group (``ModelSettings`` -> ``model``).
+
+    Disambiguates fields that share a name across groups (both the provider and
+    Ollama settings expose ``base_url``), so the rendered table never shows one
+    label for two different settings.
+    """
+    return type(obj).__name__.removesuffix("Settings").lower()
+
+
 def _config_rows(
     provider: str | None, model: str | None
-) -> list[tuple[str, str, str, str]]:
-    """``(setting, value, env var, source)`` for the user-facing settings.
+) -> list[tuple[str, str, str, str, str]]:
+    """``(group, setting, value, env var, source)`` for the user-facing settings.
 
     ``source`` is where the effective value came from: a CLI ``flag``, the
     process ``env``, the ``.env`` file, or the field ``default``.
@@ -97,6 +107,7 @@ def _config_rows(
     ]
     rows = [
         (
+            _group_name(obj),
             field,
             value,
             _env_var_for(type(obj), field),
@@ -111,5 +122,13 @@ def _config_rows(
         "api_key",
     ):
         env_var = _env_var_for(ModelSettings, field)
-        rows.append((field, secret(getattr(settings, field)), env_var, source(env_var)))
+        rows.append(
+            (
+                _group_name(settings),
+                field,
+                secret(getattr(settings, field)),
+                env_var,
+                source(env_var),
+            )
+        )
     return rows

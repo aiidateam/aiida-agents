@@ -17,10 +17,10 @@ search_aiida_docs(query)
 
 from __future__ import annotations
 
-from aiida_agents.rag.indexing import index_docs
+from aiida_agents.rag.indexing import IndexOutcome, index_docs
 from aiida_agents.rag.retriever import docs_index_available, query_docs
 
-__all__ = ["index_docs", "query_docs", "search_aiida_docs"]
+__all__ = ["IndexOutcome", "index_docs", "query_docs", "search_aiida_docs"]
 
 
 def search_aiida_docs(query: str) -> str:

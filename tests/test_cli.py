@@ -286,6 +286,39 @@ def test_rag_build_declining_toolchain_install_is_clean(
     assert "aiida-core[docs]" in result.output
 
 
+@pytest.mark.parametrize(
+    "outcome_name, expected, unexpected",
+    [
+        pytest.param(
+            "ALREADY_PRESENT", "already built", "index ready", id="already-present"
+        ),
+        pytest.param(
+            "EMPTY_CORPUS", "left unchanged", "index ready", id="empty-corpus"
+        ),
+        pytest.param("BUILT", "RAG index ready", "already built", id="built"),
+    ],
+)
+def test_rag_build_reports_outcome(
+    monkeypatch: pytest.MonkeyPatch, outcome_name: str, expected: str, unexpected: str
+) -> None:
+    """The final line reflects what ``index_docs`` actually did, so re-running on
+    an up-to-date index reads as a no-op, not a fresh build."""
+    from aiida_agents.rag import IndexOutcome
+
+    monkeypatch.setattr("aiida_agents.cli.commands._module_missing", lambda name: False)
+    monkeypatch.setattr(
+        "aiida_agents.cli.commands._prompt_pull_ollama_model", lambda model: None
+    )
+    outcome = getattr(IndexOutcome, outcome_name)
+    monkeypatch.setattr(
+        "aiida_agents.rag.index_docs", lambda force, progress=None: outcome
+    )
+    result = CliRunner().invoke(cli, ["rag", "build"])
+    assert result.exit_code == 0
+    assert expected in result.output
+    assert unexpected not in result.output
+
+
 def test_config_show_command_runs() -> None:
     """``config show`` renders without touching AiiDA or a model."""
     result = CliRunner().invoke(cli, ["config", "show"])
@@ -313,24 +346,43 @@ def test_build_agent_reports_missing_api_key_cleanly(
 
 
 def test_config_rows_report_value_and_source(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Each row carries the resolved value, its env var, and where it came from."""
+    """Each row carries its group, resolved value, env var, and where it came from."""
     monkeypatch.setenv("AIIDA_AGENTS_MODEL", "some-model")
     monkeypatch.delenv("AIIDA_AGENTS_PROVIDER", raising=False)
 
-    from_env = {row[0]: row for row in _config_rows(provider=None, model=None)}
-    assert from_env["model"][1:] == ("some-model", "AIIDA_AGENTS_MODEL", "env")
-    assert from_env["provider"][3] == "default"
+    from_env = {row[1]: row for row in _config_rows(provider=None, model=None)}
+    assert from_env["model"] == (
+        "model",
+        "model",
+        "some-model",
+        "AIIDA_AGENTS_MODEL",
+        "env",
+    )
+    assert from_env["provider"][4] == "default"
 
-    from_flag = {row[0]: row for row in _config_rows(provider="openai", model=None)}
-    assert from_flag["provider"][1] == "openai"
-    assert from_flag["provider"][3] == "flag"
+    from_flag = {row[1]: row for row in _config_rows(provider="openai", model=None)}
+    assert from_flag["provider"][2] == "openai"
+    assert from_flag["provider"][4] == "flag"
+
+
+def test_config_rows_disambiguate_base_url_by_group() -> None:
+    """The two ``base_url`` fields are told apart by group and env var, so the
+    rendered table never shows one label for two different settings.
+    """
+    base_urls = {
+        row[0]: row[3] for row in _config_rows(None, None) if row[1] == "base_url"
+    }
+    assert base_urls == {
+        "model": "AIIDA_AGENTS_BASE_URL",
+        "ollama": "OLLAMA_BASE_URL",
+    }
 
 
 def test_config_rows_mask_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     """API keys are reported as set/unset, never echoed."""
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-super-secret")
-    rows = {row[0]: row for row in _config_rows(None, None)}
-    assert rows["openrouter_api_key"][1] == "set"
+    rows = {row[1]: row for row in _config_rows(None, None)}
+    assert rows["openrouter_api_key"][2] == "set"
     assert "sk-super-secret" not in str(rows)
 
 

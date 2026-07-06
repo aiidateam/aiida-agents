@@ -16,6 +16,7 @@ import subprocess
 import sys
 import tempfile
 from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 
 from aiida_agents._settings import RagSettings
@@ -33,6 +34,19 @@ logger = logging.getLogger(__name__)
 
 _DOCS_REPO = "https://github.com/aiidateam/aiida-core.git"
 _DOCS_SUBDIR = "docs"  # need full docs/ for sphinx-build, not just source/
+
+
+class IndexOutcome(Enum):
+    """What :func:`index_docs` did, so a caller can report it precisely.
+
+    Only ``BUILT`` (re)created the collection; ``ALREADY_PRESENT`` reused a
+    populated one and ``EMPTY_CORPUS`` produced no chunks, both leaving any
+    existing index exactly as it was.
+    """
+
+    BUILT = "built"
+    ALREADY_PRESENT = "already_present"
+    EMPTY_CORPUS = "empty_corpus"
 
 
 def _clone_and_build_text(target_dir: str) -> None:
@@ -148,7 +162,7 @@ def _clone_and_build_text(target_dir: str) -> None:
 def index_docs(
     force: bool = False,
     progress: Callable[[int, int], None] | None = None,
-) -> None:
+) -> IndexOutcome:
     """Build or rebuild the ChromaDB collection from aiida-core docs.
 
     The collection is keyed by docs version and embedding model (see
@@ -172,6 +186,12 @@ def index_docs(
             the existing index untouched.
         progress: Optional ``(done, total)`` callback invoked after each embed
             batch, so a caller (e.g. the CLI) can render a progress bar.
+
+    Returns:
+        An :class:`IndexOutcome`: ``BUILT`` when the collection was (re)created,
+        ``ALREADY_PRESENT`` when a populated collection was reused, or
+        ``EMPTY_CORPUS`` when the corpus yielded no chunks and any existing index
+        was left untouched.
     """
     cfg = RagSettings()
     client = _get_client(cfg)
@@ -180,7 +200,7 @@ def index_docs(
 
     if not force and _collection_populated(client, name):
         logger.info("collection '%s' already exists — skipping index", name)
-        return
+        return IndexOutcome.ALREADY_PRESENT
 
     # Render and chunk the corpus BEFORE touching the collection, so a failed
     # clone/build or an empty corpus never leaves an empty collection behind. The
@@ -198,7 +218,7 @@ def index_docs(
 
     if not chunks:
         logger.warning("no chunks loaded; leaving any existing index untouched")
-        return
+        return IndexOutcome.EMPTY_CORPUS
 
     # Only now that there are chunks to add do we replace any prior (possibly
     # empty or stale) collection.
@@ -244,3 +264,4 @@ def index_docs(
             client.delete_collection(name)
 
     logger.info("indexed %d chunks into '%s'", len(texts), name)
+    return IndexOutcome.BUILT
