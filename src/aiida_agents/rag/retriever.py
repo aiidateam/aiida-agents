@@ -54,7 +54,7 @@ def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
 
     if name not in existing:
         logger.warning(
-            "no index for docs %s + embedding '%s' — build it by running: "
+            "no index for docs %s + embedding '%s'. Build it by running: "
             'python -c "from aiida_agents.rag import index_docs; index_docs()"',
             _DOCS_TAG,
             embed_fn.name(),

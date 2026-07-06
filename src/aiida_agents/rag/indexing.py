@@ -129,7 +129,7 @@ def _clone_and_build_text(target_dir: str) -> None:
             raise RuntimeError(msg)
         # Publish atomically: copy into a sibling staging dir (a crash here
         # leaves any previous corpus untouched), then swap it into place with a
-        # single rename. Copying straight into target_dir is not atomic — an
+        # single rename. Copying straight into target_dir is not atomic: an
         # interrupted copytree would leave a truncated corpus that later runs
         # reuse as if it were complete.
         staging = f"{target_dir}.staging"
@@ -154,6 +154,12 @@ def index_docs(force: bool = False) -> None:
     collection is (re)created, and any failure or interruption mid-embed drops
     the partially filled collection. The store therefore never keeps a silent
     empty or half-built stub that the next run would mistake for a finished index.
+
+    The collection swap is delete-then-create, though: a ``force`` rebuild of an
+    existing index that fails mid-embed leaves no collection at all (the drop
+    covers the partial, and the old one was already replaced). It self-heals on
+    the next successful run; a non-``force`` build never deletes a populated
+    collection, so a good index is only ever at risk under ``force``.
 
     Args:
         force: If True, re-render the corpus and rebuild the collection even if a
@@ -184,7 +190,7 @@ def index_docs(force: bool = False) -> None:
     chunks = _load_docs(text_dir)
 
     if not chunks:
-        logger.warning("no chunks loaded — leaving any existing index untouched")
+        logger.warning("no chunks loaded; leaving any existing index untouched")
         return
 
     # Only now that there are chunks to add do we replace any prior (possibly
@@ -225,7 +231,7 @@ def index_docs(force: bool = False) -> None:
         # collection the next run treats as complete; drop it to stay atomic.
         if not completed:
             logger.warning(
-                "indexing did not complete — removing partial collection '%s'", name
+                "indexing did not complete; removing partial collection '%s'", name
             )
             client.delete_collection(name)
 

@@ -84,9 +84,10 @@ def _configure_logging(log_cfg: LoggingSettings) -> None:
     console_handler.addFilter(_ConsoleFilter())
     handlers: list[logging.Handler] = [console_handler]
     if log_cfg.log_file is not None:
-        # Create the parent dir so a log_file pointed at a not-yet-existing
-        # directory enables file logging instead of crashing the entry point
-        # at startup with a raw FileNotFoundError.
+        # Create the parent dir when it doesn't exist yet, so a log_file in a
+        # new directory enables file logging rather than crashing the entry
+        # point with FileNotFoundError. (A log_file that is itself a directory,
+        # or an unwritable path, still raises: those are fatal misconfigs.)
         log_cfg.log_file.parent.mkdir(parents=True, exist_ok=True)
         handlers.append(logging.FileHandler(log_cfg.log_file))
 

@@ -1,11 +1,11 @@
 """Unit tests for the RAG indexing pipeline.
 
 The corpus half (git clone + sphinx-build) is integration-level and is exercised
-by ``dev/rag/test_rag.py`` and manual dogfooding. The indexing half — the atomic
-build: skip only a *populated* collection, rebuild an empty stub, drop a partial
-collection on failure, and leave the prior index alone when the corpus is empty —
-is unit-tested here with a real in-memory ChromaDB client and a fake embedder, so
-no Ollama/network is needed.
+by ``dev/rag/test_rag.py`` and manual dogfooding. The indexing half is unit-tested
+here with a real ChromaDB client (on a per-test temp dir) and a fake embedder, so
+no Ollama or network is needed: skip only a *populated* collection, rebuild an
+empty stub, drop a partial collection on failure, leave a prior index alone when
+the corpus is empty, and re-clone under ``force``.
 """
 
 from __future__ import annotations
@@ -18,7 +18,11 @@ import chromadb
 import pytest
 
 from aiida_agents.rag.indexing import _clone_and_build_text, index_docs
-from aiida_agents.rag.store import _collection_name, _collection_populated
+from aiida_agents.rag.store import (
+    _CORPUS_FORMAT,
+    _collection_name,
+    _collection_populated,
+)
 
 
 def test_build_requires_docs_toolchain(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,6 +88,7 @@ def test_index_docs_drops_partial_collection_on_failure(
             raise RuntimeError("embed backend down")
 
     embed = _BoomEmbed()
+    name = _collection_name(embed)
     _wire_index_docs(
         monkeypatch,
         tmp_path,
@@ -93,7 +98,10 @@ def test_index_docs_drops_partial_collection_on_failure(
     )
     with pytest.raises(RuntimeError, match="embed backend down"):
         index_docs()
-    assert _collection_populated(client, _collection_name(embed)) is False
+    # The partial collection must be *gone*, not merely empty: a failed add
+    # leaves the collection present at count 0, so a `_collection_populated`
+    # (count > 0) check would pass even if the `finally` drop never ran.
+    assert name not in {c.name for c in client.list_collections()}
 
 
 def test_index_docs_skips_when_already_populated(
@@ -151,3 +159,37 @@ def test_index_docs_empty_corpus_leaves_existing_index(
     _wire_index_docs(monkeypatch, tmp_path, client=client, embed=embed, chunks=[])
     index_docs(force=True)
     assert client.get_collection(name).count() == 1  # untouched
+
+
+def test_index_docs_force_reclones_and_rebuilds(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """force=True re-clones even with a cached corpus on disk, and rebuilds a
+    populated collection with the fresh chunks.
+
+    Pins the ``force`` term of the clone guard: without it, an existing corpus
+    dir (and populated collection) would skip both the clone and the rebuild.
+    """
+    client: Any = chromadb.PersistentClient(path=str(tmp_path / "chroma_db"))
+    embed = _FakeEmbed()
+    name = _collection_name(embed)
+    client.create_collection(name, embedding_function=embed).add(
+        ids=["old"], documents=["old"], metadatas=[{"source": "s", "section": "S"}]
+    )
+    # A cached corpus on disk: without ``force`` the clone would be skipped.
+    corpus = tmp_path / f"aiida_text_corpus__{_CORPUS_FORMAT}"
+    corpus.mkdir(parents=True)
+    (corpus / "cached.txt").write_text("cached")
+
+    clone = _wire_index_docs(
+        monkeypatch,
+        tmp_path,
+        client=client,
+        embed=embed,
+        chunks=[
+            {"text": f"new {i}", "source": "a.txt", "section": "A"} for i in range(3)
+        ],
+    )
+    index_docs(force=True)
+    clone.assert_called_once()  # force re-clones despite the cached corpus
+    assert client.get_collection(name).count() == 3  # rebuilt with the new chunks
