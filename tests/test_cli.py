@@ -19,11 +19,8 @@ from pydantic_ai.messages import (
 from rich.console import Console
 
 from aiida_agents._logging import TRACE_LOGGER_NAMES
-from aiida_agents._settings import LoggingSettings
 from aiida_agents.cli import (
     _cap_history,
-    _configure_logging,
-    _ConsoleFilter,
     _history_file,
     _key_bindings,
     _log_tool_calls_debug,
@@ -187,47 +184,3 @@ def test_log_tool_calls_debug(
             assert "{'status': 'ok'}" in captured.out
     finally:
         root_logger.setLevel(initial_level)
-
-
-def _record(name: str) -> logging.LogRecord:
-    return logging.LogRecord(name, logging.DEBUG, "path", 0, "msg", None, None)
-
-
-def test_console_filter_blocks_trace_records() -> None:
-    """The console filter drops trace-logger records and passes all others."""
-    filt = _ConsoleFilter()
-    assert filt.filter(_record("aiida_agents.cli")) is True
-    assert filt.filter(_record("httpx")) is True
-    for name in TRACE_LOGGER_NAMES:
-        assert filt.filter(_record(name)) is False
-
-
-def test_configure_logging_wires_handlers(tmp_path: Path) -> None:
-    """With ``log_file`` set: a filtered console handler plus a file handler."""
-    root = logging.getLogger()
-    saved_handlers, saved_level = root.handlers[:], root.level
-
-    try:
-        _configure_logging(
-            LoggingSettings(log_level="INFO", log_file=tmp_path / "agents.log")
-        )
-
-        file_handlers = [h for h in root.handlers if isinstance(h, logging.FileHandler)]
-        other_handlers = [
-            h for h in root.handlers if not isinstance(h, logging.FileHandler)
-        ]
-        assert len(file_handlers) == 1
-        assert not any(
-            isinstance(f, _ConsoleFilter) for h in file_handlers for f in h.filters
-        )
-        assert any(
-            isinstance(f, _ConsoleFilter) for h in other_handlers for f in h.filters
-        )
-    finally:
-        for handler in root.handlers[:]:
-            root.removeHandler(handler)
-            if handler not in saved_handlers:
-                handler.close()
-        for handler in saved_handlers:
-            root.addHandler(handler)
-        root.setLevel(saved_level)

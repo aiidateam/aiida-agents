@@ -161,6 +161,23 @@ disallow_untyped_calls = false
 module = "sentence_transformers.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+# sphinx is an opt-in, indexing-only dependency: rag._textbuild imports it lazily
+# (see indexing._clone_and_build_text) and it is absent from the lint env. Its
+# types are only visible when it is installed (dev/indexing env), so don't fail
+# on the missing import in the lint env.
+module = ["sphinx.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# rag._textbuild subclasses sphinx's TextTranslator and returns app.statuscode.
+# With sphinx absent from the lint env (above) both resolve to Any, so relax the
+# Any-subclass and Any-return checks for this one module. With sphinx installed
+# they are real types and these relaxations are inert (full checking still applies).
+module = "aiida_agents.rag._textbuild"
+disallow_subclassing_any = false
+warn_return_any = false
+
 [tool.basedpyright]
 # Not run in CI (mypy is the type checker); this just keeps local basedpyright
 # (e.g. in-editor) aligned with the mypy baseline. Its default "recommended"

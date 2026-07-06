@@ -6,11 +6,10 @@ import asyncio
 import json
 import logging
 import os
-import sys
 from collections.abc import Iterator
 from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from prompt_toolkit import PromptSession
 from prompt_toolkit.formatted_text import HTML
@@ -32,15 +31,11 @@ from rich.panel import Panel
 from rich.text import Text
 
 from aiida_agents._logging import (
-    TRACE_LOGGER_NAMES,
     ToolPart,
-    suppress_noisy_loggers,
+    _configure_logging,
     trace_response,
     trace_tool_part,
 )
-
-if TYPE_CHECKING:
-    from aiida_agents._settings import LoggingSettings
 
 logger = logging.getLogger(__name__)
 console = Console()
@@ -374,38 +369,6 @@ def _print_agent(text: str) -> None:  # pragma: no cover
     console.print(Markdown(text))
     console.print()
     trace_response(text)
-
-
-class _ConsoleFilter(logging.Filter):
-    """Keep trace records (tool calls, agent replies) out of the console handler."""
-
-    def filter(self, record: logging.LogRecord) -> bool:
-        return not record.name.startswith(TRACE_LOGGER_NAMES)
-
-
-def _configure_logging(log_cfg: LoggingSettings) -> None:
-    """Configure console (and optional file) logging for the REPL.
-
-    ``force=True`` removes and closes any pre-existing root handlers. The
-    console handler filters out trace records; the file handler, when
-    enabled, receives everything.
-    """
-    console_handler = logging.StreamHandler(sys.stderr)
-    console_handler.addFilter(_ConsoleFilter())
-    handlers: list[logging.Handler] = [console_handler]
-    if log_cfg.log_file is not None:
-        handlers.append(logging.FileHandler(log_cfg.log_file))
-
-    logging.basicConfig(
-        level=log_cfg.log_level,
-        format="%(levelname)s:%(name)s:%(message)s",
-        handlers=handlers,
-        force=True,
-    )
-
-    # Unconditional: third-party request/debug chatter (one httpx INFO line
-    # per model call, for instance) drowns the conversation at any level.
-    suppress_noisy_loggers()
 
 
 def main() -> None:  # pragma: no cover

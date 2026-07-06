@@ -23,9 +23,8 @@ def main(argv: list[str] | None = None) -> int:
     """
     args = argv if argv is not None else sys.argv[1:]
     if len(args) != 2:
-        print(
-            "Usage: python -m aiida_agents.rag._textbuild <srcdir> <outdir>",
-            file=sys.stderr,
+        sys.stderr.write(
+            "Usage: python -m aiida_agents.rag._textbuild <srcdir> <outdir>\n"
         )
         return 2
     srcdir, outdir = args

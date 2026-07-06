@@ -20,6 +20,14 @@ ELEMENT_NAME_TO_SYMBOL: dict[str, str] = {
 }
 ELEMENT_NAME_TO_SYMBOL.update({"aluminum": "Al", "sulphur": "S", "cesium": "Cs"})
 
+# Every real element symbol, used to reject parses that invent non-elements: a
+# query like 'MultiplyAdd' splits into ['Mu', 'Ad'], which would otherwise run a
+# silent zero-match search instead of telling the caller the input was not a
+# chemical formula.
+_VALID_SYMBOLS: frozenset[str] = frozenset(
+    str(data["symbol"]) for data in elements.values()
+)
+
 
 def search_structures(
     formula: str | None = None,
@@ -48,6 +56,18 @@ def search_structures(
                 target_elements.extend(sub_tokens if sub_tokens else [token])
 
         logger.debug("search_structures: parsed elements %s", target_elements)
+
+        # Reject a parse that produced non-elements rather than running a silent
+        # zero-match search, so the caller (or model) can correct the input.
+        unknown = sorted({e for e in target_elements if e not in _VALID_SYMBOLS})
+        if unknown:
+            msg = (
+                f"{formula!r} does not parse to valid chemical elements "
+                f"(unrecognised: {', '.join(unknown)}). Pass a formula like "
+                f"'SiO2', element symbols like 'Si, O', or element names like "
+                f"'silicon and oxygen'."
+            )
+            raise ValueError(msg)
 
     # Element-set matching pushed to the database: each target element must
     # appear in some kind's ``symbols``, AND-combined across elements. The

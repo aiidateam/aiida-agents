@@ -12,9 +12,13 @@ module's.
 from __future__ import annotations
 
 import logging
-from typing import TypeAlias
+import sys
+from typing import TYPE_CHECKING, TypeAlias
 
 from pydantic_ai.messages import ToolCallPart, ToolReturnPart
+
+if TYPE_CHECKING:
+    from aiida_agents._settings import LoggingSettings
 
 file_logger = logging.getLogger("aiida_agents.file_debug")
 file_logger.propagate = True
@@ -59,3 +63,37 @@ def suppress_noisy_loggers() -> None:
     noisy = ["asyncio", "httpcore", "httpx", "openai", "chromadb", "markdown_it"]
     for logger_name in noisy:
         logging.getLogger(logger_name).setLevel(logging.WARNING)
+
+
+class _ConsoleFilter(logging.Filter):
+    """Keep trace records (tool calls, agent replies) out of the console handler."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        return not record.name.startswith(TRACE_LOGGER_NAMES)
+
+
+def _configure_logging(log_cfg: LoggingSettings) -> None:
+    """Configure console (and optional file) logging for any entry point.
+
+    Shared by the REPL and the MCP server so file logging behaves the same on
+    both. ``force=True`` removes and closes any pre-existing root handlers. The
+    console handler filters out trace records; the file handler, when enabled,
+    receives everything (console records plus the full tool-call/agent-reply
+    traces, independent of ``log_level``).
+    """
+    console_handler = logging.StreamHandler(sys.stderr)
+    console_handler.addFilter(_ConsoleFilter())
+    handlers: list[logging.Handler] = [console_handler]
+    if log_cfg.log_file is not None:
+        handlers.append(logging.FileHandler(log_cfg.log_file))
+
+    logging.basicConfig(
+        level=log_cfg.log_level,
+        format="%(levelname)s:%(name)s:%(message)s",
+        handlers=handlers,
+        force=True,
+    )
+
+    # Unconditional: third-party request/debug chatter (one httpx INFO line
+    # per model call, for instance) drowns the conversation at any level.
+    suppress_noisy_loggers()

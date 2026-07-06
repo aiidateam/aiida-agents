@@ -39,3 +39,18 @@ def test_search_structures(
     record = next(r for r in results if r["pk"] == silicon_structure.pk)
     assert record["formula"] == "Si2"
     assert record["num_sites"] == 2
+
+
+@pytest.mark.parametrize(
+    "formula",
+    [
+        pytest.param("MultiplyAdd", id="workflow-name"),
+        pytest.param("Xx", id="nonexistent-symbol"),
+    ],
+)
+def test_search_structures_rejects_non_elements(formula: str) -> None:
+    """A query that parses to non-elements raises, so the caller can correct it
+    instead of getting a silent empty result (needs no DB: the raise precedes it).
+    """
+    with pytest.raises(ValueError, match="valid chemical elements"):
+        search_structures(formula=formula)

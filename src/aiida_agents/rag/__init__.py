@@ -18,7 +18,7 @@ search_aiida_docs(query)
 from __future__ import annotations
 
 from aiida_agents.rag.indexing import index_docs
-from aiida_agents.rag.retriever import query_docs
+from aiida_agents.rag.retriever import docs_index_available, query_docs
 
 __all__ = ["index_docs", "query_docs", "search_aiida_docs"]
 
@@ -44,6 +44,14 @@ def search_aiida_docs(query: str) -> str:
     """
     results = query_docs(query, limit=3)
     if not results:
+        if not docs_index_available():
+            return (
+                "The AiiDA documentation index has not been built yet, so "
+                "documentation search is unavailable. It must be built once by "
+                "calling aiida_agents.rag.index_docs() before this tool can return "
+                "results. Tell the user to build the index; do not answer AiiDA "
+                "documentation questions from memory in the meantime."
+            )
         return "No relevant AiiDA documentation found for this query."
 
     formatted = []

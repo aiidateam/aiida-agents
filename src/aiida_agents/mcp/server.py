@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-import sys
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -11,6 +9,7 @@ from aiida import load_profile
 from aiida.manage import get_manager
 from fastmcp import FastMCP
 
+from aiida_agents._logging import _configure_logging
 from aiida_agents._settings import (
     LoggingSettings,
     ServerSettings,
@@ -29,7 +28,7 @@ async def _lifespan(_: FastMCP) -> AsyncGenerator[None]:
     load is skipped if one is already active (e.g. the test fixture's), so it
     never clobbers a loaded profile.
     """
-    logging.basicConfig(level=LoggingSettings().log_level, stream=sys.stderr)
+    _configure_logging(LoggingSettings())
     warn_on_unrecognized_settings()
     if get_manager().get_profile() is None:
         load_profile()

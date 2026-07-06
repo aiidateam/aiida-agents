@@ -26,6 +26,10 @@ _MIN_CHUNK_CHARS = 150  # discard stubs shorter than this
 # still mirrors the full docs; this only curates what gets embedded.
 _EXCLUDED_SOURCES: frozenset[str] = frozenset({"reference/_changelog.txt"})
 
+# A code-fence line: ``` optionally indented. Matches both the opening
+# ```lang line and the bare closing ``` (the corpus format from rag._textbuild).
+_FENCE_RE = re.compile(r"^\s*```")
+
 
 def _extract_text_sections(text: str) -> list[tuple[str, str]]:
     """Parse a Sphinx .txt file into (heading, body) pairs.
@@ -92,9 +96,6 @@ def _extract_text_sections(text: str) -> list[tuple[str, str]]:
         sections.append((title, body))
 
     return sections
-
-
-_FENCE_RE = re.compile(r"^\s*```")
 
 
 def _fence_segments(text: str) -> list[tuple[str, bool]]:

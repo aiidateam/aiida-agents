@@ -32,6 +32,20 @@ def _get_client(settings: RagSettings | None = None) -> Any:
     return chromadb.PersistentClient(path=str(path))
 
 
+def _collection_populated(client: Any, name: str) -> bool:
+    """True if a collection named ``name`` exists and holds at least one entry.
+
+    An empty collection counts as absent: a failed or interrupted build can leave
+    a zero-row stub, and both the indexer (skip guard) and the retriever (missing
+    -index message) must treat that stub as "not built", not as a finished index.
+    """
+    for collection in client.list_collections():
+        if collection.name == name:
+            count: int = collection.count()
+            return count > 0
+    return False
+
+
 def _collection_name(embed_fn: EmbeddingFunction) -> str:
     """Collection name keyed by docs version, corpus format, and embedding model.
 

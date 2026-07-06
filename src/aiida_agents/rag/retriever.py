@@ -10,10 +10,27 @@ from __future__ import annotations
 
 import logging
 
-from aiida_agents.rag.store import _DOCS_TAG, _collection_name, _get_client
+from aiida_agents.rag.store import (
+    _DOCS_TAG,
+    _collection_name,
+    _collection_populated,
+    _get_client,
+)
 from aiida_agents.rag.embeddings import get_embedding_function
 
 logger = logging.getLogger(__name__)
+
+
+def docs_index_available() -> bool:
+    """True if a populated docs index exists for the active embedding model.
+
+    Lets callers tell "the index was never built (or is empty)" apart from
+    "queried, but nothing matched", so an unbuilt index can be reported instead
+    of silently returning no results.
+    """
+    client = _get_client()
+    name = _collection_name(get_embedding_function())
+    return _collection_populated(client, name)
 
 
 def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
@@ -37,7 +54,8 @@ def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
 
     if name not in existing:
         logger.warning(
-            "no index for docs %s + embedding '%s' — run `aiida-agents rag init`",
+            "no index for docs %s + embedding '%s' — build it with "
+            "aiida_agents.rag.index_docs()",
             _DOCS_TAG,
             embed_fn.name(),
         )

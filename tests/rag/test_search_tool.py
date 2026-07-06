@@ -18,14 +18,31 @@ from aiida_agents.rag import search_aiida_docs
 
 class TestSearchAiidaDocs:
     def test_returns_string(self) -> None:
-        with patch("aiida_agents.rag.query_docs", return_value=[]):
+        with (
+            patch("aiida_agents.rag.query_docs", return_value=[]),
+            patch("aiida_agents.rag.docs_index_available", return_value=True),
+        ):
             result = search_aiida_docs("anything")
         assert isinstance(result, str)
 
     def test_no_results_message(self) -> None:
-        with patch("aiida_agents.rag.query_docs", return_value=[]):
+        """A built index that simply has no match reports "no relevant docs"."""
+        with (
+            patch("aiida_agents.rag.query_docs", return_value=[]),
+            patch("aiida_agents.rag.docs_index_available", return_value=True),
+        ):
             result = search_aiida_docs("xyzzy unknown term")
         assert "No relevant" in result
+
+    def test_unbuilt_index_message(self) -> None:
+        """No results *and* no index tells the user to build it, not "no match"."""
+        with (
+            patch("aiida_agents.rag.query_docs", return_value=[]),
+            patch("aiida_agents.rag.docs_index_available", return_value=False),
+        ):
+            result = search_aiida_docs("what is a CalcJobNode")
+        assert "has not been built" in result
+        assert "No relevant" not in result
 
     def test_formats_source_and_section(self) -> None:
         fake = [
@@ -53,7 +70,10 @@ class TestSearchAiidaDocs:
         assert "---" in result
 
     def test_delegates_to_query_docs_with_limit_3(self) -> None:
-        with patch("aiida_agents.rag.query_docs", return_value=[]) as mock_qd:
+        with (
+            patch("aiida_agents.rag.query_docs", return_value=[]) as mock_qd,
+            patch("aiida_agents.rag.docs_index_available", return_value=True),
+        ):
             search_aiida_docs("test query")
         mock_qd.assert_called_once_with("test query", limit=3)
 
