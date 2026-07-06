@@ -17,7 +17,7 @@ from pydantic_ai import Agent
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.messages import ModelMessage
 
-from aiida_agents._settings import ModelSettings, warn_on_unrecognized_settings
+from aiida_agents._settings import ModelSettings
 from aiida_agents.cli.ollama import _ensure_ollama_model, _ollama_pull
 from aiida_agents.cli.output import _trace_tool_calls
 
@@ -69,7 +69,6 @@ def _build_agent(
     from aiida import load_profile
     from aiida_agents.agents import get_agent
 
-    warn_on_unrecognized_settings()
     try:
         settings = _resolve_model_settings(provider, model)
         _ensure_ollama_model(settings)

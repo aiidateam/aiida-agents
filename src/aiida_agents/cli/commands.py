@@ -61,6 +61,10 @@ def cli(
     # records stay off the console (see ``_configure_logging``). ``--help`` is an
     # eager option that exits before this runs, so help stays fast.
     _configure_logging(LoggingSettings())
+    # Flag a typo'd AIIDA_AGENTS_* key once, here, so every subcommand surfaces
+    # it (not just the ones that build an agent). Logging is configured first so
+    # the warning is formatted; ``--help`` never reaches this.
+    warn_on_unrecognized_settings()
     ctx.ensure_object(dict)
     ctx.obj["provider"] = provider
     ctx.obj["model"] = model
@@ -101,7 +105,6 @@ def ask_cmd(ctx: click.Context, question: str) -> None:  # pragma: no cover
 @click.pass_context
 def check(ctx: click.Context) -> None:  # pragma: no cover
     """Verify the configured model is reachable, and warm it up."""
-    warn_on_unrecognized_settings()
     settings = _resolve_model_settings(ctx.obj["provider"], ctx.obj["model"])
     click.echo(f"Checking {settings.provider}:{settings.model} …")
     start = time.monotonic()
@@ -122,16 +125,14 @@ def config() -> None:
 @click.pass_context
 def config_show(ctx: click.Context) -> None:
     """Print the effective settings and where each value comes from."""
-    # `config show` is where a user goes to debug their configuration, so a
-    # typo'd AIIDA_AGENTS_* key (silently ignored elsewhere) must surface here.
-    warn_on_unrecognized_settings()
     table = Table(title="aiida-agents configuration")
     table.add_column("Group", style="dim")
     table.add_column("Setting", style="bold")
-    table.add_column("Value")
-    # ``fold`` (not the table default ``ellipsis``) so a long env var wraps
-    # instead of truncating: this column is meant to be copied verbatim to
-    # ``export`` a setting, and ``AIIDA_AGENTS_MAX_TOK…`` is not actionable.
+    # ``fold`` (not the table default ``ellipsis``) on the wide columns, so a
+    # long value or env var wraps instead of hiding characters: both are read or
+    # copied verbatim (a truncated URL, path, or ``AIIDA_AGENTS_MAX_TOK…`` is not
+    # actionable). The short columns keep the default.
+    table.add_column("Value", overflow="fold")
     table.add_column("Env var", style="dim", overflow="fold")
     table.add_column("Source", style="cyan")
     for group, setting, value, env_var, src in _config_rows(
@@ -220,6 +221,11 @@ def rag_build(force: bool) -> None:  # pragma: no cover
             BarColumn(),
             TimeRemainingColumn(),
             console=console,
+            # Tear the bar down on exit so a fast no-op (an already-built index
+            # returns before the first _report) leaves no stale, never-updated
+            # "Cloning…" frame on screen. The permanent ✓ lines are console
+            # prints above the live region, so they survive the teardown.
+            transient=True,
             # Embedding a batch can take ~a minute on a weak GPU; the default 30s
             # speed window lets each sample age out before the next lands, so the
             # ETA never computes. Widen it to span several batches.

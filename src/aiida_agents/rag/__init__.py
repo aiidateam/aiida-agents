@@ -6,6 +6,10 @@ index_docs()
     Build (or rebuild) the ChromaDB vector index from the sphinx text corpus.
     Call once before querying; subsequent calls are no-ops unless ``force=True``.
 
+IndexOutcome
+    Enum returned by ``index_docs`` (``BUILT`` / ``ALREADY_PRESENT`` /
+    ``EMPTY_CORPUS``) so a caller can report what the build actually did.
+
 query_docs(query, limit=3)
     Low-level semantic search — returns raw result dicts with ``text``,
     ``source``, and ``section`` keys.
