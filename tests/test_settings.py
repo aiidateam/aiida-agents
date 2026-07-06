@@ -390,6 +390,50 @@ def test_warns_on_unrecognized_prefixed_key(
     assert "typo" in caplog.text.lower()
 
 
+@pytest.mark.parametrize(
+    "typo, suggestion",
+    [
+        pytest.param(
+            "AIIDA_AGENS_PROVIDER", "AIIDA_AGENTS_PROVIDER", id="prefix-drop-t"
+        ),
+        pytest.param("AIDA_AGENTS_MODEL", "AIIDA_AGENTS_MODEL", id="prefix-drop-i"),
+        pytest.param("OLLAMA_BAES_URL", "OLLAMA_BASE_URL", id="alias-transposed"),
+    ],
+)
+def test_warns_on_mistyped_prefix_with_suggestion(
+    typo: str,
+    suggestion: str,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A key that misses the namespace but closely resembles a real setting
+    (a mistyped prefix) is flagged with a 'did you mean' suggestion, not dropped.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(typo, "x")
+    with caplog.at_level(logging.WARNING, logger="aiida_agents._settings"):
+        warn_on_unrecognized_settings()
+    assert typo in caplog.text
+    assert suggestion in caplog.text
+
+
+def test_does_not_warn_on_plausible_neighbour_of_a_setting(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A legitimate, similarly-named var (``OPENAI_API_BASE``, next to the
+    recognised ``OPENAI_API_KEY``) stays below the typo threshold, so a real
+    provider variable is never mistaken for a typo.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_BASE", "http://localhost:1234/v1")
+    with caplog.at_level(logging.WARNING, logger="aiida_agents._settings"):
+        warn_on_unrecognized_settings()
+    assert "OPENAI_API_BASE" not in caplog.text
+
+
 def test_does_not_warn_on_recognized_keys(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,

@@ -23,6 +23,7 @@ pydantic-settings reads both the process environment and a ``.env`` file.
 
 from __future__ import annotations
 
+import difflib
 import logging
 import os
 from pathlib import Path
@@ -251,10 +252,9 @@ def _known_env_var_names() -> frozenset[str]:
     return frozenset(names)
 
 
-def _present_prefixed_keys(env_file: Path) -> set[str]:
-    """``AIIDA_AGENTS_*`` keys set in the process env or the ``.env`` file."""
-    prefix = _Base.model_config.get("env_prefix", "").upper()
-    present = {key.upper() for key in os.environ if key.upper().startswith(prefix)}
+def _present_env_keys(env_file: Path) -> set[str]:
+    """Upper-cased env var names set in the process env or the ``.env`` file."""
+    present = {key.upper() for key in os.environ}
     if env_file.is_file():
         for raw_line in env_file.read_text(encoding="utf-8").splitlines():
             line = raw_line.strip()
@@ -263,28 +263,57 @@ def _present_prefixed_keys(env_file: Path) -> set[str]:
             key = line.split("=", 1)[0].strip()
             if key.startswith("export "):
                 key = key.removeprefix("export ").strip()
-            if key.upper().startswith(prefix):
-                present.add(key.upper())
+            present.add(key.upper())
     return present
 
 
-def warn_on_unrecognized_settings(env_file: Path | None = None) -> None:
-    """Warn about any ``AIIDA_AGENTS_*`` variable no settings group declares.
+# Similarity above which a stray, out-of-namespace key is treated as a typo of
+# a real setting rather than an unrelated variable. Genuine near-misses (a one-
+# or two-character slip in a 15+ character name, e.g. ``AIIDA_AGENS_PROVIDER``)
+# score ~0.97; legitimate neighbours like ``OPENAI_API_BASE`` vs
+# ``OPENAI_API_KEY`` sit around 0.8, so 0.9 separates them with headroom.
+_TYPO_SIMILARITY = 0.9
 
-    A typo'd key (e.g. ``AIIDA_AGENTS_PROVDER``) is otherwise dropped silently
-    by ``extra="ignore"``, leaving the setting at its default. Call this once at
-    startup so the typo is surfaced instead of quietly ignored. Only the
-    ``AIIDA_AGENTS_`` namespace is checked; the unprefixed ``OLLAMA_BASE_URL``
-    can't be told apart from unrelated environment variables.
+
+def warn_on_unrecognized_settings(env_file: Path | None = None) -> None:
+    """Warn about a set variable that looks like a mistyped aiida-agents setting.
+
+    Two failure modes are surfaced, both otherwise dropped silently by
+    ``extra="ignore"`` (leaving the setting at its default):
+
+    * a *field* typo inside the namespace (``AIIDA_AGENTS_PROVDER``), flagged
+      because it carries the ``AIIDA_AGENTS_`` prefix but matches no field;
+    * a *prefix* typo that lands outside the namespace
+      (``AIIDA_AGENS_PROVIDER``), flagged only when it closely resembles a real
+      setting name, so unrelated environment variables stay silent.
+
+    Call this once at startup. Unprefixed but recognised names
+    (``OLLAMA_BASE_URL``, the cloud SDK keys) are known and never warned.
 
     :param env_file: ``.env`` file to scan; defaults to ``.env`` in the current
         directory, matching what the settings groups load.
     """
     target = env_file if env_file is not None else Path(".env")
-    unknown = _present_prefixed_keys(target) - _known_env_var_names()
-    for key in sorted(unknown):
-        logger.warning(
-            "%s is set but is not a recognised aiida-agents setting; it will be "
-            "ignored. Check for a typo.",
-            key,
+    prefix = _Base.model_config.get("env_prefix", "").upper()
+    known = _known_env_var_names()
+    for key in sorted(_present_env_keys(target) - known):
+        if key.startswith(prefix):
+            # Right namespace, unknown field: a typo in the setting name itself.
+            logger.warning(
+                "%s is set but is not a recognised aiida-agents setting; it "
+                "will be ignored. Check for a typo.",
+                key,
+            )
+            continue
+        # Outside the namespace: only a close resemblance to a real setting
+        # (a mistyped prefix) is worth flagging; everything else is left alone.
+        close = difflib.get_close_matches(
+            key, sorted(known), n=1, cutoff=_TYPO_SIMILARITY
         )
+        if close:
+            logger.warning(
+                "%s is set but is not a recognised aiida-agents setting; did you "
+                "mean %s? It will be ignored.",
+                key,
+                close[0],
+            )
