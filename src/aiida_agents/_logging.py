@@ -3,10 +3,9 @@
 The trace loggers record what the agent did (tool calls, tool returns, final
 replies) as DEBUG records. They are ordinary propagating loggers: whether the
 records surface anywhere is decided entirely by the handlers the entry point
-installs. The REPL writes them to the optional log file and keeps them out of
-the console handler via ``TRACE_LOGGER_NAMES`` (see ``cli._configure_logging``);
-how the same events are *rendered* on screen is the REPL's concern, not this
-module's.
+installs. ``_configure_logging`` (below) writes them to the optional log file
+and keeps them out of the console handler via ``TRACE_LOGGER_NAMES``; how the
+same events are *rendered* on screen is the REPL's concern, not this module's.
 """
 
 from __future__ import annotations
@@ -85,6 +84,10 @@ def _configure_logging(log_cfg: LoggingSettings) -> None:
     console_handler.addFilter(_ConsoleFilter())
     handlers: list[logging.Handler] = [console_handler]
     if log_cfg.log_file is not None:
+        # Create the parent dir so a log_file pointed at a not-yet-existing
+        # directory enables file logging instead of crashing the entry point
+        # at startup with a raw FileNotFoundError.
+        log_cfg.log_file.parent.mkdir(parents=True, exist_ok=True)
         handlers.append(logging.FileHandler(log_cfg.log_file))
 
     logging.basicConfig(

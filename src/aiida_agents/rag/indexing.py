@@ -127,9 +127,18 @@ def _clone_and_build_text(target_dir: str) -> None:
                 f"the docs build failed. Last stderr:\n{result.stderr[-2000:]}"
             )
             raise RuntimeError(msg)
+        # Publish atomically: copy into a sibling staging dir (a crash here
+        # leaves any previous corpus untouched), then swap it into place with a
+        # single rename. Copying straight into target_dir is not atomic — an
+        # interrupted copytree would leave a truncated corpus that later runs
+        # reuse as if it were complete.
+        staging = f"{target_dir}.staging"
+        if os.path.exists(staging):
+            shutil.rmtree(staging)
+        shutil.copytree(str(text_out), staging)
         if Path(target_dir).exists():
             shutil.rmtree(target_dir)
-        shutil.copytree(str(text_out), target_dir)
+        os.replace(staging, target_dir)
 
     logger.info("text corpus ready at %s", target_dir)
 
@@ -147,7 +156,9 @@ def index_docs(force: bool = False) -> None:
     empty or half-built stub that the next run would mistake for a finished index.
 
     Args:
-        force: If True, delete and rebuild even if a populated collection exists.
+        force: If True, re-render the corpus and rebuild the collection even if a
+            populated one already exists. A rebuild that yields no chunks leaves
+            the existing index untouched.
     """
     cfg = RagSettings()
     client = _get_client(cfg)
@@ -163,7 +174,10 @@ def index_docs(force: bool = False) -> None:
     # corpus format is part of the directory name, so a format bump regenerates
     # the corpus instead of reusing a stale cached rendering.
     text_dir = str(cfg.vector_db_path / f"aiida_text_corpus__{_CORPUS_FORMAT}")
-    if not os.path.exists(text_dir) or not list(Path(text_dir).rglob("*.txt")):
+    # ``force`` re-renders the corpus too: a cached corpus may itself be stale or
+    # (before the atomic swap above) truncated, and a forced reindex must be able
+    # to repair it, not just rebuild the collection from the same bad corpus.
+    if force or not os.path.exists(text_dir) or not list(Path(text_dir).rglob("*.txt")):
         _clone_and_build_text(text_dir)
     else:
         logger.info("text corpus already exists at %s — skipping clone", text_dir)

@@ -24,9 +24,12 @@ async def _lifespan(_: FastMCP) -> AsyncGenerator[None]:
 
     Runs on every launch path (``main()``, ``fastmcp run``, ``fastmcp dev``),
     unlike a ``main()``-only setup. Logging is configured here rather than at
-    import time so importing the module stays side-effect-free. The profile
-    load is skipped if one is already active (e.g. the test fixture's), so it
-    never clobbers a loaded profile.
+    import time so importing the module stays side-effect-free.
+    ``_configure_logging`` applies the REPL's policy: it resets the root
+    handlers (``force=True``) and quiets the noisy third-party loggers, so even
+    at ``DEBUG`` the server no longer surfaces per-request httpx/httpcore lines.
+    The profile load is skipped if one is already active (e.g. the test
+    fixture's), so it never clobbers a loaded profile.
     """
     _configure_logging(LoggingSettings())
     warn_on_unrecognized_settings()

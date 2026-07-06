@@ -17,14 +17,6 @@ from aiida_agents.rag import search_aiida_docs
 
 
 class TestSearchAiidaDocs:
-    def test_returns_string(self) -> None:
-        with (
-            patch("aiida_agents.rag.query_docs", return_value=[]),
-            patch("aiida_agents.rag.docs_index_available", return_value=True),
-        ):
-            result = search_aiida_docs("anything")
-        assert isinstance(result, str)
-
     def test_no_results_message(self) -> None:
         """A built index that simply has no match reports "no relevant docs"."""
         with (

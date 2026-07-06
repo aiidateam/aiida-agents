@@ -48,9 +48,9 @@ def search_aiida_docs(query: str) -> str:
             return (
                 "The AiiDA documentation index has not been built yet, so "
                 "documentation search is unavailable. It must be built once by "
-                "calling aiida_agents.rag.index_docs() before this tool can return "
-                "results. Tell the user to build the index; do not answer AiiDA "
-                "documentation questions from memory in the meantime."
+                'running this in a shell: python -c "from aiida_agents.rag import '
+                'index_docs; index_docs()". Tell the user to run that; do not '
+                "answer AiiDA documentation questions from memory in the meantime."
             )
         return "No relevant AiiDA documentation found for this query."
 
