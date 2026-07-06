@@ -19,7 +19,7 @@ from pydantic_ai.messages import ModelMessage
 
 from aiida_agents._settings import ModelSettings, warn_on_unrecognized_settings
 from aiida_agents.cli.ollama import _ensure_ollama_model, _ollama_pull
-from aiida_agents.cli.output import _log_tool_calls_debug, console
+from aiida_agents.cli.output import _trace_tool_calls
 
 logger = logging.getLogger(__name__)
 
@@ -32,7 +32,9 @@ async def ask(
     """Run a single query through the agent, returning the result."""
     logger.info("agent query: %s", question)
     result = await agent.run(question, message_history=message_history)
-    _log_tool_calls_debug(result.new_messages(), console)
+    # Record the tool-call trace to the log file now (always); the console
+    # render is the caller's job, done after any live spinner has stopped.
+    _trace_tool_calls(result.new_messages())
     return result
 
 

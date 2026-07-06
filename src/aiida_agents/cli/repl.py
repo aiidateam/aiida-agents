@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import logging
 import os
 import time
-from contextlib import AbstractContextManager, nullcontext
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -21,7 +19,12 @@ from pydantic_ai.tools import DeferredToolRequests
 from aiida_agents._settings import ModelSettings, ReplSettings
 from aiida_agents.cli.session import ask
 from aiida_agents.cli.hitl import _handle_deferred
-from aiida_agents.cli.output import _format_duration, _print_agent, console
+from aiida_agents.cli.output import (
+    _format_duration,
+    _print_agent,
+    _render_tool_calls,
+    console,
+)
 
 
 def _cap_history(messages: list[ModelMessage], max_turns: int) -> list[ModelMessage]:
@@ -136,15 +139,7 @@ def _run_repl(agent: Agent, settings: ModelSettings) -> None:  # pragma: no cove
 
         start = time.monotonic()
         try:
-            # A live spinner fights the interleaved tool-call trace that renders
-            # to the console in debug mode, so skip it and let the trace flow.
-            status_ctx: AbstractContextManager[object]
-            if logging.getLogger().getEffectiveLevel() > logging.DEBUG:
-                status_ctx = console.status("[dim]thinking…[/]", spinner="dots")
-            else:
-                status_ctx = nullcontext()
-
-            with status_ctx:
+            with console.status("[dim]thinking…[/]", spinner="dots"):
                 result = asyncio.run(
                     ask(
                         agent,
@@ -159,6 +154,11 @@ def _run_repl(agent: Agent, settings: ModelSettings) -> None:  # pragma: no cove
             print(f"❌ Error: {exc}")
             continue
         elapsed = time.monotonic() - start
+
+        # Render the run's tool-call trace now that the spinner has stopped: the
+        # traces are a post-run dump, so printing them into the still-live
+        # spinner region above would fight its redraws. Debug-gated inside.
+        _render_tool_calls(result.new_messages(), console)
 
         if isinstance(result.output, DeferredToolRequests):
             history = _handle_deferred(agent, result, history)

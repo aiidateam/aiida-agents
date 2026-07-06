@@ -30,7 +30,7 @@ from aiida_agents.cli.session import (
 )
 from aiida_agents.cli.ollama import _prompt_pull_ollama_model
 from aiida_agents.cli.config import _config_rows
-from aiida_agents.cli.output import _format_duration, console
+from aiida_agents.cli.output import _format_duration, _render_tool_calls, console
 from aiida_agents.cli.repl import _run_repl
 
 
@@ -86,6 +86,7 @@ def ask_cmd(ctx: click.Context, question: str) -> None:  # pragma: no cover
     """Answer a single QUESTION and exit (one-shot; scriptable)."""
     agent, _ = _build_agent(ctx.obj["provider"], ctx.obj["model"], ctx.obj["profile"])
     result = asyncio.run(ask(agent, question))
+    _render_tool_calls(result.new_messages(), console)  # debug-gated; no spinner here
     if isinstance(result.output, DeferredToolRequests):
         click.echo(
             "The agent proposed a write action, which needs interactive approval. "
@@ -221,9 +222,13 @@ def rag_build(force: bool) -> None:  # pragma: no cover
 
             def _report(done: int, total: int) -> None:
                 if done == 0:
-                    # index_docs signals embed start with done=0; zero the timer
-                    # here so the ETA reflects the embed rate, not the preceding
-                    # clone/sphinx time.
+                    # The corpus phase (clone + sphinx + chunk) has finished and
+                    # embedding is starting. Leave a permanent line for it above
+                    # the live bar so the completed step stays visible instead of
+                    # being overwritten, then repurpose the task for embedding.
+                    # Resetting also zeroes the timer, so the ETA reflects the
+                    # embed rate, not the preceding clone/sphinx time.
+                    console.print(f"✓ Text corpus ready ({total} chunks)")
                     bar.reset(task, total=total)
                 bar.update(
                     task,

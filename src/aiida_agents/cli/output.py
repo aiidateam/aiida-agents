@@ -68,17 +68,38 @@ def _render_part(part: ToolPart, console: Console) -> None:
     console.print()
 
 
-def _log_tool_calls_debug(messages: list[ModelMessage], console: Console) -> None:
-    """Record tool calls/returns to the trace log; render on the console at DEBUG.
+def _trace_tool_calls(messages: list[ModelMessage]) -> None:
+    """Record every tool call/return to the trace log (level-independent).
 
-    The trace log always records: the log file's content must not depend on
-    the console log level. Only the console rendering is debug-gated.
+    The log file's content must not depend on the console log level, so this
+    always records; rendering to the console is a separate, debug-gated concern
+    (:func:`_render_tool_calls`).
     """
-    render = logging.getLogger().getEffectiveLevel() <= logging.DEBUG
     for part in _tool_parts(messages):
         trace_tool_part(part)
-        if render:
-            _render_part(part, console)
+
+
+def _render_tool_calls(messages: list[ModelMessage], console: Console) -> None:
+    """Render tool calls/returns on the console, but only at DEBUG.
+
+    Kept separate from :func:`_trace_tool_calls` so a caller with a live spinner
+    or progress bar can record during the run and render *after* the live region
+    is torn down, rather than printing into it.
+    """
+    if logging.getLogger().getEffectiveLevel() > logging.DEBUG:
+        return
+    for part in _tool_parts(messages):
+        _render_part(part, console)
+
+
+def _log_tool_calls_debug(messages: list[ModelMessage], console: Console) -> None:
+    """Record to the trace log (always) and render on the console at DEBUG.
+
+    Convenience for callers with no live region to coordinate around; the REPL
+    splits these so it can render after its spinner stops.
+    """
+    _trace_tool_calls(messages)
+    _render_tool_calls(messages, console)
 
 
 def _format_duration(seconds: float) -> str:

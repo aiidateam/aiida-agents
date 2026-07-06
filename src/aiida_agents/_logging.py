@@ -82,6 +82,15 @@ def _configure_logging(log_cfg: LoggingSettings) -> None:
     """
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.addFilter(_ConsoleFilter())
+    # The console is the interactive surface (rich replies, spinners, progress
+    # bars); INFO-level operational logs duplicate that output and collide with
+    # rich's live regions, so keep them off the console and let the log file
+    # capture them. DEBUG is an explicit opt-in to verbosity, so it passes
+    # through; WARNING and above always surface. The file handler stays
+    # unfiltered and receives everything regardless.
+    console_handler.setLevel(
+        logging.WARNING if log_cfg.log_level == "INFO" else log_cfg.log_level
+    )
     handlers: list[logging.Handler] = [console_handler]
     if log_cfg.log_file is not None:
         # Create the parent dir when it doesn't exist yet, so a log_file in a
