@@ -9,6 +9,7 @@ lives and how a collection is named. The persistence path defaults to
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from typing import Any
 
 import chromadb
@@ -44,6 +45,66 @@ def _collection_populated(client: Any, name: str) -> bool:
             count: int = collection.count()
             return count > 0
     return False
+
+
+@dataclass(frozen=True)
+class CollectionInfo:
+    """A persisted collection's user-facing facts (from its build-time metadata)."""
+
+    name: str
+    chunks: int
+    docs_version: str
+    embedding: str
+
+
+@dataclass(frozen=True)
+class IndexStatus:
+    """Network-free snapshot of the RAG store, for ``aiida-agents rag status``."""
+
+    store_path: str
+    store_exists: bool
+    configured_docs_version: str
+    configured_embed_backend: str
+    configured_embed_model: str
+    collections: tuple[CollectionInfo, ...]
+
+    @property
+    def built(self) -> bool:
+        """True if any populated collection is present (a usable index exists)."""
+        return any(c.chunks > 0 for c in self.collections)
+
+
+def index_status(settings: RagSettings | None = None) -> IndexStatus:
+    """Introspect the persisted store directly, without a live embedder.
+
+    Reads the collections and their build-time metadata straight from disk, so
+    it reports the real persisted state regardless of whether Ollama is
+    reachable (constructing the live embedding function would probe the network
+    and could silently fall back to a different backend, and thus a different
+    collection name).
+    """
+    cfg = settings if settings is not None else RagSettings()
+    if not cfg.vector_db_path.exists():
+        collections: tuple[CollectionInfo, ...] = ()
+    else:
+        client = _get_client(cfg)
+        collections = tuple(
+            CollectionInfo(
+                name=c.name,
+                chunks=c.count(),
+                docs_version=(c.metadata or {}).get("docs_version", "unknown"),
+                embedding=(c.metadata or {}).get("embedding", "unknown"),
+            )
+            for c in client.list_collections()
+        )
+    return IndexStatus(
+        store_path=str(cfg.vector_db_path),
+        store_exists=cfg.vector_db_path.exists(),
+        configured_docs_version=_DOCS_TAG,
+        configured_embed_backend=str(cfg.embed_backend),
+        configured_embed_model=cfg.embed_model,
+        collections=collections,
+    )
 
 
 def _collection_name(embed_fn: EmbeddingFunction) -> str:

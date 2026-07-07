@@ -22,6 +22,7 @@ import pytest
 from pydantic import ValidationError
 
 from aiida_agents._settings import (
+    _SETTINGS_GROUPS,
     AgentSettings,
     LoggingSettings,
     ModelSettings,
@@ -416,6 +417,19 @@ def test_warns_on_mistyped_prefix_with_suggestion(
         warn_on_unrecognized_settings()
     assert typo in caplog.text
     assert suggestion in caplog.text
+
+
+@pytest.mark.parametrize("settings_cls", _SETTINGS_GROUPS, ids=lambda c: c.__name__)
+def test_every_field_is_documented(settings_cls: type[_Base]) -> None:
+    """Every field carries a description (its attribute docstring), so IDE hover
+    and the ``config init`` template stay complete as fields are added.
+    """
+    undocumented = [
+        name
+        for name, field in settings_cls.model_fields.items()
+        if not field.description
+    ]
+    assert not undocumented, f"{settings_cls.__name__}: {undocumented}"
 
 
 def test_does_not_warn_on_plausible_neighbour_of_a_setting(

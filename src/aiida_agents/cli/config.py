@@ -8,6 +8,7 @@ from pathlib import Path
 from pydantic_settings import BaseSettings
 
 from aiida_agents._settings import (
+    LoggingSettings,
     ModelSettings,
     OllamaSettings,
     RagSettings,
@@ -42,6 +43,38 @@ def _dotenv_keys(path: Path) -> set[str]:
         key = line.split("=", 1)[0].strip().removeprefix("export ").strip()
         keys.add(key.upper())
     return keys
+
+
+def _env_template() -> str:
+    """A commented ``.env`` scaffold listing every recognised setting.
+
+    Derived from the settings classes, so the keys are correct by construction:
+    a generated template can never teach a typo. Every line is commented out and
+    carries the field's default; secrets are listed with an empty value, never a
+    default. Uncomment and edit a line to override.
+    """
+    groups = (ModelSettings, OllamaSettings, ReplSettings, RagSettings, LoggingSettings)
+    lines = [
+        "# aiida-agents configuration.",
+        "# Uncomment a line and set its value to override the default.",
+        "",
+    ]
+    for cls in groups:
+        lines.append(f"# --- {cls.__name__.removesuffix('Settings').lower()} ---")
+        for field_name, field in cls.model_fields.items():
+            env_var = _env_var_for(cls, field_name)
+            # A field's description goes on its own comment line(s) above the key,
+            # so uncommenting the key never drags an inline comment into the value.
+            if field.description:
+                lines.extend(f"#   {line}" for line in field.description.splitlines())
+            if field_name.endswith("_key") or field.is_required():
+                # Secrets get no default; a required field has none to show.
+                lines.append(f"# {env_var}=")
+            else:
+                default = field.default
+                lines.append(f"# {env_var}={'' if default is None else default}")
+        lines.append("")
+    return "\n".join(lines)
 
 
 def _group_name(obj: BaseSettings) -> str:

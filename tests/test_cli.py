@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from pathlib import Path
 
@@ -232,7 +233,7 @@ def test_cli_exposes_expected_commands() -> None:
     """The top-level group lists every subcommand we ship."""
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    for command in ("ask", "chat", "check", "config", "rag"):
+    for command in ("ask", "chat", "check", "config", "doctor", "mcp", "rag", "warm"):
         assert command in result.output
 
 
@@ -420,3 +421,228 @@ def test_ollama_lists_model_normalizes_latest_tag(model: str, present: bool) -> 
         "qwen3.5:9b                  def  6.6 GB\n"
     )
     assert _ollama_lists_model(model, out) is present
+
+
+def test_check_verifies_reachability_without_generating(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`check` must probe reachability, never warm/generate the model."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "aiida_agents.cli.commands._check_reachable",
+        lambda settings: calls.append("reachable"),
+    )
+    monkeypatch.setattr(
+        "aiida_agents.cli.commands._probe_model",
+        lambda settings: calls.append("generate"),
+    )
+    result = CliRunner().invoke(cli, ["check"])
+    assert result.exit_code == 0
+    assert calls == ["reachable"]
+
+
+def test_warm_fires_the_generation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`warm` runs the generation probe that loads the model."""
+    calls: list[str] = []
+    monkeypatch.setattr(
+        "aiida_agents.cli.commands._probe_model",
+        lambda settings: calls.append("generate"),
+    )
+    result = CliRunner().invoke(cli, ["warm"])
+    assert result.exit_code == 0
+    assert calls == ["generate"]
+
+
+class _FakeModelsPage:
+    def __init__(self, ids: list[str]) -> None:
+        self.data = [type("M", (), {"id": i})() for i in ids]
+
+
+class _FakeAsyncClient:
+    def __init__(self, ids: list[str], *, hang: bool = False) -> None:
+        self._ids, self._hang = ids, hang
+        self.models = self
+
+    async def list(self) -> _FakeModelsPage:
+        if self._hang:
+            await asyncio.sleep(1)
+        return _FakeModelsPage(self._ids)
+
+
+def test_list_model_ids_returns_advertised_ids() -> None:
+    """The listing helper collects the endpoint's model ids."""
+    from aiida_agents.cli.session import _list_model_ids
+
+    assert asyncio.run(_list_model_ids(_FakeAsyncClient(["a", "b"]))) == {"a", "b"}
+
+
+def test_list_model_ids_times_out_as_connection_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A slow endpoint becomes a connection error (never an indefinite hang)."""
+    from aiida_agents.cli import session
+
+    monkeypatch.setattr(session, "_REACHABILITY_TIMEOUT", 0.01)
+    with pytest.raises(ConnectionError, match="could not connect"):
+        asyncio.run(session._list_model_ids(_FakeAsyncClient([], hang=True)))
+
+
+def test_version_option_prints_version() -> None:
+    """`--version` reports the installed package version and exits cleanly."""
+    from importlib.metadata import version
+
+    result = CliRunner().invoke(cli, ["--version"])
+    assert result.exit_code == 0
+    assert version("aiida-agents") in result.output
+
+
+# --- fail-fast on a mistyped setting key -----------------------------------
+
+
+def _one_typo() -> list[tuple[str, str | None]]:
+    return [("AIIDA_AGENS_PROVIDER", "AIIDA_AGENTS_PROVIDER")]
+
+
+def test_action_command_fails_fast_on_mistyped_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A command that acts on config exits 2, before doing work, on a typo'd key."""
+    monkeypatch.setattr(
+        "aiida_agents.cli.commands.find_unrecognized_settings", _one_typo
+    )
+    result = CliRunner().invoke(cli, ["rag", "status"])
+    assert result.exit_code == 2
+    assert "AIIDA_AGENS_PROVIDER" in result.output
+    assert "did you mean AIIDA_AGENTS_PROVIDER" in result.output
+
+
+def test_config_show_flags_but_still_runs_on_typo(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`config show` reports the typo yet renders the table (exit 0), to aid debugging."""
+    monkeypatch.setattr(
+        "aiida_agents.cli.commands.find_unrecognized_settings", _one_typo
+    )
+    result = CliRunner().invoke(cli, ["config", "show"])
+    assert result.exit_code == 0
+    assert "AIIDA_AGENS_PROVIDER" in result.output
+
+
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["check", "--help"], id="command-help"),
+        pytest.param(["rag", "--help"], id="group-help"),
+        pytest.param(["rag", "status", "-h"], id="subcommand-h"),
+    ],
+)
+def test_help_bypasses_the_settings_check(
+    monkeypatch: pytest.MonkeyPatch, args: list[str]
+) -> None:
+    """--help / -h resolve before the guard runs, so they work despite a typo."""
+    monkeypatch.setattr(
+        "aiida_agents.cli.commands.find_unrecognized_settings", _one_typo
+    )
+    assert CliRunner().invoke(cli, args).exit_code == 0
+
+
+# --- config init / path -----------------------------------------------------
+
+
+def test_env_template_keys_are_all_recognized() -> None:
+    """Every key the template scaffolds is a real setting: it can't teach a typo."""
+    from aiida_agents._settings import _known_env_var_names
+    from aiida_agents.cli.config import _env_template
+
+    known = _known_env_var_names()
+    keys = [
+        key
+        for line in _env_template().splitlines()
+        if line.startswith("# ") and "=" in line
+        # env-var lines are `# NAME=...`; description lines (`#   ... x=y`) and
+        # section headers are excluded because a key token has no spaces.
+        for key in [line[2:].split("=", 1)[0]]
+        if " " not in key
+    ]
+    assert keys
+    assert set(keys) <= known
+    assert "AIIDA_AGENTS_PROVIDER" in keys
+    assert "OPENAI_API_KEY" in keys
+
+
+def test_config_init_writes_template_and_refuses_overwrite(tmp_path: Path) -> None:
+    """`config init` writes a template, then declines to clobber it without --force."""
+    first = CliRunner().invoke(cli, ["config", "init"])
+    assert first.exit_code == 0
+    written = (tmp_path / ".env").read_text(encoding="utf-8")
+    assert "AIIDA_AGENTS_PROVIDER=ollama" in written
+
+    second = CliRunner().invoke(cli, ["config", "init"])
+    assert second.exit_code == 1
+    assert "already exists" in second.output
+
+    forced = CliRunner().invoke(cli, ["config", "init", "--force"])
+    assert forced.exit_code == 0
+
+
+def test_config_path_reports_the_env_file(tmp_path: Path) -> None:
+    """`config path` names the .env it reads and whether it is present."""
+    result = CliRunner().invoke(cli, ["config", "path"])
+    assert result.exit_code == 0
+    assert ".env" in result.output
+    assert "not present" in result.output
+
+
+# --- rag search / dotenv / parse-args --------------------------------------
+
+
+def test_rag_search_errors_cleanly_without_an_index(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`rag search` with no index is a clean CLI error, not a traceback."""
+    monkeypatch.setattr("aiida_agents.cli.commands.find_unrecognized_settings", list)
+    monkeypatch.setattr(
+        "aiida_agents.rag.retriever.docs_index_available", lambda: False
+    )
+    result = CliRunner().invoke(cli, ["rag", "search", "what is a calcjob"])
+    assert result.exit_code == 1
+    assert "No RAG index" in result.output
+
+
+def test_dotenv_keys_parses_assignments(tmp_path: Path) -> None:
+    """Keys are upper-cased; comments, blanks, non-assignments, and `export ` handled."""
+    from aiida_agents.cli.config import _dotenv_keys
+
+    env = tmp_path / ".env"
+    env.write_text(
+        "# comment\n\nAIIDA_AGENTS_MODEL=foo\n"
+        "export OLLAMA_BASE_URL=http://x\nnot_an_assignment\nlower=bar\n",
+        encoding="utf-8",
+    )
+    assert _dotenv_keys(env) == {"AIIDA_AGENTS_MODEL", "OLLAMA_BASE_URL", "LOWER"}
+
+
+def test_dotenv_keys_missing_file_is_empty(tmp_path: Path) -> None:
+    """A missing .env yields no keys rather than raising."""
+    from aiida_agents.cli.config import _dotenv_keys
+
+    assert _dotenv_keys(tmp_path / "absent.env") == set()
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        pytest.param({"a": 1}, {"a": 1}, id="dict-passthrough"),
+        pytest.param('{"a": 1}', {"a": 1}, id="json-string"),
+        pytest.param("not json", {}, id="malformed-json"),
+        pytest.param(None, {}, id="none"),
+        pytest.param("[1, 2]", {}, id="json-but-not-a-dict"),
+    ],
+)
+def test_parse_args_coerces_to_dict(
+    raw: str | dict[str, object] | None, expected: dict[str, object]
+) -> None:
+    """Tool-call args become a dict whether they arrive as a dict, JSON, or junk."""
+    from aiida_agents.cli.hitl import _parse_args
+
+    assert _parse_args(raw) == expected

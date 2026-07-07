@@ -87,12 +87,68 @@ def _probe_model(settings: ModelSettings) -> None:  # pragma: no cover
     """Fire a minimal generation against the configured model.
 
     A failure surfaces here (before a session), and for a local Ollama model the
-    call loads it into memory so the first real query isn't a cold start.
+    call loads it into memory so the first real query isn't a cold start. This is
+    the heavy path behind ``warm``; ``check`` uses :func:`_check_reachable`, which
+    never generates.
     """
     from aiida_agents.agents._models import get_model
 
     probe = Agent(get_model(model_settings=settings))
     asyncio.run(probe.run("Reply with the single word: ok."))
+
+
+# A reachability check must never hang, so the model listing is bounded.
+_REACHABILITY_TIMEOUT = 8.0
+
+
+async def _list_model_ids(client: Any) -> set[str]:
+    """Model ids the endpoint advertises, via a cheap listing under a timeout."""
+    try:
+        page = await asyncio.wait_for(
+            client.models.list(), timeout=_REACHABILITY_TIMEOUT
+        )
+    except TimeoutError as exc:
+        # Phrase it so ``_diagnose_probe_failure`` routes it to the "unreachable"
+        # branch (it matches on "connect").
+        msg = f"could not connect within {_REACHABILITY_TIMEOUT:.0f}s"
+        raise ConnectionError(msg) from exc
+    return {item.id for item in page.data}
+
+
+def _check_reachable(settings: ModelSettings) -> None:  # pragma: no cover
+    """Verify config, endpoint reachability, and model availability, no generation.
+
+    Builds the model (validating the provider, base_url, and key presence), then
+    lists the endpoint's models (one cheap GET under a short timeout). It never
+    loads or runs the model. Reachability / auth failures raise for the caller to
+    diagnose; a configured model the endpoint doesn't advertise raises
+    ``SystemExit(1)`` with an actionable hint.
+    """
+    from aiida_agents.agents._models import get_model
+
+    model = get_model(model_settings=settings)
+    # OpenAIChatModel / AnthropicModel both expose the underlying SDK client; the
+    # base ``Model`` type does not, hence the ignore.
+    client: Any = model.client  # type: ignore[attr-defined]
+    click.echo(f"Endpoint: {client.base_url}")
+    ids = asyncio.run(_list_model_ids(client))
+    click.echo(f"✓ reachable ({len(ids)} models advertised)")
+
+    # Ollama lists an untagged model as ``<name>:latest``; normalise so an
+    # untagged configured name still matches. Cloud ids carry no such suffix.
+    wanted = settings.model
+    if settings.provider == "ollama" and ":" not in wanted:
+        wanted = f"{wanted}:latest"
+    if wanted in ids or settings.model in ids:
+        click.echo(f"✓ model '{settings.model}' is available")
+        return
+
+    click.echo(
+        f"✗ model '{settings.model}' is not available at this endpoint.", err=True
+    )
+    if settings.provider == "ollama":
+        click.echo(f"  Pull it with: ollama pull {settings.model}", err=True)
+    raise SystemExit(1)
 
 
 def _diagnose_probe_failure(
@@ -106,9 +162,9 @@ def _diagnose_probe_failure(
             _ollama_pull(settings.model)
         return
     if ("api" in msg and "key" in msg) or "401" in msg or "403" in msg:
-        click.echo("✗ Authentication failed — check the provider's API key.", err=True)
+        click.echo("✗ Authentication failed: check the provider's API key.", err=True)
         return
     if "connect" in msg or "connection" in msg:
-        click.echo("✗ Could not reach the endpoint — is the server running?", err=True)
+        click.echo("✗ Could not reach the endpoint. Is the server running?", err=True)
         return
     click.echo(f"✗ {exc}", err=True)

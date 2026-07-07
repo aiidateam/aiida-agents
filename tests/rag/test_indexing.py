@@ -197,3 +197,41 @@ def test_index_docs_force_reclones_and_rebuilds(
     assert index_docs(force=True) is IndexOutcome.BUILT
     clone.assert_called_once()  # force re-clones despite the cached corpus
     assert client.get_collection(name).count() == 3  # rebuilt with the new chunks
+
+
+def test_index_status_empty_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A store that was never created reports not-built, with no collections."""
+    from aiida_agents.rag.store import index_status
+
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(tmp_path / "absent"))
+    status = index_status()
+    assert status.built is False
+    assert status.collections == ()
+    assert status.store_exists is False
+
+
+def test_index_status_reports_built_collection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A populated collection surfaces with its chunk count and build metadata."""
+    from aiida_agents._settings import RagSettings
+    from aiida_agents.rag.store import _get_client, index_status
+
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(tmp_path / "vdb"))
+    embed = _FakeEmbed()
+    client = _get_client(RagSettings())
+    client.create_collection(
+        "aiida_docs__v2.8.0__fenced1__ollama_mxbai-embed-large",
+        embedding_function=embed,
+        metadata={"docs_version": "v2.8.0", "embedding": "ollama/mxbai-embed-large"},
+    ).add(ids=["a"], documents=["x"], metadatas=[{"source": "s", "section": "S"}])
+
+    status = index_status()
+    assert status.built is True
+    assert len(status.collections) == 1
+    info = status.collections[0]
+    assert info.chunks == 1
+    assert info.docs_version == "v2.8.0"
+    assert info.embedding == "ollama/mxbai-embed-large"

@@ -59,6 +59,10 @@ class _Base(BaseSettings):
         # carrying an alias can only be set via that alias, so the natural
         # ``OllamaSettings(base_url=...)`` would silently drop the value.
         populate_by_name=True,
+        # Use each field's attribute docstring (the string literal below it) as
+        # its description, so one line documents the field for IDE hover/
+        # autocomplete, ``config show``/``config init``, and JSON schema at once.
+        use_attribute_docstrings=True,
     )
 
 
@@ -83,33 +87,41 @@ class ModelSettings(_Base):
     """LLM model/provider configuration (``AIIDA_AGENTS_*``)."""
 
     provider: _Provider = "ollama"
+    """Model backend: ollama | openai | anthropic | openrouter | openai-compatible."""
+
     model: str = "qwen3.5:2b"
+    """Model name/tag for the chosen provider (an Ollama tag, or a cloud model id)."""
 
-    # OpenAI-compatible provider settings. ``api_key`` is the endpoint
-    # credential (often a dummy for keyless servers); it stays on the env / .env
-    # rail and must never be persisted to a committed config file.
     base_url: str | None = None
-    api_key: str = "api-key-not-set"
+    """Base URL for provider=openai-compatible (e.g. https://api.deepseek.com/v1)."""
 
-    # Cloud provider SDK keys, read under their conventional unprefixed names
-    # (not ``AIIDA_AGENTS_*``) so they work in ``.env`` as well as the real
-    # environment. The model factory passes the active provider's key through;
-    # ``None`` lets the SDK fall back to its own env lookup. Secrets: never
-    # persist to a committed config file.
+    api_key: str = "api-key-not-set"
+    """API key for provider=openai-compatible (with AIIDA_AGENTS_BASE_URL); often a
+    dummy for keyless local servers. A secret: never commit it."""
+
+    # Cloud provider SDK keys use their conventional unprefixed names (not the
+    # AIIDA_AGENTS_ prefix) so an existing OPENAI_API_KEY etc. just works; the
+    # factory passes the active provider's key through, and None lets the SDK
+    # fall back to its own env lookup. Secrets: never commit them.
     openai_api_key: str | None = Field(default=None, validation_alias="OPENAI_API_KEY")
+    """API key for provider=openai."""
+
     anthropic_api_key: str | None = Field(
         default=None, validation_alias="ANTHROPIC_API_KEY"
     )
+    """API key for provider=anthropic."""
+
     openrouter_api_key: str | None = Field(
         default=None, validation_alias="OPENROUTER_API_KEY"
     )
+    """API key for provider=openrouter."""
 
-    # Output cap (all providers). Too small truncates long tool-calling runs.
     max_tokens: int = Field(default=8192, gt=0)
+    """Output token cap (all providers). Too small truncates long tool-calling runs."""
 
-    # Ollama context window (``num_ctx``), sent per request; Ollama-only. ``None``
-    # keeps Ollama's default. Larger windows cost more VRAM, so it is opt-in.
     context_length: int | None = Field(default=None, gt=0)
+    """Ollama context window (num_ctx), sent per request; Ollama-only. None keeps
+    Ollama's default. Larger windows cost more VRAM, so it is opt-in."""
 
     @model_validator(mode="after")
     def _validate_token_budget(self) -> Self:
@@ -142,25 +154,24 @@ class ModelSettings(_Base):
 class AgentSettings(_Base):
     """Agent behaviour configuration (``AIIDA_AGENTS_*``)."""
 
-    # Max *consecutive* failed attempts at a single tool before the run is
-    # aborted; any success resets the count (pydantic-ai tracks it per tool, not
-    # per run). A small budget lets a hallucinating model recover from a bad or
-    # wrong-type identifier without letting a genuinely broken tool retry forever,
-    # which on a paid provider is unbounded cost. ``0`` disables retries (a tool
-    # error aborts immediately); a negative value is meaningless, so reject it.
     tool_retries: int = Field(default=3, ge=0)
+    """Max consecutive failed attempts at one tool before the run aborts; any
+    success resets the count (tracked per tool). A small budget lets a
+    hallucinating model recover from a bad identifier without a genuinely broken
+    tool retrying forever (unbounded cost on a paid provider). 0 disables retries;
+    negative is rejected."""
 
 
 class ReplSettings(_Base):
     """Interactive REPL configuration (``AIIDA_AGENTS_*``)."""
 
-    # How many recent user turns of conversation the REPL replays as context per
-    # query. Capped on turn boundaries (never mid tool-call/return) so the window
-    # cannot grow without bound across a long session; must keep at least one.
     history_max_turns: int = Field(default=10, ge=1)
+    """Recent user turns the REPL replays as context per query. Capped on turn
+    boundaries (never mid tool-call/return) so the window can't grow unbounded; at
+    least 1."""
 
-    # Use vi keybindings for REPL line editing instead of the default emacs bindings.
     vi_mode: bool = False
+    """Use vi keybindings for REPL line editing instead of the default emacs bindings."""
 
 
 class OllamaSettings(_Base):
@@ -177,16 +188,22 @@ class OllamaSettings(_Base):
         default="http://localhost:11434/v1",
         validation_alias="OLLAMA_BASE_URL",
     )
+    """Local Ollama endpoint (OpenAI-compatible /v1 URL), shared by the chat model
+    and the RAG embeddings."""
 
 
 class RagSettings(_Base):
     """RAG / documentation-retrieval configuration (``AIIDA_AGENTS_*``)."""
 
-    # ``embed_model`` applies to the ``ollama`` backend; the
-    # ``sentence-transformers`` backend uses its own fixed model.
     embed_backend: _EmbedBackend = "ollama"
+    """Embedding backend for RAG: ollama | sentence-transformers."""
+
     embed_model: str = "mxbai-embed-large"
+    """Embedding model for the ollama backend (sentence-transformers uses its own
+    fixed model)."""
+
     vector_db_path: Path = Path(".aiida_agents_vector_db")
+    """Directory for the persisted ChromaDB vector store."""
 
     # The ``ollama`` backend's endpoint lives in ``OllamaSettings`` (shared with
     # the chat model), read by ``get_embedding_function`` where it builds the
@@ -197,6 +214,7 @@ class ServerSettings(_Base):
     """MCP server configuration (``AIIDA_AGENTS_*``)."""
 
     port: int = 8000
+    """Port the MCP server listens on."""
 
 
 class LoggingSettings(_Base):
@@ -208,11 +226,12 @@ class LoggingSettings(_Base):
     """
 
     log_level: _LogLevel = "INFO"
+    """Console log level: DEBUG | INFO | WARNING | ERROR | CRITICAL."""
 
-    # Optional log file; setting a path enables file logging. The file gets
-    # everything: the console's records plus full tool-call and agent-reply
-    # traces, independent of ``log_level``.
     log_file: Path | None = None
+    """Optional log file; a path enables file logging. The file captures everything
+    (console records plus full tool-call/agent-reply traces), independent of
+    log_level."""
 
 
 # ---------------------------------------------------------------------------
@@ -275,20 +294,23 @@ def _present_env_keys(env_file: Path) -> set[str]:
 _TYPO_SIMILARITY = 0.9
 
 
-def warn_on_unrecognized_settings(env_file: Path | None = None) -> None:
-    """Warn about a set variable that looks like a mistyped aiida-agents setting.
+def find_unrecognized_settings(
+    env_file: Path | None = None,
+) -> list[tuple[str, str | None]]:
+    """Return ``(key, suggestion)`` for each set variable that looks mistyped.
 
-    Two failure modes are surfaced, both otherwise dropped silently by
-    ``extra="ignore"`` (leaving the setting at its default):
+    Two kinds are reported, both otherwise dropped silently by ``extra="ignore"``
+    (leaving the setting at its default):
 
-    * a *field* typo inside the namespace (``AIIDA_AGENTS_PROVDER``), flagged
-      because it carries the ``AIIDA_AGENTS_`` prefix but matches no field;
+    * a *field* typo inside the namespace (``AIIDA_AGENTS_PROVDER``), suggestion
+      ``None`` (the prefix is right, but no field matches);
     * a *prefix* typo that lands outside the namespace
-      (``AIIDA_AGENS_PROVIDER``), flagged only when it closely resembles a real
-      setting name, so unrelated environment variables stay silent.
+      (``AIIDA_AGENS_PROVIDER``), suggestion = the closest real setting name,
+      reported only when the resemblance clears :data:`_TYPO_SIMILARITY` so
+      unrelated environment variables stay out.
 
-    Call this once at startup. Unprefixed but recognised names
-    (``OLLAMA_BASE_URL``, the cloud SDK keys) are known and never warned.
+    Unprefixed but recognised names (``OLLAMA_BASE_URL``, the cloud SDK keys)
+    are known and never reported.
 
     :param env_file: ``.env`` file to scan; defaults to ``.env`` in the current
         directory, matching what the settings groups load.
@@ -296,24 +318,35 @@ def warn_on_unrecognized_settings(env_file: Path | None = None) -> None:
     target = env_file if env_file is not None else Path(".env")
     prefix = _Base.model_config.get("env_prefix", "").upper()
     known = _known_env_var_names()
+    problems: list[tuple[str, str | None]] = []
     for key in sorted(_present_env_keys(target) - known):
         if key.startswith(prefix):
-            # Right namespace, unknown field: a typo in the setting name itself.
-            logger.warning(
-                "%s is set but is not a recognised aiida-agents setting; it "
-                "will be ignored. Check for a typo.",
-                key,
-            )
-            continue
-        # Outside the namespace: only a close resemblance to a real setting
-        # (a mistyped prefix) is worth flagging; everything else is left alone.
-        close = difflib.get_close_matches(
+            problems.append((key, None))
+        elif close := difflib.get_close_matches(
             key, sorted(known), n=1, cutoff=_TYPO_SIMILARITY
-        )
-        if close:
+        ):
+            problems.append((key, close[0]))
+    return problems
+
+
+def warn_on_unrecognized_settings(env_file: Path | None = None) -> None:
+    """Log a non-fatal warning for each mistyped setting.
+
+    Detection lives in :func:`find_unrecognized_settings`; this is the
+    warn-and-continue entry point used where stopping is undesirable (the MCP
+    server). The CLI fails fast on the same findings instead.
+    """
+    for key, suggestion in find_unrecognized_settings(env_file):
+        if suggestion is not None:
             logger.warning(
                 "%s is set but is not a recognised aiida-agents setting; did you "
                 "mean %s? It will be ignored.",
                 key,
-                close[0],
+                suggestion,
+            )
+        else:
+            logger.warning(
+                "%s is set but is not a recognised aiida-agents setting; it will "
+                "be ignored. Check for a typo.",
+                key,
             )
