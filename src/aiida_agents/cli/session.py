@@ -115,14 +115,14 @@ async def _list_model_ids(client: Any) -> set[str]:
     return {item.id for item in page.data}
 
 
-def _check_reachable(settings: ModelSettings) -> None:  # pragma: no cover
-    """Verify config, endpoint reachability, and model availability, no generation.
+def _probe_reachable(settings: ModelSettings) -> tuple[str, int, bool]:
+    """Reachability facts without a generation: ``(endpoint, n_models, model_ok)``.
 
-    Builds the model (validating the provider, base_url, and key presence), then
-    lists the endpoint's models (one cheap GET under a short timeout). It never
-    loads or runs the model. Reachability / auth failures raise for the caller to
-    diagnose; a configured model the endpoint doesn't advertise raises
-    ``SystemExit(1)`` with an actionable hint.
+    Builds the model (validating provider / base_url / key presence), then lists
+    the endpoint's models (one cheap GET under a short timeout). ``model_ok`` is
+    whether the configured model is among those advertised. Raises on an
+    unreachable endpoint, bad key, or bad config. Shared by ``check`` and
+    ``doctor``; never loads or runs the model.
     """
     from aiida_agents.agents._models import get_model
 
@@ -130,25 +130,39 @@ def _check_reachable(settings: ModelSettings) -> None:  # pragma: no cover
     # OpenAIChatModel / AnthropicModel both expose the underlying SDK client; the
     # base ``Model`` type does not, hence the ignore.
     client: Any = model.client  # type: ignore[attr-defined]
-    click.echo(f"Endpoint: {client.base_url}")
     ids = asyncio.run(_list_model_ids(client))
-    click.echo(f"✓ reachable ({len(ids)} models advertised)")
-
     # Ollama lists an untagged model as ``<name>:latest``; normalise so an
     # untagged configured name still matches. Cloud ids carry no such suffix.
     wanted = settings.model
     if settings.provider == "ollama" and ":" not in wanted:
         wanted = f"{wanted}:latest"
-    if wanted in ids or settings.model in ids:
+    model_ok = wanted in ids or settings.model in ids
+    return str(client.base_url), len(ids), model_ok
+
+
+def _check_reachable(settings: ModelSettings) -> None:  # pragma: no cover
+    """Print ``check``'s reachability report; exit non-zero on a real problem.
+
+    Reachability / auth failures raise for the caller to diagnose. A configured
+    model the endpoint doesn't advertise is fatal for Ollama (its listing is
+    authoritative, so it means "not pulled"), but only a warning for cloud or
+    openai-compatible endpoints, whose ``/models`` listing may be partial.
+    """
+    endpoint, n_models, model_ok = _probe_reachable(settings)
+    click.echo(f"Endpoint: {endpoint}")
+    click.echo(f"✓ reachable ({n_models} models advertised)")
+    if model_ok:
         click.echo(f"✓ model '{settings.model}' is available")
         return
-
-    click.echo(
-        f"✗ model '{settings.model}' is not available at this endpoint.", err=True
-    )
     if settings.provider == "ollama":
+        click.echo(f"✗ model '{settings.model}' is not pulled.", err=True)
         click.echo(f"  Pull it with: ollama pull {settings.model}", err=True)
-    raise SystemExit(1)
+        raise SystemExit(1)
+    click.echo(
+        f"! model '{settings.model}' is not in this endpoint's list "
+        "(it may be partial; the model may still work).",
+        err=True,
+    )
 
 
 def _diagnose_probe_failure(
@@ -162,7 +176,12 @@ def _diagnose_probe_failure(
             _ollama_pull(settings.model)
         return
     if ("api" in msg and "key" in msg) or "401" in msg or "403" in msg:
-        click.echo("✗ Authentication failed: check the provider's API key.", err=True)
+        if "not set" in msg or "environment variable" in msg or "set the" in msg:
+            click.echo("✗ API key not set: set the provider's API key.", err=True)
+        else:
+            click.echo(
+                "✗ Authentication failed: check the provider's API key.", err=True
+            )
         return
     if "connect" in msg or "connection" in msg:
         click.echo("✗ Could not reach the endpoint. Is the server running?", err=True)

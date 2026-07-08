@@ -7,13 +7,7 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
-from aiida_agents._settings import (
-    LoggingSettings,
-    ModelSettings,
-    OllamaSettings,
-    RagSettings,
-    ReplSettings,
-)
+from aiida_agents._settings import _SETTINGS_GROUPS, ModelSettings
 from aiida_agents.cli.session import _resolve_model_settings
 
 
@@ -45,22 +39,42 @@ def _dotenv_keys(path: Path) -> set[str]:
     return keys
 
 
+def _group_label(cls: type[BaseSettings]) -> str:
+    """Short label for a settings group (``ModelSettings`` -> ``model``).
+
+    Disambiguates fields that share a name across groups (both the model and
+    Ollama settings expose ``base_url``), so a rendered table or template never
+    shows one label for two different settings.
+    """
+    return cls.__name__.removesuffix("Settings").lower()
+
+
+def _display_value(obj: BaseSettings, field_name: str) -> str:
+    """User-facing string for a field's effective value, masking secrets."""
+    value = getattr(obj, field_name)
+    if field_name.endswith("_key"):
+        return "set" if value and value != "api-key-not-set" else "unset"
+    if value is None:
+        return "(unset)"
+    return str(value)
+
+
 def _env_template() -> str:
     """A commented ``.env`` scaffold listing every recognised setting.
 
-    Derived from the settings classes, so the keys are correct by construction:
-    a generated template can never teach a typo. Every line is commented out and
-    carries the field's default; secrets are listed with an empty value, never a
-    default. Uncomment and edit a line to override.
+    Iterates :data:`_SETTINGS_GROUPS` (the same source the typo-detector and
+    ``config show`` use), so the keys are correct and complete by construction: a
+    generated template can never teach a typo, and no setting is silently absent.
+    Every line is commented out and carries the field's default; secrets are
+    listed with an empty value, never a default. Uncomment and edit to override.
     """
-    groups = (ModelSettings, OllamaSettings, ReplSettings, RagSettings, LoggingSettings)
     lines = [
         "# aiida-agents configuration.",
         "# Uncomment a line and set its value to override the default.",
         "",
     ]
-    for cls in groups:
-        lines.append(f"# --- {cls.__name__.removesuffix('Settings').lower()} ---")
+    for cls in _SETTINGS_GROUPS:
+        lines.append(f"# --- {_group_label(cls)} ---")
         for field_name, field in cls.model_fields.items():
             env_var = _env_var_for(cls, field_name)
             # A field's description goes on its own comment line(s) above the key,
@@ -77,29 +91,16 @@ def _env_template() -> str:
     return "\n".join(lines)
 
 
-def _group_name(obj: BaseSettings) -> str:
-    """Short label for a settings group (``ModelSettings`` -> ``model``).
-
-    Disambiguates fields that share a name across groups (both the provider and
-    Ollama settings expose ``base_url``), so the rendered table never shows one
-    label for two different settings.
-    """
-    return type(obj).__name__.removesuffix("Settings").lower()
-
-
 def _config_rows(
     provider: str | None, model: str | None
 ) -> list[tuple[str, str, str, str, str]]:
-    """``(group, setting, value, env var, source)`` for the user-facing settings.
+    """``(group, setting, value, env var, source)`` for every recognised setting.
 
-    ``source`` is where the effective value came from: a CLI ``flag``, the
-    process ``env``, the ``.env`` file, or the field ``default``.
+    Iterates :data:`_SETTINGS_GROUPS` so it stays in step with ``config init`` and
+    the typo-detector, and no setting is silently omitted. ``source`` is where the
+    effective value came from: a CLI ``flag``, the process ``env``, the ``.env``
+    file, or the field ``default``.
     """
-    settings = _resolve_model_settings(provider, model)
-    ollama = OllamaSettings()
-    repl = ReplSettings()
-    rag = RagSettings()
-
     env_keys = {key.upper() for key in os.environ}
     dotenv_keys = _dotenv_keys(Path(".env"))
     flagged = {
@@ -116,52 +117,22 @@ def _config_rows(
             return ".env"
         return "default"
 
-    def secret(value: str | None) -> str:
-        return "set" if value and value != "api-key-not-set" else "unset"
-
-    plain: list[tuple[BaseSettings, str, str]] = [
-        (settings, "provider", str(settings.provider)),
-        (settings, "model", settings.model),
-        (settings, "base_url", settings.base_url or "(none)"),
-        (settings, "max_tokens", str(settings.max_tokens)),
-        (
-            settings,
-            "context_length",
-            str(settings.context_length)
-            if settings.context_length is not None
-            else "(Ollama default)",
-        ),
-        (ollama, "base_url", ollama.base_url),
-        (repl, "history_max_turns", str(repl.history_max_turns)),
-        (repl, "vi_mode", str(repl.vi_mode)),
-        (rag, "embed_backend", str(rag.embed_backend)),
-        (rag, "embed_model", rag.embed_model),
-        (rag, "vector_db_path", str(rag.vector_db_path)),
-    ]
-    rows = [
-        (
-            _group_name(obj),
-            field,
-            value,
-            _env_var_for(type(obj), field),
-            source(_env_var_for(type(obj), field)),
+    rows: list[tuple[str, str, str, str, str]] = []
+    for cls in _SETTINGS_GROUPS:
+        # ModelSettings honours the --provider/--model overrides; the other
+        # groups read only env / .env / defaults.
+        obj = (
+            _resolve_model_settings(provider, model) if cls is ModelSettings else cls()
         )
-        for obj, field, value in plain
-    ]
-    for field in (
-        "openai_api_key",
-        "anthropic_api_key",
-        "openrouter_api_key",
-        "api_key",
-    ):
-        env_var = _env_var_for(ModelSettings, field)
-        rows.append(
-            (
-                _group_name(settings),
-                field,
-                secret(getattr(settings, field)),
-                env_var,
-                source(env_var),
+        for field_name in cls.model_fields:
+            env_var = _env_var_for(cls, field_name)
+            rows.append(
+                (
+                    _group_label(cls),
+                    field_name,
+                    _display_value(obj, field_name),
+                    env_var,
+                    source(env_var),
+                )
             )
-        )
     return rows

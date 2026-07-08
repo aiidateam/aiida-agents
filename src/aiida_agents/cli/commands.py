@@ -24,7 +24,11 @@ from rich.table import Table
 from rich.text import Text
 
 from aiida_agents._logging import _configure_logging
-from aiida_agents._settings import LoggingSettings, find_unrecognized_settings
+from aiida_agents._settings import (
+    LoggingSettings,
+    ModelSettings,
+    find_unrecognized_settings,
+)
 from aiida_agents.cli.session import (
     _build_agent,
     _check_reachable,
@@ -183,14 +187,16 @@ def warm(ctx: click.Context) -> None:  # pragma: no cover
 
 
 def _run_diagnostics(
-    settings: object, profile: str | None
-) -> "list[tuple[str, bool, str]]":  # pragma: no cover
+    settings: ModelSettings, profile: str | None
+) -> list[tuple[str, bool, str]]:  # pragma: no cover
     """Run each health check, returning ``(label, ok, detail)`` rows.
 
     Every check is isolated in its own ``try`` so one failure (an unreachable
-    model, an unloadable profile) never aborts the rest of the report.
+    model, an unloadable profile) never aborts the rest of the report. The model
+    check uses the no-generation reachability probe, so ``doctor`` never warms
+    the model.
     """
-    from aiida_agents.cli.session import _probe_model
+    from aiida_agents.cli.session import _probe_reachable
 
     rows: list[tuple[str, bool, str]] = []
 
@@ -202,10 +208,19 @@ def _run_diagnostics(
     except Exception as exc:
         rows.append(("AiiDA profile loads", False, str(exc)))
 
-    model_label = f"Model reachable ({settings.provider}:{settings.model})"  # type: ignore[attr-defined]
+    model_label = f"Model reachable ({settings.provider}:{settings.model})"
     try:
-        _probe_model(settings)  # type: ignore[arg-type]
-        rows.append((model_label, True, ""))
+        endpoint, _, model_ok = _probe_reachable(settings)
+        if model_ok:
+            rows.append((model_label, True, endpoint))
+        elif settings.provider == "ollama":
+            rows.append(
+                (model_label, False, f"model not pulled (ollama pull {settings.model})")
+            )
+        else:
+            rows.append(
+                (model_label, True, "reachable; model not listed (may still work)")
+            )
     except Exception as exc:
         rows.append((model_label, False, str(exc).splitlines()[0][:100]))
 

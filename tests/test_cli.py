@@ -549,13 +549,14 @@ def test_help_bypasses_the_settings_check(
 # --- config init / path -----------------------------------------------------
 
 
-def test_env_template_keys_are_all_recognized() -> None:
-    """Every key the template scaffolds is a real setting: it can't teach a typo."""
+def test_env_template_covers_exactly_the_recognised_settings() -> None:
+    """The template scaffolds every recognised setting and nothing else: it can't
+    teach a typo, and no setting is silently missing.
+    """
     from aiida_agents._settings import _known_env_var_names
     from aiida_agents.cli.config import _env_template
 
-    known = _known_env_var_names()
-    keys = [
+    keys = {
         key
         for line in _env_template().splitlines()
         if line.startswith("# ") and "=" in line
@@ -563,11 +564,18 @@ def test_env_template_keys_are_all_recognized() -> None:
         # section headers are excluded because a key token has no spaces.
         for key in [line[2:].split("=", 1)[0]]
         if " " not in key
-    ]
-    assert keys
-    assert set(keys) <= known
-    assert "AIIDA_AGENTS_PROVIDER" in keys
-    assert "OPENAI_API_KEY" in keys
+    }
+    assert keys == _known_env_var_names()
+
+
+def test_config_rows_cover_all_recognised_settings() -> None:
+    """`config show` covers exactly the recognised settings, so it stays in step
+    with `config init` and the typo-detector (one source, no drift).
+    """
+    from aiida_agents._settings import _known_env_var_names
+
+    env_vars = {row[3] for row in _config_rows(None, None)}
+    assert env_vars == _known_env_var_names()
 
 
 def test_config_init_writes_template_and_refuses_overwrite(tmp_path: Path) -> None:
