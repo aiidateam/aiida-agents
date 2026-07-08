@@ -453,6 +453,27 @@ def test_warm_fires_the_generation(monkeypatch: pytest.MonkeyPatch) -> None:
     assert calls == ["generate"]
 
 
+@pytest.mark.parametrize(
+    "exc, expected",
+    [
+        pytest.param(ValueError(), "", id="empty-message"),
+        pytest.param(ValueError("boom"), "boom", id="single-line"),
+        pytest.param(ValueError("first\nsecond"), "first", id="first-line-only"),
+        pytest.param(ValueError("\n\n  \nreal"), "real", id="skips-blank-lines"),
+        pytest.param(ValueError("x" * 200), "x" * 100, id="truncated-to-100"),
+    ],
+)
+def test_short_reason_summarizes_exception(exc: Exception, expected: str) -> None:
+    """A failing health check yields a one-line, bounded detail for the `doctor`
+    table. An empty-message exception (a bare ``ValueError``, or
+    ``asyncio.TimeoutError``) yields '' instead of crashing the whole report with
+    ``IndexError`` (regression for the ``str(exc).splitlines()[0]`` guard).
+    """
+    from aiida_agents.cli.commands import _short_reason
+
+    assert _short_reason(exc) == expected
+
+
 class _FakeModelsPage:
     def __init__(self, ids: list[str]) -> None:
         self.data = [type("M", (), {"id": i})() for i in ids]
@@ -619,7 +640,7 @@ def test_rag_search_errors_cleanly_without_an_index(
 
 def test_dotenv_keys_parses_assignments(tmp_path: Path) -> None:
     """Keys are upper-cased; comments, blanks, non-assignments, and `export ` handled."""
-    from aiida_agents.cli.config import _dotenv_keys
+    from aiida_agents._settings import _dotenv_keys
 
     env = tmp_path / ".env"
     env.write_text(
@@ -632,7 +653,7 @@ def test_dotenv_keys_parses_assignments(tmp_path: Path) -> None:
 
 def test_dotenv_keys_missing_file_is_empty(tmp_path: Path) -> None:
     """A missing .env yields no keys rather than raising."""
-    from aiida_agents.cli.config import _dotenv_keys
+    from aiida_agents._settings import _dotenv_keys
 
     assert _dotenv_keys(tmp_path / "absent.env") == set()
 

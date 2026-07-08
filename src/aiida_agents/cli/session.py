@@ -107,9 +107,13 @@ async def _list_model_ids(client: Any) -> set[str]:
         page = await asyncio.wait_for(
             client.models.list(), timeout=_REACHABILITY_TIMEOUT
         )
-    except TimeoutError as exc:
-        # Phrase it so ``_diagnose_probe_failure`` routes it to the "unreachable"
-        # branch (it matches on "connect").
+    except asyncio.TimeoutError as exc:
+        # ``asyncio.TimeoutError``, not the builtin: on Python 3.10 (our minimum)
+        # ``wait_for`` raises the asyncio one, a distinct class from the builtin
+        # ``TimeoutError`` (they were only merged into aliases in 3.11), so
+        # catching the builtin would let the timeout escape uncaught there.
+        # Phrase the message so ``_diagnose_probe_failure`` routes it to the
+        # "unreachable" branch (it matches on "connect").
         msg = f"could not connect within {_REACHABILITY_TIMEOUT:.0f}s"
         raise ConnectionError(msg) from exc
     return {item.id for item in page.data}

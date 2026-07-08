@@ -7,7 +7,7 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings
 
-from aiida_agents._settings import _SETTINGS_GROUPS, ModelSettings
+from aiida_agents._settings import _SETTINGS_GROUPS, ModelSettings, _dotenv_keys
 from aiida_agents.cli.session import _resolve_model_settings
 
 
@@ -23,20 +23,6 @@ def _env_var_for(cls: type[BaseSettings], field_name: str) -> str:
         return alias
     prefix = cls.model_config.get("env_prefix", "")
     return f"{prefix}{field_name}".upper()
-
-
-def _dotenv_keys(path: Path) -> set[str]:
-    """Upper-cased keys assigned in a ``.env`` file, for config-source display."""
-    keys: set[str] = set()
-    if not path.is_file():
-        return keys
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key = line.split("=", 1)[0].strip().removeprefix("export ").strip()
-        keys.add(key.upper())
-    return keys
 
 
 def _group_label(cls: type[BaseSettings]) -> str:
@@ -55,7 +41,7 @@ def _display_value(obj: BaseSettings, field_name: str) -> str:
     if field_name.endswith("_key"):
         return "set" if value and value != "api-key-not-set" else "unset"
     if value is None:
-        return "(unset)"
+        return "unset"
     return str(value)
 
 

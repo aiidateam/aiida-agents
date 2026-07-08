@@ -12,6 +12,7 @@ import asyncio
 import json
 from typing import Any
 
+import rich_click as click
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.tools import DeferredToolRequests
@@ -90,15 +91,15 @@ def _print_previews(previews: list[_Preview]) -> None:  # pragma: no cover
     """Print the resolved submissions awaiting the user's confirmation."""
     from aiida_agents.tools.submit import _format_resolved_inputs
 
-    print("\n⚠️  The agent wants to perform the following submission(s):")
+    click.echo("\n⚠️  The agent wants to perform the following submission(s):")
     for call, _, resolved in previews:
-        print(f"   Tool  : {call.tool_name}")
+        click.echo(f"   Tool  : {call.tool_name}")
         if resolved is None:
-            print(f"   Inputs: {_parse_args(call.args)}")
+            click.echo(f"   Inputs: {_parse_args(call.args)}")
             continue
         args = _parse_args(call.args)
-        print(f"   Entry : {args.get('entry_point', '<unknown>')}")
-        print(f"   Inputs (resolved):\n{_format_resolved_inputs(resolved)}")
+        click.echo(f"   Entry : {args.get('entry_point', '<unknown>')}")
+        click.echo(f"   Inputs (resolved):\n{_format_resolved_inputs(resolved)}")
 
 
 def _handle_deferred(
@@ -132,8 +133,8 @@ def _handle_deferred(
 
         if previews:
             _print_previews(previews)
-            if input("\nProceed? [y/N]: ").strip().lower() != "y":
-                print("Cancelled - nothing was submitted.")
+            if not click.confirm("\nProceed?", default=False):
+                click.echo("Cancelled - nothing was submitted.")
                 return history
 
             # Outcome per approval tool-call id. Auto-denied invalid submissions
@@ -144,7 +145,7 @@ def _handle_deferred(
             }
             for call, process_class, resolved in previews:
                 if process_class is None or resolved is None:
-                    print(
+                    click.echo(
                         f"   Skipping {call.tool_name}: not an executable submission."
                     )
                     outcomes[call.tool_call_id] = {"skipped": call.tool_name}
@@ -153,16 +154,16 @@ def _handle_deferred(
                 try:
                     res = _run_submission(entry_point, process_class, resolved)
                 except Exception as exc:
-                    print(f"\n❌ Submission failed: {exc}")
+                    click.echo(f"\n❌ Submission failed: {exc}")
                     outcomes[call.tool_call_id] = {"error": str(exc)}
                     continue
-                print(
+                click.echo(
                     f"\n✅ Submitted {res['workflow']}: "
                     f"pk={res['pk']}, state={res['state']}"
                 )
                 outcomes[call.tool_call_id] = res
 
-            print()  # separate the submission summary from the next prompt
+            click.echo()  # separate the submission summary from the next prompt
 
             # Splice each approval's outcome back as its tool return so the
             # submission survives in history and no unanswered tool call is left
@@ -189,7 +190,7 @@ def _handle_deferred(
         # Only invalid submissions this round: deny them back to the model so it
         # corrects its own inputs, then re-run. No DB write happens on the worker
         # thread here (denied calls are never executed), so this is thread-safe.
-        print("\n⚠️  Inputs were invalid; asking the agent to correct them.")
+        click.echo("\n⚠️  Inputs were invalid; asking the agent to correct them.")
         try:
             result = asyncio.run(
                 agent.run(
@@ -200,7 +201,7 @@ def _handle_deferred(
             )
             _log_tool_calls_debug(result.new_messages(), console)
         except Exception as exc:
-            print(f"\n❌ Error: {exc}")
+            click.echo(f"\n❌ Error: {exc}")
             return history
 
         if not isinstance(result.output, DeferredToolRequests):
@@ -208,5 +209,5 @@ def _handle_deferred(
             messages: list[ModelMessage] = result.all_messages()
             return messages
 
-    print("\n⚠️  Too many correction rounds; stopping without submitting.")
+    click.echo("\n⚠️  Too many correction rounds; stopping without submitting.")
     return history

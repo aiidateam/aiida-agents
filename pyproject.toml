@@ -119,6 +119,10 @@ fail_under = 80
 exclude = [
     ".aiida_agents_vector_db",
 ]
+# Ruff's defaults (E/F) plus T20: no bare ``print()`` in the package; user-facing
+# output goes through ``click.echo`` / ``console.print``. The carve-outs below are
+# staged for a later pass that broadens the selection to their families.
+lint.extend-select = ["T20"]
 lint.ignore = [
     "TRY003",  # https://docs.astral.sh/ruff/rules/raise-vanilla-args/
     "EM101",   # https://docs.astral.sh/ruff/rules/raw-string-in-exception/

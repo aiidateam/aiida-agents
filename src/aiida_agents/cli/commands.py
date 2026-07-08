@@ -186,6 +186,19 @@ def warm(ctx: click.Context) -> None:  # pragma: no cover
     click.echo(f"✓ warmed in {_format_duration(time.monotonic() - start)}")
 
 
+def _short_reason(exc: Exception) -> str:
+    """First non-empty line of ``exc``'s message, truncated for a table cell.
+
+    Guards the empty-message case (``"".splitlines()`` is ``[]``, so ``[0]``
+    would raise): a health check that fails with a message-less error (a bare
+    ``ValueError``, or ``asyncio.TimeoutError`` whose ``str`` is empty) must
+    still yield a printable detail, never an ``IndexError`` that aborts the
+    whole diagnostics report.
+    """
+    lines = [line for line in str(exc).splitlines() if line.strip()]
+    return lines[0][:100] if lines else ""
+
+
 def _run_diagnostics(
     settings: ModelSettings, profile: str | None
 ) -> list[tuple[str, bool, str]]:  # pragma: no cover
@@ -206,7 +219,7 @@ def _run_diagnostics(
         loaded = load_profile(profile)
         rows.append(("AiiDA profile loads", True, loaded.name))
     except Exception as exc:
-        rows.append(("AiiDA profile loads", False, str(exc)))
+        rows.append(("AiiDA profile loads", False, _short_reason(exc)))
 
     model_label = f"Model reachable ({settings.provider}:{settings.model})"
     try:
@@ -222,7 +235,7 @@ def _run_diagnostics(
                 (model_label, True, "reachable; model not listed (may still work)")
             )
     except Exception as exc:
-        rows.append((model_label, False, str(exc).splitlines()[0][:100]))
+        rows.append((model_label, False, _short_reason(exc)))
 
     try:
         from aiida_agents.rag.store import index_status
@@ -232,7 +245,7 @@ def _run_diagnostics(
             ("RAG index built", built, "" if built else "run `aiida-agents rag build`")
         )
     except Exception as exc:
-        rows.append(("RAG index built", False, str(exc)[:100]))
+        rows.append(("RAG index built", False, _short_reason(exc)))
 
     has_sphinx = not _module_missing("sphinx")
     rows.append(

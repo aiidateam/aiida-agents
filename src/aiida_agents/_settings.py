@@ -271,19 +271,28 @@ def _known_env_var_names() -> frozenset[str]:
     return frozenset(names)
 
 
+def _dotenv_keys(env_file: Path) -> set[str]:
+    """Upper-cased keys assigned in a ``.env`` file.
+
+    Comments, blank lines, and non-assignments are skipped, and a leading
+    ``export `` is stripped. Shared by the typo detector here and ``config
+    show``'s source column, so both read a ``.env`` the same way.
+    """
+    keys: set[str] = set()
+    if not env_file.is_file():
+        return keys
+    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key = line.split("=", 1)[0].strip().removeprefix("export ").strip()
+        keys.add(key.upper())
+    return keys
+
+
 def _present_env_keys(env_file: Path) -> set[str]:
     """Upper-cased env var names set in the process env or the ``.env`` file."""
-    present = {key.upper() for key in os.environ}
-    if env_file.is_file():
-        for raw_line in env_file.read_text(encoding="utf-8").splitlines():
-            line = raw_line.strip()
-            if not line or line.startswith("#") or "=" not in line:
-                continue
-            key = line.split("=", 1)[0].strip()
-            if key.startswith("export "):
-                key = key.removeprefix("export ").strip()
-            present.add(key.upper())
-    return present
+    return {key.upper() for key in os.environ} | _dotenv_keys(env_file)
 
 
 # Similarity above which a stray, out-of-namespace key is treated as a typo of

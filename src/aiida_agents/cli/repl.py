@@ -12,6 +12,7 @@ from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
+import rich_click as click
 from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.tools import DeferredToolRequests
@@ -104,7 +105,7 @@ def _run_repl(agent: Agent, settings: ModelSettings) -> None:  # pragma: no cove
         vi_mode=repl_cfg.vi_mode,
     )
 
-    print(
+    click.echo(
         f"AiiDA Agent [{settings.provider}:{settings.model}] - "
         "type 'quit' to exit, '/clear' to start a new conversation, "
         "Esc then Enter (Alt+Enter) for a new line\n"
@@ -134,7 +135,7 @@ def _run_repl(agent: Agent, settings: ModelSettings) -> None:  # pragma: no cove
 
         if question.lower() == "/clear":
             history = []
-            print("Conversation cleared.\n")
+            click.echo("Conversation cleared.\n")
             continue
 
         start = time.monotonic()
@@ -148,10 +149,10 @@ def _run_repl(agent: Agent, settings: ModelSettings) -> None:  # pragma: no cove
                     )
                 )
         except KeyboardInterrupt:
-            print("(interrupted)")
+            click.echo("(interrupted)")
             continue
         except Exception as exc:
-            print(f"❌ Error: {exc}")
+            click.echo(f"❌ Error: {exc}")
             continue
         elapsed = time.monotonic() - start
 
