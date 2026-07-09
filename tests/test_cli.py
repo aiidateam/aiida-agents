@@ -237,12 +237,20 @@ def test_cli_exposes_expected_commands() -> None:
         assert command in result.output
 
 
-def test_dash_h_is_a_help_alias() -> None:
-    """`-h` works as a help alias at the group and on subcommands."""
-    assert CliRunner().invoke(cli, ["-h"]).exit_code == 0
-    assert CliRunner().invoke(cli, ["config", "-h"]).exit_code == 0
-    assert CliRunner().invoke(cli, ["ask", "-h"]).exit_code == 0
-    assert CliRunner().invoke(cli, ["rag", "build", "-h"]).exit_code == 0
+@pytest.mark.parametrize(
+    "args",
+    [
+        pytest.param(["-h"], id="root"),
+        pytest.param(["config", "-h"], id="group"),
+        pytest.param(["ask", "-h"], id="command"),
+        pytest.param(["rag", "build", "-h"], id="nested-subcommand"),
+    ],
+)
+def test_dash_h_is_a_help_alias(args: list[str]) -> None:
+    """`-h` actually renders help (not just exits 0) at the group and every level."""
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code == 0
+    assert "Show this message and exit" in result.output
 
 
 @pytest.mark.parametrize(
@@ -321,18 +329,26 @@ def test_rag_build_reports_outcome(
 
 
 def test_config_show_command_runs() -> None:
-    """``config show`` renders without touching AiiDA or a model."""
+    """``config show`` renders the settings table without touching AiiDA or a model."""
     result = CliRunner().invoke(cli, ["config", "show"])
     assert result.exit_code == 0
+    # The table actually rendered with real setting names and default values
+    # (short tokens, so they survive rich's column folding at any width).
+    assert "provider" in result.output
+    assert "ollama" in result.output  # default provider
+    assert "qwen3.5:2b" in result.output  # default model
 
 
 def test_build_agent_reports_missing_api_key_cleanly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A missing cloud API key surfaces as a clean CLI error, not a traceback."""
-    from pydantic_ai.exceptions import UserError
+    """A missing cloud API key surfaces as a clean CLI error, not a traceback.
 
-    monkeypatch.setattr("aiida.load_profile", lambda profile=None: None)
+    Uses the real ``load_profile`` (the autouse test profile), mocking only the
+    genuinely external step: ``get_agent``, made to raise as pydantic-ai would
+    for a missing key.
+    """
+    from pydantic_ai.exceptions import UserError
 
     def _no_key(**kwargs: object) -> object:
         raise UserError("Set the `OPENROUTER_API_KEY` environment variable")
@@ -387,22 +403,24 @@ def test_config_rows_mask_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "sk-super-secret" not in str(rows)
 
 
-def test_ollama_model_names_parses_list_output() -> None:
-    """Names come from the first column, with the header row skipped."""
-    out = (
-        "NAME                                            ID    SIZE\n"
-        "qwen3.5:9b                                      abc   6.6 GB\n"
-        "MichelRosselli/apertus:8b-instruct-2509-q4_k_m  def   5.1 GB\n"
-    )
-    assert _ollama_model_names(out) == {
-        "qwen3.5:9b",
-        "MichelRosselli/apertus:8b-instruct-2509-q4_k_m",
-    }
-
-
-def test_ollama_model_names_empty_when_no_models() -> None:
-    """A header-only listing yields no names (nothing pulled)."""
-    assert _ollama_model_names("NAME  ID  SIZE  MODIFIED\n") == set()
+@pytest.mark.parametrize(
+    "output, expected",
+    [
+        pytest.param("NAME  ID  SIZE  MODIFIED\n", set(), id="header-only-nothing"),
+        pytest.param(
+            "NAME                                            ID    SIZE\n"
+            "qwen3.5:9b                                      abc   6.6 GB\n"
+            "MichelRosselli/apertus:8b-instruct-2509-q4_k_m  def   5.1 GB\n",
+            {"qwen3.5:9b", "MichelRosselli/apertus:8b-instruct-2509-q4_k_m"},
+            id="multi-model-first-column",
+        ),
+    ],
+)
+def test_ollama_model_names_parses_first_column(
+    output: str, expected: set[str]
+) -> None:
+    """Names come from the first column, header row skipped (empty when none)."""
+    assert _ollama_model_names(output) == expected
 
 
 @pytest.mark.parametrize(
@@ -423,10 +441,21 @@ def test_ollama_lists_model_normalizes_latest_tag(model: str, present: bool) -> 
     assert _ollama_lists_model(model, out) is present
 
 
-def test_check_verifies_reachability_without_generating(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    "command, expected_calls",
+    [
+        pytest.param("check", ["reachable"], id="check-probes-never-generates"),
+        pytest.param("warm", ["generate"], id="warm-generates"),
+    ],
+)
+def test_check_and_warm_use_distinct_probes(
+    monkeypatch: pytest.MonkeyPatch, command: str, expected_calls: list[str]
 ) -> None:
-    """`check` must probe reachability, never warm/generate the model."""
+    """`check` probes reachability and never generates; `warm` runs the generation
+    probe that loads the model. Pins the deliberate split (a check stays cheap and
+    side-effect-free): both probes are stubbed, so the recorded calls prove which
+    one each command drives.
+    """
     calls: list[str] = []
     monkeypatch.setattr(
         "aiida_agents.cli.commands._check_reachable",
@@ -436,21 +465,9 @@ def test_check_verifies_reachability_without_generating(
         "aiida_agents.cli.commands._probe_model",
         lambda settings: calls.append("generate"),
     )
-    result = CliRunner().invoke(cli, ["check"])
+    result = CliRunner().invoke(cli, [command])
     assert result.exit_code == 0
-    assert calls == ["reachable"]
-
-
-def test_warm_fires_the_generation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`warm` runs the generation probe that loads the model."""
-    calls: list[str] = []
-    monkeypatch.setattr(
-        "aiida_agents.cli.commands._probe_model",
-        lambda settings: calls.append("generate"),
-    )
-    result = CliRunner().invoke(cli, ["warm"])
-    assert result.exit_code == 0
-    assert calls == ["generate"]
+    assert calls == expected_calls
 
 
 @pytest.mark.parametrize(
@@ -562,7 +579,11 @@ def test_help_bypasses_the_settings_check(
     monkeypatch.setattr(
         "aiida_agents.cli._guards.find_unrecognized_settings", _one_typo
     )
-    assert CliRunner().invoke(cli, args).exit_code == 0
+    result = CliRunner().invoke(cli, args)
+    assert result.exit_code == 0
+    # help rendered and the guard never fired (no "did you mean" from _one_typo)
+    assert "Show this message and exit" in result.output
+    assert "did you mean" not in result.output
 
 
 # --- config init / path -----------------------------------------------------
