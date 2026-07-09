@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 
 import rich_click as click
+from pydantic import ValidationError
 from pydantic_settings import BaseSettings
 from rich.table import Table
 
@@ -93,6 +94,20 @@ def _env_template() -> str:
     return "\n".join(lines)
 
 
+def _invalid_fields(exc: ValidationError) -> dict[str, str]:
+    """Field name -> concise reason for each field-level error in ``exc``.
+
+    Whole-model errors (a cross-field ``model_validator``, which carry no field
+    location) are omitted; those fields still render as ``(invalid)`` and the
+    full reason is available from ``aiida-agents check``.
+    """
+    return {
+        str(err["loc"][-1]): err["msg"].removeprefix("Value error, ")
+        for err in exc.errors()
+        if err["loc"]
+    }
+
+
 def _config_rows(
     provider: str | None, model: str | None
 ) -> list[tuple[str, str, str, str, str]]:
@@ -122,20 +137,29 @@ def _config_rows(
     rows: list[tuple[str, str, str, str, str]] = []
     for cls in _SETTINGS_GROUPS:
         # ModelSettings honours the --provider/--model overrides; the other
-        # groups read only env / .env / defaults.
-        obj = (
-            _resolve_model_settings(provider, model) if cls is ModelSettings else cls()
-        )
+        # groups read only env / .env / defaults. config show is the debugging
+        # tool, so a bad value in one group must not blank the whole table: catch
+        # its ValidationError, render that group's fields as invalid (the reason
+        # on the offending field), and carry on with the other groups.
+        try:
+            obj: BaseSettings | None = (
+                _resolve_model_settings(provider, model)
+                if cls is ModelSettings
+                else cls()
+            )
+            invalid: dict[str, str] = {}
+        except ValidationError as exc:
+            obj = None
+            invalid = _invalid_fields(exc)
         for field_name in cls.model_fields:
             env_var = _env_var_for(cls, field_name)
+            if obj is None:
+                reason = invalid.get(field_name)
+                value = f"(invalid: {reason})" if reason else "(invalid)"
+            else:
+                value = _display_value(obj, field_name)
             rows.append(
-                (
-                    _group_label(cls),
-                    field_name,
-                    _display_value(obj, field_name),
-                    env_var,
-                    source(env_var),
-                )
+                (_group_label(cls), field_name, value, env_var, source(env_var))
             )
     return rows
 
@@ -200,5 +224,10 @@ def config_init(path_str: str, force: bool) -> None:
         raise click.ClickException(
             f"{target} already exists; pass --force to overwrite."
         )
-    target.write_text(_env_template(), encoding="utf-8")
+    try:
+        target.write_text(_env_template(), encoding="utf-8")
+    except OSError as exc:
+        # e.g. a --path into a directory that does not exist: a clean error, not
+        # a raw FileNotFoundError traceback.
+        raise click.ClickException(f"Could not write {target}: {exc}") from exc
     click.echo(f"✓ Wrote {target}. Uncomment and edit the settings you want to change.")

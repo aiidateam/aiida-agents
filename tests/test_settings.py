@@ -30,6 +30,7 @@ from aiida_agents._settings import (
     RagSettings,
     ServerSettings,
     _Base,
+    _format_validation_error,
     warn_on_unrecognized_settings,
 )
 
@@ -511,3 +512,24 @@ def test_context_length_on_non_ollama_provider_warns(
     assert settings.context_length == 4096  # kept, just unused
     assert "context_length" in caplog.text.lower()
     assert "ollama" in caplog.text.lower()
+
+
+def test_format_validation_error_is_concise(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The formatter yields ``field: reason`` lines, drops pydantic's docs URL,
+    and strips the ``Value error,`` prefix from a whole-model validator message.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValidationError) as field_error:
+        ModelSettings(provider="bogus")  # type: ignore[arg-type]
+    field_msg = _format_validation_error(field_error.value)
+    assert field_msg.startswith("provider: ")
+    assert "https://errors.pydantic.dev" not in field_msg
+
+    with pytest.raises(ValidationError) as model_error:
+        ModelSettings(provider="ollama", max_tokens=9000, context_length=4096)
+    model_msg = _format_validation_error(model_error.value)
+    assert not model_msg.startswith("Value error,")
+    assert "must be smaller than context_length" in model_msg

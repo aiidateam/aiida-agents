@@ -13,11 +13,12 @@ import logging
 from typing import Any
 
 import rich_click as click
+from pydantic import ValidationError
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.messages import ModelMessage
 
-from aiida_agents._settings import ModelSettings
+from aiida_agents._settings import ModelSettings, _format_validation_error
 from aiida_agents.cli.ollama import _ensure_ollama_model, _ollama_pull
 from aiida_agents.cli.output import _trace_tool_calls
 
@@ -57,6 +58,22 @@ def _resolve_model_settings(provider: str | None, model: str | None) -> ModelSet
     return ModelSettings(**overrides)
 
 
+def _resolve_settings_or_fail(provider: str | None, model: str | None) -> ModelSettings:
+    """Resolve model settings, turning an invalid value into a clean CLI error.
+
+    ``_resolve_model_settings`` raises pydantic's ``ValidationError`` (a raw
+    traceback) on a bad ``AIIDA_AGENTS_*`` value. The read-only diagnostics
+    commands (``check``/``warm``/``doctor``) build settings outside a ``try``, so
+    this converts it to a ``ClickException`` the way ``_build_agent`` does for its
+    other configuration errors.
+    """
+    try:
+        return _resolve_model_settings(provider, model)
+    except ValidationError as exc:
+        msg = f"Invalid configuration:\n{_format_validation_error(exc)}"
+        raise click.ClickException(msg) from exc
+
+
 def _build_agent(
     provider: str | None, model: str | None, profile: str | None
 ) -> tuple[Agent, ModelSettings]:  # pragma: no cover
@@ -70,7 +87,7 @@ def _build_agent(
     from aiida_agents.agents import get_agent
 
     try:
-        settings = _resolve_model_settings(provider, model)
+        settings = _resolve_settings_or_fail(provider, model)
         _ensure_ollama_model(settings)
         load_profile(profile)
         agent = get_agent(model_settings=settings)

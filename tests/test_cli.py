@@ -620,6 +620,48 @@ def test_config_path_reports_the_env_file(tmp_path: Path) -> None:
     assert "not present" in result.output
 
 
+# --- clean errors on a bad setting value -----------------------------------
+
+
+def test_check_reports_invalid_setting_value_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bad setting *value* is a clean CLI error, not a raw pydantic traceback.
+
+    Regression: `check`/`warm`/`doctor` build settings outside their try, so an
+    invalid `AIIDA_AGENTS_*` value used to surface as an uncaught
+    `ValidationError`; now `_resolve_settings_or_fail` converts it.
+    """
+    from pydantic import ValidationError
+
+    monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", "bogus")
+    result = CliRunner().invoke(cli, ["check"])
+    assert result.exit_code == 1
+    assert "Invalid configuration" in result.output
+    assert "provider" in result.output
+    assert not isinstance(result.exception, ValidationError)
+
+
+def test_config_rows_mark_invalid_group_without_crashing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A bad value renders as `(invalid: …)` instead of raising, so `config show`
+    (the debugging tool) still shows the healthy groups.
+    """
+    monkeypatch.setenv("AIIDA_AGENTS_MAX_TOKENS", "0")  # violates gt=0
+    rows = {row[1]: row for row in _config_rows(None, None)}  # must not raise
+    assert rows["max_tokens"][2].startswith("(invalid")
+    assert rows["tool_retries"][2] == "3"  # a healthy group is untouched
+
+
+def test_config_init_missing_parent_dir_is_clean() -> None:
+    """`config init --path` into a non-existent directory is a clean error."""
+    result = CliRunner().invoke(cli, ["config", "init", "--path", "no/such/dir/.env"])
+    assert result.exit_code == 1
+    assert "Could not write" in result.output
+    assert not isinstance(result.exception, FileNotFoundError)
+
+
 # --- rag search / dotenv / parse-args --------------------------------------
 
 

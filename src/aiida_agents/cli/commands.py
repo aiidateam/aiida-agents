@@ -28,7 +28,7 @@ from aiida_agents.cli.session import (
     _check_reachable,
     _diagnose_probe_failure,
     _probe_model,
-    _resolve_model_settings,
+    _resolve_settings_or_fail,
     ask,
 )
 
@@ -111,7 +111,7 @@ def check(ctx: click.Context) -> None:  # pragma: no cover
     Fast and read-only: it never loads or runs the model. Use `warm` to
     pre-load a local model before an interactive session.
     """
-    settings = _resolve_model_settings(ctx.obj["provider"], ctx.obj["model"])
+    settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     click.echo(f"Checking {settings.provider}:{settings.model} …")
     try:
         _check_reachable(settings)
@@ -129,7 +129,7 @@ def warm(ctx: click.Context) -> None:  # pragma: no cover
     Mainly useful for a local Ollama model before a session; for a cloud model
     it is just a round-trip that also confirms generation works.
     """
-    settings = _resolve_model_settings(ctx.obj["provider"], ctx.obj["model"])
+    settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     click.echo(f"Warming {settings.provider}:{settings.model} …")
     start = time.monotonic()
     try:
@@ -217,7 +217,7 @@ def _run_diagnostics(
 @_needs_recognized_settings
 def doctor(ctx: click.Context) -> None:  # pragma: no cover
     """Diagnose the setup: profile, model, RAG index, and docs toolchain."""
-    settings = _resolve_model_settings(ctx.obj["provider"], ctx.obj["model"])
+    settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     click.echo("Running diagnostics …\n")
     all_ok = True
     for label, ok, detail in _run_diagnostics(settings, ctx.obj["profile"]):

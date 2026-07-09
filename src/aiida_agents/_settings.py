@@ -29,7 +29,7 @@ import os
 from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import BeforeValidator, Field, model_validator
+from pydantic import BeforeValidator, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from typing_extensions import Self
 
@@ -232,6 +232,23 @@ class LoggingSettings(_Base):
     """Optional log file; a path enables file logging. The file captures everything
     (console records plus full tool-call/agent-reply traces), independent of
     log_level."""
+
+
+def _format_validation_error(exc: ValidationError) -> str:
+    """Render a pydantic ``ValidationError`` as concise ``field: reason`` lines.
+
+    Drops pydantic's framing (the trailing docs URL that ``str(exc)`` appends,
+    the ``Value error,`` prefix on custom-validator messages) so a CLI can tell a
+    researcher what to fix without a wall of internals. A whole-model error (a
+    cross-field ``model_validator``, which carries no field location) is shown as
+    its bare message.
+    """
+    lines = []
+    for err in exc.errors():
+        location = ".".join(str(part) for part in err["loc"])
+        reason = err["msg"].removeprefix("Value error, ")
+        lines.append(f"{location}: {reason}" if location else reason)
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
