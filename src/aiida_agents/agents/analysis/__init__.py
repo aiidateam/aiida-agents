@@ -4,11 +4,6 @@ This is the first concrete agent (ADR-04,
 docs/adr/04-multi-agent-architecture.md). It exposes read-only MCP tools
 for querying processes, nodes, and crystal structures, and a write tool
 (submit_workflow) that requires explicit human confirmation before execution.
-
-Public API
-----------
-get_agent()
-    Build and return a ready-to-use Analysis agent instance.
 """
 
 from __future__ import annotations

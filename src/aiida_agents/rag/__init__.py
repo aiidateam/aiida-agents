@@ -16,7 +16,7 @@ query_docs(query, limit=3)
 
 search_aiida_docs(query)
     Pydantic AI tool — wraps ``query_docs`` with formatted output suitable for
-    an LLM context window.  Register this directly in an ``Agent(tools=[...])``.
+    an LLM context window. Register this directly in an ``Agent(tools=[...])``.
 """
 
 from __future__ import annotations

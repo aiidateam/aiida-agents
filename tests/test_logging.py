@@ -15,7 +15,7 @@ from aiida_agents._logging import (
     suppress_noisy_loggers,
     trace_response,
 )
-from aiida_agents._settings import LoggingSettings
+from aiida_agents._settings import LoggingSettings, _LogLevel
 
 _NOISY_LOGGERS = ["asyncio", "httpcore", "httpx", "openai", "chromadb", "markdown_it"]
 
@@ -95,6 +95,32 @@ def test_configure_logging_wires_handlers(with_file: bool, tmp_path: Path) -> No
     assert not any(
         isinstance(f, _ConsoleFilter) for h in file_handlers for f in h.filters
     )
+
+
+@pytest.mark.parametrize(
+    ("log_level", "expected"),
+    [
+        pytest.param("WARNING", logging.WARNING, id="warning"),
+        pytest.param("INFO", logging.INFO, id="info-honoured"),
+        pytest.param("DEBUG", logging.DEBUG, id="debug"),
+    ],
+)
+@pytest.mark.usefixtures("_isolate_root_logging")
+def test_console_handler_honours_log_level(log_level: _LogLevel, expected: int) -> None:
+    """The console handler's level tracks ``log_level`` verbatim.
+
+    Regression guard for the dropped INFO->WARNING special-case: ``log_level=INFO``
+    must actually surface INFO on the console rather than be demoted to WARNING, so
+    a re-introduced special-case or a changed mapping fails here. The WARNING
+    default itself is pinned by ``test_settings`` (declared-defaults).
+    """
+    _configure_logging(LoggingSettings(log_level=log_level))
+    console_handler = next(
+        h
+        for h in logging.getLogger().handlers
+        if any(isinstance(f, _ConsoleFilter) for f in h.filters)
+    )
+    assert console_handler.level == expected
 
 
 @pytest.mark.usefixtures("_isolate_root_logging")

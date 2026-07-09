@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from typing import NamedTuple
 
 import rich_click as click
 from pydantic import ValidationError
@@ -25,7 +26,7 @@ from aiida_agents._settings import (
 )
 from aiida_agents.cli._guards import _report_setting_problems
 from aiida_agents.cli.output import console
-from aiida_agents.cli.session import _resolve_model_settings
+from aiida_agents.cli.agent import _resolve_model_settings
 
 
 def _env_var_for(cls: type[BaseSettings], field_name: str) -> str:
@@ -108,10 +109,18 @@ def _invalid_fields(exc: ValidationError) -> dict[str, str]:
     }
 
 
-def _config_rows(
-    provider: str | None, model: str | None
-) -> list[tuple[str, str, str, str, str]]:
-    """``(group, setting, value, env var, source)`` for every recognised setting.
+class ConfigRow(NamedTuple):
+    """One row of ``config show``: a setting's effective value and its provenance."""
+
+    group: str
+    setting: str
+    value: str
+    env_var: str
+    source: str
+
+
+def _config_rows(provider: str | None, model: str | None) -> list[ConfigRow]:
+    """A :class:`ConfigRow` for every recognised setting.
 
     Iterates :data:`_SETTINGS_GROUPS` so it stays in step with ``config init`` and
     the typo-detector, and no setting is silently omitted. ``source`` is where the
@@ -134,7 +143,7 @@ def _config_rows(
             return ".env"
         return "default"
 
-    rows: list[tuple[str, str, str, str, str]] = []
+    rows: list[ConfigRow] = []
     for cls in _SETTINGS_GROUPS:
         # ModelSettings honours the --provider/--model overrides; the other
         # groups read only env / .env / defaults. config show is the debugging
@@ -159,7 +168,9 @@ def _config_rows(
             else:
                 value = _display_value(obj, field_name)
             rows.append(
-                (_group_label(cls), field_name, value, env_var, source(env_var))
+                ConfigRow(
+                    _group_label(cls), field_name, value, env_var, source(env_var)
+                )
             )
     return rows
 
@@ -178,7 +189,7 @@ def config_show(ctx: click.Context) -> None:
     _report_setting_problems(find_unrecognized_settings())
     table = Table(title="aiida-agents configuration")
     table.add_column("Group", style="dim")
-    table.add_column("Setting", style="bold")
+    table.add_column("Setting", style="bold", overflow="fold")
     # ``fold`` (not the table default ``ellipsis``) on the wide columns, so a
     # long value or env var wraps instead of hiding characters: both are read or
     # copied verbatim (a truncated URL, path, or ``AIIDA_AGENTS_MAX_TOK...`` is not

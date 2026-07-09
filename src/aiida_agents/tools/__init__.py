@@ -3,6 +3,14 @@
 Read tools are re-exported flat (``from aiida_agents.tools import query_nodes``);
 the write tool ``submit_workflow`` stays an explicit ``tools.submit`` import, so
 the database-writing tool is not grabbed as casually as a read (HITL-gated, ADR-08).
+
+Public API
+----------
+query_nodes, get_node_inputs, get_node_outputs, list_processes,
+get_process_status, search_structures
+    Read-only AiiDA query tools, safe to register on an agent or expose over
+    MCP. The write tool ``submit_workflow`` is intentionally not re-exported
+    here; import it from ``tools.submit`` (HITL-gated, ADR-08).
 """
 
 from __future__ import annotations

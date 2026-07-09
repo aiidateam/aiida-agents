@@ -1,6 +1,11 @@
 """Command-line interface for aiida-agents.
 
-The Click entry point (``cli``) plus its command surface, split by concern:
+Public API
+----------
+cli
+    The root Click command group: the ``aiida-agents`` console entry point.
+
+The command surface is split by concern:
 
 * ``commands``: the root group and the core commands (chat/ask/check/warm/doctor)
 * ``config``: the ``config`` group and the effective-settings data behind it
@@ -9,7 +14,7 @@ The Click entry point (``cli``) plus its command surface, split by concern:
 * ``_guards``: the fail-fast guard for a mistyped settings key
 * ``repl``: the interactive REPL loop and prompt_toolkit session
 * ``hitl``: the human-in-the-loop write-approval flow
-* ``session``: build, run, and probe the agent for a command
+* ``agent``: build, run, and probe the agent for a command
 * ``ollama``: local Ollama model provisioning (presence checks, pull prompts)
 * ``output``: the shared console and reply rendering
 """

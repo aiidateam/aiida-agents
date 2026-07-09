@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, NamedTuple
 
 import rich_click as click
 from pydantic_ai import Agent
@@ -39,10 +39,17 @@ def _parse_args(args: str | dict[str, Any] | None) -> dict[str, Any]:
 # inputs cannot spin forever.
 _MAX_APPROVAL_ROUNDS = 10
 
-# A pending submission awaiting the user's decision: the original tool call, its
-# loaded process class, and its resolved inputs. The latter two are None for any
-# non-submit approval tool (shown with raw args, not executable out of band).
-_Preview = tuple[Any, Any, dict[str, Any] | None]
+
+class _Preview(NamedTuple):
+    """A pending submission awaiting the user's decision.
+
+    ``process_class`` and ``resolved`` are None for any non-submit approval tool
+    (shown with raw args, not executable out of band).
+    """
+
+    call: Any
+    process_class: Any
+    resolved: dict[str, Any] | None
 
 
 def _triage_submissions(
@@ -70,7 +77,7 @@ def _triage_submissions(
     previews: list[_Preview] = []
     for call in pending.approvals:
         if call.tool_name != "submit_workflow":
-            previews.append((call, None, None))
+            previews.append(_Preview(call, None, None))
             continue
         args = _parse_args(call.args)
         try:
@@ -83,7 +90,7 @@ def _triage_submissions(
                 "Correct the inputs and call submit_workflow again."
             )
             continue
-        previews.append((call, process_class, resolved))
+        previews.append(_Preview(call, process_class, resolved))
     return auto, previews
 
 

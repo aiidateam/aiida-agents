@@ -18,7 +18,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents._settings import ModelSettings, ReplSettings
-from aiida_agents.cli.session import ask
+from aiida_agents.cli.agent import ask
 from aiida_agents.cli.hitl import _handle_deferred
 from aiida_agents.cli.output import (
     _format_duration,

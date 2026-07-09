@@ -23,7 +23,7 @@ from rich.console import Console
 from aiida_agents._logging import TRACE_LOGGER_NAMES
 from aiida_agents._settings import SettingProblem
 from aiida_agents.cli import cli
-from aiida_agents.cli.session import _resolve_model_settings
+from aiida_agents.cli.agent import _resolve_model_settings
 from aiida_agents.cli.ollama import _ollama_lists_model, _ollama_model_names
 from aiida_agents.cli.config import _config_rows
 from aiida_agents.cli.output import _format_duration, _log_tool_calls_debug
@@ -368,19 +368,18 @@ def test_config_rows_report_value_and_source(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setenv("AIIDA_AGENTS_MODEL", "some-model")
     monkeypatch.delenv("AIIDA_AGENTS_PROVIDER", raising=False)
 
-    from_env = {row[1]: row for row in _config_rows(provider=None, model=None)}
-    assert from_env["model"] == (
-        "model",
-        "model",
-        "some-model",
-        "AIIDA_AGENTS_MODEL",
-        "env",
-    )
-    assert from_env["provider"][4] == "default"
+    from_env = {row.setting: row for row in _config_rows(provider=None, model=None)}
+    model_row = from_env["model"]
+    assert model_row.value == "some-model"
+    assert model_row.env_var == "AIIDA_AGENTS_MODEL"
+    assert model_row.source == "env"
+    assert from_env["provider"].source == "default"
 
-    from_flag = {row[1]: row for row in _config_rows(provider="openai", model=None)}
-    assert from_flag["provider"][2] == "openai"
-    assert from_flag["provider"][4] == "flag"
+    from_flag = {
+        row.setting: row for row in _config_rows(provider="openai", model=None)
+    }
+    assert from_flag["provider"].value == "openai"
+    assert from_flag["provider"].source == "flag"
 
 
 def test_config_rows_disambiguate_base_url_by_group() -> None:
@@ -388,7 +387,9 @@ def test_config_rows_disambiguate_base_url_by_group() -> None:
     rendered table never shows one label for two different settings.
     """
     base_urls = {
-        row[0]: row[3] for row in _config_rows(None, None) if row[1] == "base_url"
+        row.group: row.env_var
+        for row in _config_rows(None, None)
+        if row.setting == "base_url"
     }
     assert base_urls == {
         "model": "AIIDA_AGENTS_BASE_URL",
@@ -399,8 +400,8 @@ def test_config_rows_disambiguate_base_url_by_group() -> None:
 def test_config_rows_mask_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
     """API keys are reported as set/unset, never echoed."""
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-super-secret")
-    rows = {row[1]: row for row in _config_rows(None, None)}
-    assert rows["openrouter_api_key"][2] == "set"
+    rows = {row.setting: row for row in _config_rows(None, None)}
+    assert rows["openrouter_api_key"].value == "set"
     assert "sk-super-secret" not in str(rows)
 
 
@@ -510,7 +511,7 @@ class _FakeAsyncClient:
 
 def test_list_model_ids_returns_advertised_ids() -> None:
     """The listing helper collects the endpoint's model ids."""
-    from aiida_agents.cli.session import _list_model_ids
+    from aiida_agents.cli.agent import _list_model_ids
 
     assert asyncio.run(_list_model_ids(_FakeAsyncClient(["a", "b"]))) == {"a", "b"}
 
@@ -519,11 +520,11 @@ def test_list_model_ids_times_out_as_connection_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A slow endpoint becomes a connection error (never an indefinite hang)."""
-    from aiida_agents.cli import session
+    from aiida_agents.cli import agent
 
-    monkeypatch.setattr(session, "_REACHABILITY_TIMEOUT", 0.01)
+    monkeypatch.setattr(agent, "_REACHABILITY_TIMEOUT", 0.01)
     with pytest.raises(ConnectionError, match="could not connect"):
-        asyncio.run(session._list_model_ids(_FakeAsyncClient([], hang=True)))
+        asyncio.run(agent._list_model_ids(_FakeAsyncClient([], hang=True)))
 
 
 def test_version_option_prints_version() -> None:
@@ -615,7 +616,7 @@ def test_config_rows_cover_all_recognised_settings() -> None:
     """
     from aiida_agents._settings import _known_env_var_names
 
-    env_vars = {row[3] for row in _config_rows(None, None)}
+    env_vars = {row.env_var for row in _config_rows(None, None)}
     assert env_vars == _known_env_var_names()
 
 
@@ -682,9 +683,9 @@ def test_config_rows_mark_invalid_group_without_crashing(
     (the debugging tool) still shows the healthy groups.
     """
     monkeypatch.setenv("AIIDA_AGENTS_MAX_TOKENS", "0")  # violates gt=0
-    rows = {row[1]: row for row in _config_rows(None, None)}  # must not raise
-    assert rows["max_tokens"][2].startswith("(invalid")
-    assert rows["tool_retries"][2] == "3"  # a healthy group is untouched
+    rows = {row.setting: row for row in _config_rows(None, None)}  # must not raise
+    assert rows["max_tokens"].value.startswith("(invalid")
+    assert rows["tool_retries"].value == "3"  # a healthy group is untouched
 
 
 def test_config_init_missing_parent_dir_is_clean() -> None:

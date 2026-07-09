@@ -243,7 +243,7 @@ class ServerSettings(_Base):
 class LoggingSettings(_Base):
     """Process-wide logging configuration (``AIIDA_AGENTS_*``).
 
-    Not MCP-server specific: every entry point (CLI, MCP server, RAG indexing)
+    Every entry point (CLI, MCP server, RAG indexing)
     logs, so the level is a package-wide knob rather than part of
     ``ServerSettings``.
     """

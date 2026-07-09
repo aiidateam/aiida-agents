@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
+from typing import Any, NamedTuple
 
 import rich_click as click
 from pydantic import ValidationError
@@ -143,7 +143,15 @@ async def _list_model_ids(client: Any) -> set[str]:
     return {item.id for item in page.data}
 
 
-def _probe_reachable(settings: ModelSettings) -> tuple[str, int, bool]:
+class Reachability(NamedTuple):
+    """What a no-generation reachability probe learns about the endpoint."""
+
+    endpoint: str
+    n_models: int
+    model_ok: bool
+
+
+def _probe_reachable(settings: ModelSettings) -> Reachability:
     """Reachability facts without a generation: ``(endpoint, n_models, model_ok)``.
 
     Builds the model (validating provider / base_url / key presence), then lists
@@ -165,7 +173,7 @@ def _probe_reachable(settings: ModelSettings) -> tuple[str, int, bool]:
     if settings.provider == "ollama" and ":" not in wanted:
         wanted = f"{wanted}:latest"
     model_ok = wanted in ids or settings.model in ids
-    return str(client.base_url), len(ids), model_ok
+    return Reachability(str(client.base_url), len(ids), model_ok)
 
 
 def _check_reachable(settings: ModelSettings) -> None:  # pragma: no cover

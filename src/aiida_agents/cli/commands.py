@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import NamedTuple
 
 import rich_click as click
 from pydantic_ai.tools import DeferredToolRequests
@@ -23,7 +24,7 @@ from aiida_agents.cli.mcp import mcp
 from aiida_agents.cli.output import _format_duration, _render_tool_calls, console
 from aiida_agents.cli.rag import _module_missing, rag
 from aiida_agents.cli.repl import _run_repl
-from aiida_agents.cli.session import (
+from aiida_agents.cli.agent import (
     _build_agent,
     _check_reachable,
     _diagnose_probe_failure,
@@ -89,7 +90,7 @@ def chat(ctx: click.Context) -> None:  # pragma: no cover
 @click.pass_context
 @_needs_recognized_settings
 def ask_cmd(ctx: click.Context, question: str) -> None:  # pragma: no cover
-    """Answer a single QUESTION and exit (one-shot; scriptable)."""
+    """Answer a single question and exit (one-shot)."""
     agent, _ = _build_agent(ctx.obj["provider"], ctx.obj["model"], ctx.obj["profile"])
     result = asyncio.run(ask(agent, question))
     _render_tool_calls(result.new_messages(), console)  # debug-gated; no spinner here
@@ -154,57 +155,75 @@ def _short_reason(exc: Exception) -> str:
     return lines[0][:100] if lines else ""
 
 
+class DiagnosticRow(NamedTuple):
+    """One ``doctor`` health-check result: a label, pass/fail, and a detail."""
+
+    label: str
+    ok: bool
+    detail: str
+
+
 def _run_diagnostics(
     settings: ModelSettings, profile: str | None
-) -> list[tuple[str, bool, str]]:  # pragma: no cover
-    """Run each health check, returning ``(label, ok, detail)`` rows.
+) -> list[DiagnosticRow]:  # pragma: no cover
+    """Run each health check, returning a :class:`DiagnosticRow` per check.
 
     Every check is isolated in its own ``try`` so one failure (an unreachable
     model, an unloadable profile) never aborts the rest of the report. The model
     check uses the no-generation reachability probe, so ``doctor`` never warms
     the model.
     """
-    from aiida_agents.cli.session import _probe_reachable
+    from aiida_agents.cli.agent import _probe_reachable
 
-    rows: list[tuple[str, bool, str]] = []
+    rows: list[DiagnosticRow] = []
 
     try:
         from aiida import load_profile
 
         loaded = load_profile(profile)
-        rows.append(("AiiDA profile loads", True, loaded.name))
+        rows.append(DiagnosticRow("AiiDA profile loads", True, loaded.name))
     except Exception as exc:
-        rows.append(("AiiDA profile loads", False, _short_reason(exc)))
+        rows.append(DiagnosticRow("AiiDA profile loads", False, _short_reason(exc)))
 
     model_label = f"Model reachable ({settings.provider}:{settings.model})"
     try:
         endpoint, _, model_ok = _probe_reachable(settings)
         if model_ok:
-            rows.append((model_label, True, endpoint))
+            rows.append(DiagnosticRow(model_label, True, endpoint))
         elif settings.provider == "ollama":
             rows.append(
-                (model_label, False, f"model not pulled (ollama pull {settings.model})")
+                DiagnosticRow(
+                    model_label,
+                    False,
+                    f"model not pulled (ollama pull {settings.model})",
+                )
             )
         else:
             rows.append(
-                (model_label, True, "reachable; model not listed (may still work)")
+                DiagnosticRow(
+                    model_label, True, "reachable; model not listed (may still work)"
+                )
             )
     except Exception as exc:
-        rows.append((model_label, False, _short_reason(exc)))
+        rows.append(DiagnosticRow(model_label, False, _short_reason(exc)))
 
     try:
         from aiida_agents.rag.store import index_status
 
         built = index_status().built
         rows.append(
-            ("RAG index built", built, "" if built else "run `aiida-agents rag build`")
+            DiagnosticRow(
+                "RAG index built",
+                built,
+                "" if built else "run `aiida-agents rag build`",
+            )
         )
     except Exception as exc:
-        rows.append(("RAG index built", False, _short_reason(exc)))
+        rows.append(DiagnosticRow("RAG index built", False, _short_reason(exc)))
 
     has_sphinx = not _module_missing("sphinx")
     rows.append(
-        (
+        DiagnosticRow(
             "Docs toolchain (sphinx)",
             has_sphinx,
             "" if has_sphinx else "needed only for `rag build`",
