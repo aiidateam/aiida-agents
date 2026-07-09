@@ -257,10 +257,10 @@ def test_rag_build_reports_index_failure_cleanly(
 ) -> None:
     """A build failure (sphinx, or the embedder over the network) surfaces as a
     clean CLI error, not a traceback."""
-    monkeypatch.setattr("aiida_agents.cli.commands._module_missing", lambda name: False)
+    monkeypatch.setattr("aiida_agents.cli.rag._module_missing", lambda name: False)
     # No real Ollama pull during the test if the embed model is absent.
     monkeypatch.setattr(
-        "aiida_agents.cli.commands._prompt_pull_ollama_model", lambda model: None
+        "aiida_agents.cli.rag._prompt_pull_ollama_model", lambda model: None
     )
 
     def _boom(force: bool, progress: object = None) -> None:
@@ -279,7 +279,7 @@ def test_rag_build_declining_toolchain_install_is_clean(
 ) -> None:
     """Missing sphinx plus a declined install gives a clean, actionable error."""
     monkeypatch.setattr(
-        "aiida_agents.cli.commands._module_missing", lambda name: name == "sphinx"
+        "aiida_agents.cli.rag._module_missing", lambda name: name == "sphinx"
     )
     result = CliRunner().invoke(cli, ["rag", "build"], input="n\n")
     assert result.exit_code == 1
@@ -306,9 +306,9 @@ def test_rag_build_reports_outcome(
     an up-to-date index reads as a no-op, not a fresh build."""
     from aiida_agents.rag import IndexOutcome
 
-    monkeypatch.setattr("aiida_agents.cli.commands._module_missing", lambda name: False)
+    monkeypatch.setattr("aiida_agents.cli.rag._module_missing", lambda name: False)
     monkeypatch.setattr(
-        "aiida_agents.cli.commands._prompt_pull_ollama_model", lambda model: None
+        "aiida_agents.cli.rag._prompt_pull_ollama_model", lambda model: None
     )
     outcome = getattr(IndexOutcome, outcome_name)
     monkeypatch.setattr(
@@ -529,7 +529,7 @@ def test_action_command_fails_fast_on_mistyped_setting(
 ) -> None:
     """A command that acts on config exits 2, before doing work, on a typo'd key."""
     monkeypatch.setattr(
-        "aiida_agents.cli.commands.find_unrecognized_settings", _one_typo
+        "aiida_agents.cli._guards.find_unrecognized_settings", _one_typo
     )
     result = CliRunner().invoke(cli, ["rag", "status"])
     assert result.exit_code == 2
@@ -541,9 +541,7 @@ def test_config_show_flags_but_still_runs_on_typo(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`config show` reports the typo yet renders the table (exit 0), to aid debugging."""
-    monkeypatch.setattr(
-        "aiida_agents.cli.commands.find_unrecognized_settings", _one_typo
-    )
+    monkeypatch.setattr("aiida_agents.cli.config.find_unrecognized_settings", _one_typo)
     result = CliRunner().invoke(cli, ["config", "show"])
     assert result.exit_code == 0
     assert "AIIDA_AGENS_PROVIDER" in result.output
@@ -562,7 +560,7 @@ def test_help_bypasses_the_settings_check(
 ) -> None:
     """--help / -h resolve before the guard runs, so they work despite a typo."""
     monkeypatch.setattr(
-        "aiida_agents.cli.commands.find_unrecognized_settings", _one_typo
+        "aiida_agents.cli._guards.find_unrecognized_settings", _one_typo
     )
     assert CliRunner().invoke(cli, args).exit_code == 0
 
@@ -629,7 +627,7 @@ def test_rag_search_errors_cleanly_without_an_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """`rag search` with no index is a clean CLI error, not a traceback."""
-    monkeypatch.setattr("aiida_agents.cli.commands.find_unrecognized_settings", list)
+    monkeypatch.setattr("aiida_agents.cli._guards.find_unrecognized_settings", list)
     monkeypatch.setattr(
         "aiida_agents.rag.retriever.docs_index_available", lambda: False
     )

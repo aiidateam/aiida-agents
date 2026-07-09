@@ -1,13 +1,29 @@
-"""Data behind ``config show``: effective settings, their env var, and source."""
+"""The ``aiida-agents config`` command group and the data behind it.
+
+``config show`` renders each effective setting with its env var and source,
+``config init`` scaffolds a ``.env`` template, and ``config path`` reports where
+configuration is read from. The row/template builders (:func:`_config_rows`,
+:func:`_env_template`) derive everything from ``_SETTINGS_GROUPS`` so the surface
+never drifts from the settings themselves.
+"""
 
 from __future__ import annotations
 
 import os
 from pathlib import Path
 
+import rich_click as click
 from pydantic_settings import BaseSettings
+from rich.table import Table
 
-from aiida_agents._settings import _SETTINGS_GROUPS, ModelSettings, _dotenv_keys
+from aiida_agents._settings import (
+    _SETTINGS_GROUPS,
+    ModelSettings,
+    _dotenv_keys,
+    find_unrecognized_settings,
+)
+from aiida_agents.cli._guards import _report_setting_problems
+from aiida_agents.cli.output import console
 from aiida_agents.cli.session import _resolve_model_settings
 
 
@@ -122,3 +138,67 @@ def _config_rows(
                 )
             )
     return rows
+
+
+@click.group("config")
+def config() -> None:
+    """Inspect effective configuration."""
+
+
+@config.command("show")
+@click.pass_context
+def config_show(ctx: click.Context) -> None:
+    """Print the effective settings and where each value comes from."""
+    # Flag (but don't fail on) a mistyped key: this is where you come to debug
+    # configuration, so it must still render the table.
+    _report_setting_problems(find_unrecognized_settings())
+    table = Table(title="aiida-agents configuration")
+    table.add_column("Group", style="dim")
+    table.add_column("Setting", style="bold")
+    # ``fold`` (not the table default ``ellipsis``) on the wide columns, so a
+    # long value or env var wraps instead of hiding characters: both are read or
+    # copied verbatim (a truncated URL, path, or ``AIIDA_AGENTS_MAX_TOK…`` is not
+    # actionable). The short columns keep the default.
+    table.add_column("Value", overflow="fold")
+    table.add_column("Env var", style="dim", overflow="fold")
+    table.add_column("Source", style="cyan")
+    for group, setting, value, env_var, src in _config_rows(
+        ctx.obj["provider"], ctx.obj["model"]
+    ):
+        table.add_row(group, setting, value, env_var, src)
+    console.print(table)
+
+
+@config.command("path")
+def config_path() -> None:
+    """Show where configuration is read from."""
+    # click.echo (not console.print): the resolved path is long and must stay on
+    # one line so it is copyable; rich would soft-wrap it to the terminal width.
+    env_file = Path(".env").resolve()
+    marker = "found" if env_file.is_file() else "not present"
+    click.echo(f".env file: {env_file} ({marker})")
+    click.echo(
+        "Settings come from environment variables and this .env file. "
+        "Run `aiida-agents config show` to see effective values and sources."
+    )
+
+
+@config.command("init")
+@click.option(
+    "--path",
+    "path_str",
+    type=click.Path(dir_okay=False),
+    default=".env",
+    show_default=True,
+    help="Where to write the template.",
+)
+@click.option("--force", is_flag=True, help="Overwrite an existing file.")
+def config_init(path_str: str, force: bool) -> None:
+    """Write a commented ``.env`` template with the recognised settings."""
+    target = Path(path_str)
+    if target.exists() and not force:
+        raise click.ClickException(
+            f"{target} already exists; pass --force to overwrite."
+        )
+    target.write_text(_env_template(), encoding="utf-8")
+    click.echo(f"✓ Wrote {target}. Uncomment and edit the settings you want to change.")
