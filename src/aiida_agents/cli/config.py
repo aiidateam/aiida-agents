@@ -181,7 +181,7 @@ def config_show(ctx: click.Context) -> None:
     table.add_column("Setting", style="bold")
     # ``fold`` (not the table default ``ellipsis``) on the wide columns, so a
     # long value or env var wraps instead of hiding characters: both are read or
-    # copied verbatim (a truncated URL, path, or ``AIIDA_AGENTS_MAX_TOK…`` is not
+    # copied verbatim (a truncated URL, path, or ``AIIDA_AGENTS_MAX_TOK...`` is not
     # actionable). The short columns keep the default.
     table.add_column("Value", overflow="fold")
     table.add_column("Env var", style="dim", overflow="fold")

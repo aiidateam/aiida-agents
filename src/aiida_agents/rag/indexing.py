@@ -72,7 +72,7 @@ def _clone_and_build_text(target_dir: str) -> None:
         repo_dir = tmp_path / "aiida-core"
 
         # Step 1: sparse-clone only docs/ at the v2.8 tag
-        logger.info("cloning aiida-core %s (sparse, docs/ only)…", _DOCS_TAG)
+        logger.info("cloning aiida-core %s (sparse, docs/ only)...", _DOCS_TAG)
         subprocess.run(
             [
                 "git",
@@ -109,7 +109,7 @@ def _clone_and_build_text(target_dir: str) -> None:
         # ```lang fences around code blocks; see rag._textbuild) under THIS
         # interpreter (sys.executable), so it uses the environment that has
         # aiida installed, not a stray system sphinx-build on PATH.
-        logger.info("running sphinx text build…")
+        logger.info("running sphinx text build...")
         result = subprocess.run(
             [
                 sys.executable,

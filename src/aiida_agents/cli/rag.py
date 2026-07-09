@@ -110,7 +110,7 @@ def rag_build(force: bool) -> None:  # pragma: no cover
             console=console,
             # Tear the bar down on exit so a fast no-op (an already-built index
             # returns before the first _report) leaves no stale, never-updated
-            # "Cloning…" frame on screen. The permanent ✓ lines are console
+            # "Cloning..." frame on screen. The permanent ✓ lines are console
             # prints above the live region, so they survive the teardown.
             transient=True,
             # Embedding a batch can take ~a minute on a weak GPU; the default 30s
@@ -118,7 +118,7 @@ def rag_build(force: bool) -> None:  # pragma: no cover
             # ETA never computes. Widen it to span several batches.
             speed_estimate_period=600.0,
         ) as bar:
-            task = bar.add_task("Cloning docs, building text (sphinx)…", total=None)
+            task = bar.add_task("Cloning docs, building text (sphinx)...", total=None)
 
             def _report(done: int, total: int) -> None:
                 if done == 0:

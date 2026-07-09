@@ -21,6 +21,7 @@ from pydantic_ai.messages import (
 from rich.console import Console
 
 from aiida_agents._logging import TRACE_LOGGER_NAMES
+from aiida_agents._settings import SettingProblem
 from aiida_agents.cli import cli
 from aiida_agents.cli.session import _resolve_model_settings
 from aiida_agents.cli.ollama import _ollama_lists_model, _ollama_model_names
@@ -537,8 +538,8 @@ def test_version_option_prints_version() -> None:
 # --- fail-fast on a mistyped setting key -----------------------------------
 
 
-def _one_typo() -> list[tuple[str, str | None]]:
-    return [("AIIDA_AGENS_PROVIDER", "AIIDA_AGENTS_PROVIDER")]
+def _one_typo() -> list[SettingProblem]:
+    return [SettingProblem("AIIDA_AGENS_PROVIDER", "AIIDA_AGENTS_PROVIDER")]
 
 
 def test_action_command_fails_fast_on_mistyped_setting(
@@ -677,7 +678,7 @@ def test_provider_flag_rejects_unknown_choice() -> None:
 def test_config_rows_mark_invalid_group_without_crashing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A bad value renders as `(invalid: …)` instead of raising, so `config show`
+    """A bad value renders as `(invalid: ...)` instead of raising, so `config show`
     (the debugging tool) still shows the healthy groups.
     """
     monkeypatch.setenv("AIIDA_AGENTS_MAX_TOKENS", "0")  # violates gt=0

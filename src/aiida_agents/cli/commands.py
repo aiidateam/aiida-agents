@@ -113,7 +113,7 @@ def check(ctx: click.Context) -> None:  # pragma: no cover
     pre-load a local model before an interactive session.
     """
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
-    click.echo(f"Checking {settings.provider}:{settings.model} …")
+    click.echo(f"Checking {settings.provider}:{settings.model} ...")
     try:
         _check_reachable(settings)
     except Exception as exc:
@@ -131,7 +131,7 @@ def warm(ctx: click.Context) -> None:  # pragma: no cover
     it is just a round-trip that also confirms generation works.
     """
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
-    click.echo(f"Warming {settings.provider}:{settings.model} …")
+    click.echo(f"Warming {settings.provider}:{settings.model} ...")
     start = time.monotonic()
     try:
         _probe_model(settings)
@@ -219,7 +219,7 @@ def _run_diagnostics(
 def doctor(ctx: click.Context) -> None:  # pragma: no cover
     """Diagnose the setup: profile, model, RAG index, and docs toolchain."""
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
-    click.echo("Running diagnostics …\n")
+    click.echo("Running diagnostics ...\n")
     all_ok = True
     for label, ok, detail in _run_diagnostics(settings, ctx.obj["profile"]):
         mark = "[green]✓[/]" if ok else "[red]✗[/]"

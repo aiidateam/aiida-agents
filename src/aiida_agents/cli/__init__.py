@@ -8,7 +8,7 @@ The Click entry point (``cli``) plus its command surface, split by concern:
 * ``mcp``: the ``mcp`` group (run the MCP server from the CLI)
 * ``_guards``: the fail-fast guard for a mistyped settings key
 * ``repl``: the interactive REPL loop and prompt_toolkit session
-* ``hitl``: the human-in-the-loop write-approval flow (ADR-08)
+* ``hitl``: the human-in-the-loop write-approval flow
 * ``session``: build, run, and probe the agent for a command
 * ``ollama``: local Ollama model provisioning (presence checks, pull prompts)
 * ``output``: the shared console and reply rendering

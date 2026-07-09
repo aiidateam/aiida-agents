@@ -31,5 +31,5 @@ def mcp_serve(port: int | None) -> None:  # pragma: no cover
     from aiida_agents.mcp import server
 
     resolved = port if port is not None else ServerSettings().port
-    click.echo(f"Starting MCP server on port {resolved} (Ctrl-C to stop) …")
+    click.echo(f"Starting MCP server on port {resolved} (Ctrl-C to stop) ...")
     server.mcp.run(transport="streamable-http", port=resolved)

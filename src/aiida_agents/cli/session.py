@@ -24,6 +24,13 @@ from aiida_agents.cli.output import _trace_tool_calls
 
 logger = logging.getLogger(__name__)
 
+# Colored status glyphs so ``check`` marks success/failure the same green/red as
+# ``doctor`` (which renders its rows through rich). ``click.echo`` strips the
+# color automatically when the output is not a terminal.
+_OK = click.style("✓", fg="green")
+_FAIL = click.style("✗", fg="red")
+_WARN = click.style("!", fg="yellow")
+
 
 async def ask(
     agent: Agent,
@@ -171,16 +178,16 @@ def _check_reachable(settings: ModelSettings) -> None:  # pragma: no cover
     """
     endpoint, n_models, model_ok = _probe_reachable(settings)
     click.echo(f"Endpoint: {endpoint}")
-    click.echo(f"✓ reachable ({n_models} models advertised)")
+    click.echo(f"{_OK} reachable ({n_models} models advertised)")
     if model_ok:
-        click.echo(f"✓ model '{settings.model}' is available")
+        click.echo(f"{_OK} model '{settings.model}' is available")
         return
     if settings.provider == "ollama":
-        click.echo(f"✗ model '{settings.model}' is not pulled.", err=True)
+        click.echo(f"{_FAIL} model '{settings.model}' is not pulled.", err=True)
         click.echo(f"  Pull it with: ollama pull {settings.model}", err=True)
         raise SystemExit(1)
     click.echo(
-        f"! model '{settings.model}' is not in this endpoint's list "
+        f"{_WARN} model '{settings.model}' is not in this endpoint's list "
         "(it may be partial; the model may still work).",
         err=True,
     )
@@ -192,19 +199,24 @@ def _diagnose_probe_failure(
     """Turn a probe failure into an actionable message, offering an Ollama pull."""
     msg = str(exc).lower()
     if settings.provider == "ollama" and ("not found" in msg or "404" in msg):
-        click.echo(f"✗ Ollama model '{settings.model}' is not pulled.", err=True)
+        click.echo(f"{_FAIL} Ollama model '{settings.model}' is not pulled.", err=True)
         if click.confirm(f"Pull it now (ollama pull {settings.model})?", default=True):
             _ollama_pull(settings.model)
         return
     if ("api" in msg and "key" in msg) or "401" in msg or "403" in msg:
         if "not set" in msg or "environment variable" in msg or "set the" in msg:
-            click.echo("✗ API key not set: set the provider's API key.", err=True)
+            click.echo(
+                f"{_FAIL} API key not set: set the provider's API key.", err=True
+            )
         else:
             click.echo(
-                "✗ Authentication failed: check the provider's API key.", err=True
+                f"{_FAIL} Authentication failed: check the provider's API key.",
+                err=True,
             )
         return
     if "connect" in msg or "connection" in msg:
-        click.echo("✗ Could not reach the endpoint. Is the server running?", err=True)
+        click.echo(
+            f"{_FAIL} Could not reach the endpoint. Is the server running?", err=True
+        )
         return
-    click.echo(f"✗ {exc}", err=True)
+    click.echo(f"{_FAIL} {exc}", err=True)

@@ -100,7 +100,7 @@ _GROUP_DEFAULTS = [
             "AIIDA_AGENTS_LOG_FILE",
         ),
         {
-            "log_level": "INFO",
+            "log_level": "WARNING",
             "log_file": None,
         },
         id="logging",

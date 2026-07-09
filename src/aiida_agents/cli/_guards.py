@@ -5,6 +5,12 @@ pydantic-settings, so a command would otherwise run on an unintended default.
 Action commands wrap their body in :func:`_needs_recognized_settings` to stop
 before doing work; ``config`` commands instead report the same problem without
 stopping (they exist to inspect and fix configuration).
+
+This is the CLI *adapter* over the surface-agnostic detection in
+``_settings.find_unrecognized_settings`` (which just returns
+``SettingProblem`` data): only the *reaction* to a problem lives here, turning
+it into a Click error / ``SystemExit``. The detection stays click-free so the
+MCP server and RAG indexing can reuse it without pulling in the CLI framework.
 """
 
 from __future__ import annotations
@@ -14,10 +20,10 @@ from collections.abc import Callable
 
 import rich_click as click
 
-from aiida_agents._settings import find_unrecognized_settings
+from aiida_agents._settings import SettingProblem, find_unrecognized_settings
 
 
-def _report_setting_problems(problems: list[tuple[str, str | None]]) -> None:
+def _report_setting_problems(problems: list[SettingProblem]) -> None:
     """Print one actionable line per key that looks like a mistyped setting."""
     for key, suggestion in problems:
         hint = (

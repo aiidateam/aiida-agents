@@ -140,7 +140,7 @@ def _run_repl(agent: Agent, settings: ModelSettings) -> None:  # pragma: no cove
 
         start = time.monotonic()
         try:
-            with console.status("[dim]thinking…[/]", spinner="dots"):
+            with console.status("[dim]thinking...[/]", spinner="dots"):
                 result = asyncio.run(
                     ask(
                         agent,

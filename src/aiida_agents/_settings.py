@@ -27,7 +27,7 @@ import difflib
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Literal, TypeAlias, get_args
+from typing import Annotated, Literal, NamedTuple, TypeAlias, get_args
 
 from pydantic import BeforeValidator, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -35,13 +35,20 @@ from typing_extensions import Self
 
 logger = logging.getLogger(__name__)
 
+# The env namespace and the .env file are the two anchors the settings groups
+# load from. Named once here so the typo detector reuses them instead of
+# re-hardcoding the strings (which risks the namespace check drifting from
+# ``_Base``, or a ``""`` default silently matching every key).
+_ENV_PREFIX = "AIIDA_AGENTS_"
+_ENV_FILE = ".env"
+
 
 class _Base(BaseSettings):
     """Shared loading rules for every settings group."""
 
     model_config = SettingsConfigDict(
-        env_prefix="AIIDA_AGENTS_",
-        env_file=".env",
+        env_prefix=_ENV_PREFIX,
+        env_file=_ENV_FILE,
         env_file_encoding="utf-8",
         # A blank value (e.g. ``AIIDA_AGENTS_PROVIDER=``) means "unset", not the
         # empty string. Without this, the blank is read as "" and fails
@@ -241,13 +248,15 @@ class LoggingSettings(_Base):
     ``ServerSettings``.
     """
 
-    log_level: _LogLevel = "INFO"
-    """Console log level: DEBUG | INFO | WARNING | ERROR | CRITICAL."""
+    log_level: _LogLevel = "WARNING"
+    """Console log level: DEBUG | INFO | WARNING | ERROR | CRITICAL. Defaults to
+    WARNING so an interactive session stays uncluttered; lower it to INFO or DEBUG
+    to surface operational logs on the console."""
 
     log_file: Path | None = None
-    """Optional log file; a path enables file logging. The file captures everything
-    (console records plus full tool-call/agent-reply traces), independent of
-    log_level."""
+    """Optional log file; a path enables file logging. The file always captures the
+    full tool-call/agent-reply traces (logged at DEBUG regardless of log_level);
+    other records follow log_level."""
 
 
 def _format_validation_error(exc: ValidationError) -> str:
@@ -336,39 +345,60 @@ def _present_env_keys(env_file: Path) -> set[str]:
 _TYPO_SIMILARITY = 0.9
 
 
-def find_unrecognized_settings(
-    env_file: Path | None = None,
-) -> list[tuple[str, str | None]]:
-    """Return ``(key, suggestion)`` for each set variable that looks mistyped.
+class SettingProblem(NamedTuple):
+    """A set env var that looks like a mistyped setting.
 
-    Two kinds are reported, both otherwise dropped silently by ``extra="ignore"``
-    (leaving the setting at its default):
+    ``suggestion`` is the closest real setting name for an out-of-namespace
+    near-miss (``AIIDA_AGENS_PROVIDER`` -> ``AIIDA_AGENTS_PROVIDER``), or ``None``
+    for an in-namespace key whose field simply isn't recognised
+    (``AIIDA_AGENTS_PROVDER``). Unpacks as ``(key, suggestion)``.
+    """
 
-    * a *field* typo inside the namespace (``AIIDA_AGENTS_PROVDER``), suggestion
-      ``None`` (the prefix is right, but no field matches);
-    * a *prefix* typo that lands outside the namespace
-      (``AIIDA_AGENS_PROVIDER``), suggestion = the closest real setting name,
-      reported only when the resemblance clears :data:`_TYPO_SIMILARITY` so
-      unrelated environment variables stay out.
+    key: str
+    suggestion: str | None
 
-    Unprefixed but recognised names (``OLLAMA_BASE_URL``, the cloud SDK keys)
-    are known and never reported.
+
+def _classify_present_keys(present_keys: set[str]) -> list[SettingProblem]:
+    """Classify each present-but-unrecognised env var as a likely typo.
+
+    Pure (no I/O): ``present_keys`` are the upper-cased names already gathered
+    from the process env and ``.env`` (see :func:`_present_env_keys`), so the
+    prefix/difflib logic is unit-testable with a plain set. Two kinds are
+    reported, both otherwise dropped silently by ``extra="ignore"`` (leaving the
+    setting at its default):
+
+    * a *field* typo inside the namespace (``AIIDA_AGENTS_PROVDER``): the prefix
+      is right but no field matches, so the suggestion is ``None``;
+    * a *prefix* typo that lands outside the namespace (``AIIDA_AGENS_PROVIDER``):
+      the suggestion is the closest real setting name, reported only when the
+      resemblance clears :data:`_TYPO_SIMILARITY` so unrelated variables stay out.
+
+    Unprefixed but recognised names (``OLLAMA_BASE_URL``, the cloud SDK keys) are
+    known and never reported.
+    """
+    known = _known_env_var_names()
+    problems: list[SettingProblem] = []
+    for key in sorted(present_keys - known):
+        if key.startswith(_ENV_PREFIX):
+            problems.append(SettingProblem(key, None))
+        elif close := difflib.get_close_matches(
+            key, sorted(known), n=1, cutoff=_TYPO_SIMILARITY
+        ):
+            problems.append(SettingProblem(key, close[0]))
+    return problems
+
+
+def find_unrecognized_settings(env_file: Path | None = None) -> list[SettingProblem]:
+    """Return a :class:`SettingProblem` for each set variable that looks mistyped.
+
+    The I/O boundary over :func:`_classify_present_keys`: gathers the keys set in
+    the process env and ``env_file``, then classifies them.
 
     :param env_file: ``.env`` file to scan; defaults to ``.env`` in the current
         directory, matching what the settings groups load.
     """
-    target = env_file if env_file is not None else Path(".env")
-    prefix = _Base.model_config.get("env_prefix", "").upper()
-    known = _known_env_var_names()
-    problems: list[tuple[str, str | None]] = []
-    for key in sorted(_present_env_keys(target) - known):
-        if key.startswith(prefix):
-            problems.append((key, None))
-        elif close := difflib.get_close_matches(
-            key, sorted(known), n=1, cutoff=_TYPO_SIMILARITY
-        ):
-            problems.append((key, close[0]))
-    return problems
+    target = env_file if env_file is not None else Path(_ENV_FILE)
+    return _classify_present_keys(_present_env_keys(target))
 
 
 def warn_on_unrecognized_settings(env_file: Path | None = None) -> None:

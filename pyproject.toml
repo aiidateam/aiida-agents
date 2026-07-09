@@ -23,6 +23,9 @@ classifiers = [
 dependencies = [
     "aiida-core @ git+https://github.com/aiidateam/aiida-core.git",
     "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
+    # Reached only through rich_click (which itself requires click>=8); no
+    # speculative upper bound. Reproducibility comes from uv.lock, and a ceiling
+    # is added reactively (with the breaking version noted) if CI ever hits one.
     "click>=8",
     "fastmcp>=3.0.0",
     "prompt-toolkit>=3",
