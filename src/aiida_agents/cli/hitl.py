@@ -133,7 +133,14 @@ def _handle_deferred(
 
         if previews:
             _print_previews(previews)
-            if not click.confirm("\nProceed?", default=False):
+            # Ctrl-C / Ctrl-D at the prompt raise click.Abort; treat that as a
+            # decline (cancel the submission, stay in the REPL) rather than
+            # tearing down the whole session, matching Ctrl-C in the main loop.
+            try:
+                proceed = click.confirm("\nProceed?", default=False)
+            except click.Abort:
+                proceed = False
+            if not proceed:
                 click.echo("Cancelled - nothing was submitted.")
                 return history
 
