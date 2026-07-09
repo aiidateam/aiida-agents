@@ -27,7 +27,7 @@ import difflib
 import logging
 import os
 from pathlib import Path
-from typing import Annotated, Literal, TypeAlias
+from typing import Annotated, Literal, TypeAlias, get_args
 
 from pydantic import BeforeValidator, Field, ValidationError, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -81,6 +81,22 @@ _LogLevel: TypeAlias = Annotated[
     Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"],
     BeforeValidator(str.upper),  # ``logging`` level names are case-sensitive
 ]
+
+
+def _choices(alias: object) -> tuple[str, ...]:
+    """The allowed string values of an ``Annotated[Literal[...], ...]`` alias.
+
+    Lets consumers (the CLI's ``--provider`` choices, drift guards) derive the
+    option list from the single source of truth (the ``Literal``) instead of
+    restating it.
+    """
+    literal, *_ = get_args(alias)  # unwrap Annotated -> the Literal
+    return get_args(literal)  # the Literal's string members
+
+
+# The ``--provider`` flag's choices come from ``_Provider`` so the CLI can never
+# advertise a provider the settings don't accept (or omit a new one).
+_PROVIDER_CHOICES = _choices(_Provider)
 
 
 class ModelSettings(_Base):

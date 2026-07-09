@@ -16,7 +16,7 @@ import rich_click as click
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents._logging import _configure_logging
-from aiida_agents._settings import LoggingSettings, ModelSettings
+from aiida_agents._settings import _PROVIDER_CHOICES, LoggingSettings, ModelSettings
 from aiida_agents.cli._guards import _needs_recognized_settings
 from aiida_agents.cli.config import config
 from aiida_agents.cli.mcp import mcp
@@ -42,8 +42,9 @@ _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 @click.version_option(package_name="aiida-agents", message="%(prog)s %(version)s")
 @click.option(
     "--provider",
+    type=click.Choice(_PROVIDER_CHOICES, case_sensitive=False),
     default=None,
-    help="Override the model provider (ollama, openai, anthropic, openrouter, openai-compatible).",
+    help="Override the model provider.",
 )
 @click.option("--model", default=None, help="Override the model name.")
 @click.option(

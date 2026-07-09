@@ -30,6 +30,10 @@ from aiida_agents._settings import (
     RagSettings,
     ServerSettings,
     _Base,
+    _EmbedBackend,
+    _LogLevel,
+    _Provider,
+    _choices,
     _format_validation_error,
     warn_on_unrecognized_settings,
 )
@@ -431,6 +435,27 @@ def test_every_field_is_documented(settings_cls: type[_Base]) -> None:
         if not field.description
     ]
     assert not undocumented, f"{settings_cls.__name__}: {undocumented}"
+
+
+@pytest.mark.parametrize(
+    ("settings_cls", "field", "alias"),
+    [
+        pytest.param(ModelSettings, "provider", _Provider, id="provider"),
+        pytest.param(RagSettings, "embed_backend", _EmbedBackend, id="embed-backend"),
+        pytest.param(LoggingSettings, "log_level", _LogLevel, id="log-level"),
+    ],
+)
+def test_choice_field_docstring_lists_every_literal_value(
+    settings_cls: type[_Base], field: str, alias: object
+) -> None:
+    """A choice field's docstring enumerates every value its ``Literal`` accepts,
+    so the ``config init`` comment and IDE hover can't silently drift from the
+    accepted set (the ``--provider`` flag derives its choices from the same
+    ``Literal``, so it never drifts by construction).
+    """
+    description = settings_cls.model_fields[field].description or ""
+    missing = [value for value in _choices(alias) if value not in description]
+    assert not missing, f"{settings_cls.__name__}.{field} docstring omits {missing}"
 
 
 def test_does_not_warn_on_plausible_neighbour_of_a_setting(

@@ -663,6 +663,17 @@ def test_check_reports_invalid_setting_value_cleanly(
     assert not isinstance(result.exception, ValidationError)
 
 
+def test_provider_flag_rejects_unknown_choice() -> None:
+    """`--provider` is a `click.Choice` derived from the provider `Literal`, so a
+    bad value is a clean 'invalid choice' usage error listing the real providers
+    (complements the env-var path above, which pydantic validates).
+    """
+    result = CliRunner().invoke(cli, ["--provider", "bogus", "check"])
+    assert result.exit_code == 2  # Click usage error, before any work
+    assert "bogus" in result.output
+    assert "ollama" in result.output  # the derived choices are listed
+
+
 def test_config_rows_mark_invalid_group_without_crashing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
