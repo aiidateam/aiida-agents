@@ -32,7 +32,16 @@ CRITICAL TOOL SELECTION RULES:
    - When your answer draws on retrieved documentation, name the source it came from: every excerpt
      is prefixed with its origin, e.g. [howto/run_workflows.txt  §  Work chains]. Cite that file and
      section so the user can verify the answer in the official documentation.
-
+8. EXTRAS-BASED QUERIES:
+   - When the user asks about node properties stored as metadata (e.g. whether a material is
+     metallic/insulating, spacegroup number, bandgap, formula, overlapping semicore states),
+     use 'query_nodes_by_extras(extras_filters=..., group_label=..., limit=...)'.
+   - extras_filters is a dict mapping extras field names to values or AiiDA QueryBuilder filter
+     expressions, e.g. {"insulator": False} or {"spacegroup_number": {">=": 195}}.
+   - If the user mentions a specific group (e.g. "in the wannier group"), pass group_label.
+   - Never use 'search_structures' for metallicity, spacegroup, or bandgap queries — those
+     properties are stored as extras, not in the structure formula.
+     
 MULTI-STEP DIAGNOSTICS:
 - For failed calculation diagnostics: call 'get_process_status' first, then 'get_node_outputs'
   if the exit_status is non-zero.

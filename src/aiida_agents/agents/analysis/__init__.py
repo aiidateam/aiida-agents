@@ -30,6 +30,7 @@ from aiida_agents.tools import (
     list_processes,
     query_nodes,
     search_structures,
+    query_nodes_by_extras,
 )
 from aiida_agents.tools.submit import submit_workflow
 from aiida_agents.rag import search_aiida_docs
@@ -48,6 +49,7 @@ _READ_TOOLS: list[Any] = [
     get_node_outputs,
     search_structures,
     search_aiida_docs,
+    query_nodes_by_extras,
 ]
 
 _SYSTEM_PROMPT = (

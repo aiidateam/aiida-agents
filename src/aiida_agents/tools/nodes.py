@@ -12,7 +12,7 @@ from aiida_restapi.services.node import NodeService
 from aiida_restapi.common.query import QueryBuilderParams
 
 from ._orm import load_node
-from ._types import Identifier, NodeLink, NodeRecord
+from ._types import Identifier, NodeLink, NodeRecord, ExtrasRecord
 
 
 logger = logging.getLogger(__name__)
@@ -143,3 +143,111 @@ def get_node_outputs(identifier: Identifier) -> list[NodeLink]:
     results = _node_links(identifier, "outgoing")
     logger.debug("get_node_outputs: found %d outgoing links", len(results))
     return results
+
+
+@t.overload
+def query_nodes_by_extras(
+    extras_filters: dict[str, t.Any],
+    group_label: str | None = None,
+    count_only: t.Literal[False] = ...,
+    limit: int = ...,
+) -> list[ExtrasRecord]: ...
+
+
+@t.overload
+def query_nodes_by_extras(
+    extras_filters: dict[str, t.Any],
+    group_label: str | None = None,
+    count_only: t.Literal[True] = ...,
+    limit: int = ...,
+) -> int: ...
+
+
+@t.overload
+def query_nodes_by_extras(
+    extras_filters: dict[str, t.Any],
+    group_label: str | None = None,
+    count_only: bool = ...,
+    limit: int = ...,
+) -> list[ExtrasRecord] | int: ...
+
+
+def query_nodes_by_extras(
+    extras_filters: dict[str, t.Any],
+    group_label: str | None = None,
+    count_only: bool = False,
+    limit: int = 5,
+) -> list[ExtrasRecord] | int:
+    """Query AiiDA nodes by their extras fields, optionally within a group.
+
+    Use this for dataset-level queries where nodes carry structured metadata
+    as extras — e.g. filtering by material properties like bandgap, spacegroup,
+    or whether a structure is metallic or insulating.
+
+    ``extras_filters`` keys map directly to extras fields; values follow
+    AiiDA QueryBuilder filter syntax, so exact matches (``{"insulator": False}``),
+    comparisons (``{"spacegroup_number": {">=": 195}}``), and compound AND
+    filters (multiple keys) are all supported.
+
+    Args:
+        extras_filters: Key-value pairs to match against node extras.
+        group_label: If given, restrict the search to nodes in this group.
+        count_only: If True, return the total count of matching nodes instead of the records.
+        limit: Maximum number of nodes to return (ignored if count_only is True).
+
+    Returns:
+        List of records with ``pk``, ``uuid``, ``node_type``, ``ctime``,
+        and ``extras`` keys if count_only is False, otherwise the count as an integer.
+    """
+    logger.debug(
+        "query_nodes_by_extras(extras_filters=%r, group_label=%r, count_only=%r, limit=%d)",
+        extras_filters,
+        group_label,
+        count_only,
+        limit,
+    )
+
+    extras_key_filters: dict[str, t.Any] = {
+        f"extras.{k}": v for k, v in extras_filters.items()
+    }
+
+    qb = orm.QueryBuilder()
+
+    if group_label is not None:
+        qb.append(orm.Group, filters={"label": group_label}, tag="group")
+        qb.append(
+            orm.Node,
+            with_group="group",
+            tag="node",
+            filters=extras_key_filters,
+            project=["id", "uuid", "node_type", "ctime", "extras"],
+        )
+    else:
+        qb.append(
+            orm.Node,
+            tag="node",
+            filters=extras_key_filters,
+            project=["id", "uuid", "node_type", "ctime", "extras"],
+        )
+
+    if count_only:
+        count = qb.count()
+        logger.debug("query_nodes_by_extras: returned count %d", count)
+        return count
+
+    qb.order_by({"node": {"ctime": "desc"}})
+    qb.limit(limit)
+
+    records: list[ExtrasRecord] = [
+        {
+            "pk": pk,
+            "uuid": uuid,
+            "node_type": node_type,
+            "ctime": str(ctime),
+            "extras": extras,
+        }
+        for pk, uuid, node_type, ctime, extras in qb.iterall()
+    ]
+
+    logger.debug("query_nodes_by_extras: returned %d records", len(records))
+    return records

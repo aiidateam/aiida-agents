@@ -11,7 +11,12 @@ from __future__ import annotations
 import pytest
 from aiida import orm
 
-from aiida_agents.tools.nodes import get_node_inputs, get_node_outputs, query_nodes
+from aiida_agents.tools.nodes import (
+    get_node_inputs,
+    get_node_outputs,
+    query_nodes,
+    query_nodes_by_extras,
+)
 
 
 @pytest.mark.usefixtures("add_calc", "multiply_add_workchain")
@@ -101,3 +106,36 @@ def test_get_node_outputs_workchain(multiply_add_workchain: orm.WorkChainNode) -
     # Two sub-processes called: the multiply calcfunction and the add calcjob.
     assert len(calls) == 2
     assert [r["link_label"] for r in returns] == ["result"]
+
+
+def test_query_nodes_by_extras() -> None:
+    """Test query_nodes_by_extras with filtering, count_only, limit and group."""
+    node1 = orm.Data().store()
+    node1.base.extras.set("bandgap", 1.5)
+    node1.base.extras.set("metallic", False)
+
+    node2 = orm.Data().store()
+    node2.base.extras.set("bandgap", 0.0)
+    node2.base.extras.set("metallic", True)
+
+    # 1. basic filter
+    res = query_nodes_by_extras({"metallic": True})
+    assert len(res) >= 1
+    assert any(r["pk"] == node2.pk for r in res)
+    assert all(r["extras"]["metallic"] is True for r in res)
+
+    # 2. count_only
+    count = query_nodes_by_extras({"metallic": True}, count_only=True)
+    assert isinstance(count, int)
+    assert count >= 1
+
+    # 3. limit
+    res_limit = query_nodes_by_extras({"bandgap": {">=": 0.0}}, limit=1)
+    assert len(res_limit) == 1
+
+    # 4. group filtering
+    group = orm.Group(label="test-extras-group").store()
+    group.add_nodes(node1)
+    res_group = query_nodes_by_extras({"bandgap": 1.5}, group_label="test-extras-group")
+    assert len(res_group) == 1
+    assert res_group[0]["pk"] == node1.pk

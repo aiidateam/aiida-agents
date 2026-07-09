@@ -15,15 +15,6 @@ from pydantic import Field
 # tools' ``outputSchema``.
 from typing_extensions import TypedDict
 
-__all__ = [
-    "Identifier",
-    "NodeLink",
-    "NodeRecord",
-    "ProcessRecord",
-    "ProcessStatus",
-    "StructureRecord",
-    "SubmitResult",
-]
 
 # A node identifier: a pk or a uuid, both as a plain string. Using ``str``
 # (rather than ``int | str``) means the MCP Inspector sends the value as-is
@@ -92,3 +83,25 @@ class SubmitResult(TypedDict):
     uuid: str
     workflow: str
     state: str
+
+
+class ExtrasRecord(TypedDict):
+    """A row returned by ``query_nodes_by_extras``."""
+
+    pk: int
+    uuid: str
+    node_type: str
+    ctime: str
+    extras: dict[str, t.Any]
+
+
+__all__ = [
+    "ExtrasRecord",
+    "Identifier",
+    "NodeLink",
+    "NodeRecord",
+    "ProcessRecord",
+    "ProcessStatus",
+    "StructureRecord",
+    "SubmitResult",
+]

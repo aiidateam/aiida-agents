@@ -33,6 +33,7 @@ EXPECTED_TOOLS = {
     "search_structures",
     "search_aiida_docs",
     "submit_workflow",
+    "query_nodes_by_extras",
 }
 
 
