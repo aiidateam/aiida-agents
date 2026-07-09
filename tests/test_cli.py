@@ -710,6 +710,84 @@ def test_rag_search_errors_cleanly_without_an_index(
     assert "No RAG index" in result.output
 
 
+def test_rag_status_reports_unbuilt_index(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """With no store on disk, `rag status` reports not-built and points to `rag build`."""
+    monkeypatch.setattr("aiida_agents.cli._guards.find_unrecognized_settings", list)
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(tmp_path / "absent"))
+    result = CliRunner().invoke(cli, ["rag", "status"])
+    assert result.exit_code == 0
+    assert "Built: no" in result.output
+    assert "No index built yet" in result.output
+
+
+def test_rag_status_reports_built_index(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A populated store surfaces as built, rendering its collection and metadata."""
+    monkeypatch.setattr("aiida_agents.cli._guards.find_unrecognized_settings", list)
+    store = tmp_path / "vdb"
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(store))
+    # A real chroma collection with an entry (count > 0). Explicit embeddings keep
+    # the setup network-free; `rag status` only reads the count and metadata.
+    import chromadb
+
+    collection = chromadb.PersistentClient(path=str(store)).create_collection(
+        "aiida_docs__test",
+        metadata={"docs_version": "v2.8.0", "embedding": "ollama/mxbai-embed-large"},
+    )
+    collection.add(ids=["1"], documents=["hello"], embeddings=[[0.1, 0.2, 0.3]])
+
+    result = CliRunner().invoke(cli, ["rag", "status"])
+    assert result.exit_code == 0
+    assert "Built: yes" in result.output
+    # The collections table rendered the persisted row's name and build metadata.
+    assert "aiida_docs__test" in result.output
+    assert "v2.8.0" in result.output
+    assert "ollama/mxbai-embed-large" in result.output
+
+
+def test_rag_clear_no_store_is_clean(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """`rag clear` with nothing to delete is a clean no-op, not an error."""
+    monkeypatch.setattr("aiida_agents.cli._guards.find_unrecognized_settings", list)
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(tmp_path / "absent"))
+    result = CliRunner().invoke(cli, ["rag", "clear"])
+    assert result.exit_code == 0
+    assert "No RAG store to clear" in result.output
+
+
+@pytest.mark.parametrize(
+    ("args", "stdin", "marker", "removed"),
+    [
+        pytest.param(["rag", "clear", "--yes"], None, "Removed", True, id="yes-flag"),
+        pytest.param(["rag", "clear"], "y\n", "Removed", True, id="confirm-yes"),
+        pytest.param(["rag", "clear"], "n\n", "Cancelled", False, id="confirm-no"),
+    ],
+)
+def test_rag_clear_honours_confirmation(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    args: list[str],
+    stdin: str | None,
+    marker: str,
+    removed: bool,
+) -> None:
+    """`--yes` deletes without prompting; an interactive `y` deletes, `n` keeps."""
+    monkeypatch.setattr("aiida_agents.cli._guards.find_unrecognized_settings", list)
+    store = tmp_path / "vdb"
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(store))
+    store.mkdir(parents=True)
+    (store / "chroma.sqlite3").write_text("x")  # something for rmtree to remove
+
+    result = CliRunner().invoke(cli, args, input=stdin)
+    assert result.exit_code == 0
+    assert marker in result.output
+    assert store.exists() == (not removed)
+
+
 def test_dotenv_keys_parses_assignments(tmp_path: Path) -> None:
     """Keys are upper-cased; comments, blanks, non-assignments, and `export ` handled."""
     from aiida_agents._settings import _dotenv_keys

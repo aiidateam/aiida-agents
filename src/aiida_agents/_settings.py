@@ -112,7 +112,7 @@ class ModelSettings(_Base):
     """Base URL for provider=openai-compatible (e.g. https://api.deepseek.com/v1)."""
 
     api_key: str = "api-key-not-set"
-    """API key for provider=openai-compatible (with AIIDA_AGENTS_BASE_URL); often a
+    """API key for provider=openai-compatible (with AIIDA_AGENTS_BASE_URL), or a
     dummy for keyless local servers. A secret: never commit it."""
 
     # Cloud provider SDK keys use their conventional unprefixed names (not the
