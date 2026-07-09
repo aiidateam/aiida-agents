@@ -558,3 +558,23 @@ def test_format_validation_error_is_concise(
     model_msg = _format_validation_error(model_error.value)
     assert not model_msg.startswith("Value error,")
     assert "must be smaller than context_length" in model_msg
+
+
+def test_dotenv_keys_parses_assignments(tmp_path: pathlib.Path) -> None:
+    """Keys are upper-cased; comments, blanks, non-assignments, and `export ` handled."""
+    from aiida_agents._settings import _dotenv_keys
+
+    env = tmp_path / ".env"
+    env.write_text(
+        "# comment\n\nAIIDA_AGENTS_MODEL=foo\n"
+        "export OLLAMA_BASE_URL=http://x\nnot_an_assignment\nlower=bar\n",
+        encoding="utf-8",
+    )
+    assert _dotenv_keys(env) == {"AIIDA_AGENTS_MODEL", "OLLAMA_BASE_URL", "LOWER"}
+
+
+def test_dotenv_keys_missing_file_is_empty(tmp_path: pathlib.Path) -> None:
+    """A missing .env yields no keys rather than raising."""
+    from aiida_agents._settings import _dotenv_keys
+
+    assert _dotenv_keys(tmp_path / "absent.env") == set()

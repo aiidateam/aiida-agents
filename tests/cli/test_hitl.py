@@ -16,6 +16,7 @@ Two invariants are tested:
 
 from __future__ import annotations
 
+import pytest
 from aiida import orm
 from pydantic_ai.messages import ToolCallPart
 from pydantic_ai.toolsets import FunctionToolset
@@ -117,3 +118,22 @@ class TestTriageSubmissions:
 
         assert auto == {}
         assert previews == [(call, None, None)]
+
+
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        pytest.param({"a": 1}, {"a": 1}, id="dict-passthrough"),
+        pytest.param('{"a": 1}', {"a": 1}, id="json-string"),
+        pytest.param("not json", {}, id="malformed-json"),
+        pytest.param(None, {}, id="none"),
+        pytest.param("[1, 2]", {}, id="json-but-not-a-dict"),
+    ],
+)
+def test_parse_args_coerces_to_dict(
+    raw: str | dict[str, object] | None, expected: dict[str, object]
+) -> None:
+    """Tool-call args become a dict whether they arrive as a dict, JSON, or junk."""
+    from aiida_agents.cli.hitl import _parse_args
+
+    assert _parse_args(raw) == expected
