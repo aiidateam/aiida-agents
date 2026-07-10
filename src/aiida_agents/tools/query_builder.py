@@ -166,17 +166,24 @@ class QueryNodesSpec(BaseModel):
 
 
 def _qualify_field(field: str) -> str:
-    """Add the 'extras.' prefix unless the field is a native node field."""
+    """Qualify a node field for use in query filters and sorting.
+    
+    Returns:
+        str: The original field for native node fields or fields already prefixed with
+            ``extras.``, otherwise the field prefixed with ``extras.``.
+    """
     if field in NATIVE_NODE_FIELDS or field.startswith("extras."):
         return field
     return f"extras.{field}"
 
 
 def _translate_filter(node: FieldFilter | FilterGroup) -> dict[str, t.Any]:
-    """Recursively translate our filter spec into AiiDA QueryBuilder's
-    native nested filter dict syntax, e.g.:
-
-        {"and": [{"extras.insulator": True}, {"or": [...]}]}
+    """
+    Translate a field filter or nested filter group into an AiiDA QueryBuilder filter mapping.
+    
+    Returns:
+        dict[str, t.Any]: A nested mapping containing qualified fields, comparison
+            operators, values, and boolean group operators.
     """
     if isinstance(node, FieldFilter):
         field = _qualify_field(node.field)
@@ -190,22 +197,19 @@ def _translate_filter(node: FieldFilter | FilterGroup) -> dict[str, t.Any]:
 
 
 def query_nodes(spec: QueryNodesSpec) -> list[dict[str, t.Any]] | int:
-    """Query AiiDA nodes using a structured filter spec, with native
-    AND/OR logic, sorting, and group scoping.
-
-    Use this for any node/dataset query — filtering by extras or native
-    fields, combining conditions with AND/OR (including nested groups),
-    ranking/sorting by a field, and optionally scoping to a group.
-    Prefer `count_only=True` for "how many" questions; it never fetches
-    full records.
-
-    Args:
-        spec: The structured query spec (see QueryNodesSpec).
-
+    """
+    Query AiiDA nodes using structured filters, sorting, optional group scoping, and projection.
+    
+    Parameters:
+        spec (QueryNodesSpec): Query filters, sorting, projection, group scope, limit,
+            and count-only settings.
+    
     Returns:
-        A list of records (each a dict with the requested `project`
-        fields) if count_only is False, otherwise the integer count of
-        matching nodes.
+        list[dict[str, Any]]: Projected node records when `count_only` is false.
+        int: Number of matching nodes when `count_only` is true.
+    
+    Raises:
+        ValueError: If sorting by an extras field without specifying a cast.
     """
     logger.debug("query_nodes(spec=%r)", spec)
 

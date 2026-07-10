@@ -58,12 +58,24 @@ class CaseResult:
 
     @property
     def tool_matches_expected(self) -> bool | None:
+        """
+        Determine whether the tool result matches the expected value.
+        
+        Returns:
+            bool | None: `None` when no expected value is available or the tool was not called; otherwise, `True` if the result matches the expected value, `False` otherwise.
+        """
         if self.expected is None or not self.tool_called:
             return None
         return self.tool_result == self.expected
 
     @property
     def agent_matches_tool(self) -> bool | None:
+        """
+        Indicate whether the agent's extracted answer matches the tool result.
+        
+        Returns:
+        	bool | None: `None` if the tool was not called or no agent answer was extracted; otherwise, `True` if the values match and `False` otherwise.
+        """
         if not self.tool_called or self.agent_text_answer is None:
             return None
         return self.agent_text_answer == self.tool_result
@@ -138,11 +150,14 @@ TEST_CASES: list[TestCase] = [
 
 
 def _extract_agent_number(text: str) -> int | None:
-    """Best-effort pull of the first number-like token from prose output.
-
-    Fuzzy by nature. Good enough for flagging mismatches like the
-    2781-vs-2881 case; not a substitute for reading raw_output when a
-    case looks suspicious.
+    """
+    Extracts the first number-like value from agent prose output.
+    
+    Parameters:
+        text (str): Agent output to inspect.
+    
+    Returns:
+        int | None: The first extracted integer, or `None` if no number is found.
     """
     match = re.search(r"\b\d{1,3}(?:,\d{3})*\b", text)
     if not match:
@@ -151,6 +166,16 @@ def _extract_agent_number(text: str) -> int | None:
 
 
 async def run_case(case: TestCase, group: str) -> CaseResult:
+    """
+    Execute a benchmark query and collect the tool result and agent's reported quantity.
+    
+    Parameters:
+    	case (TestCase): Test case defining the query template and expected value.
+    	group (str): Group label used to format the query.
+    
+    Returns:
+    	CaseResult: Results from the agent execution, including tool-call status, extracted values, and raw output.
+    """
     query = case.query_template.format(group=group)
     agent = get_agent()
     result = await agent.run(query)
@@ -179,16 +204,38 @@ async def run_case(case: TestCase, group: str) -> CaseResult:
 
 
 def _fmt(value: Any) -> str:
+    """Format a value for display, using an em dash for `None`.
+    
+    Parameters:
+    	value (Any): The value to format.
+    
+    Returns:
+    	str: The value converted to a string, or `"—"` when the value is `None`.
+    """
     return "—" if value is None else str(value)
 
 
 def _fmt_bool(value: bool | None) -> str:
+    """Format an optional Boolean result as a status label.
+    
+    Parameters:
+    	value (bool | None): The result to format.
+    
+    Returns:
+    	str: ``"n/a"`` for ``None``, ``"PASS"`` for ``True``, or ``"FAIL"`` for ``False``.
+    """
     if value is None:
         return "n/a"
     return "PASS" if value else "FAIL"
 
 
 def print_summary(results: list[CaseResult]) -> None:
+    """
+    Print a tabular summary of benchmark results, correctness metrics, and cases where the tool was not called.
+    
+    Parameters:
+        results (list[CaseResult]): Benchmark results to summarize.
+    """
     header = (
         f"{'case':<32} {'expected':>9} {'tool_result':>12} "
         f"{'agent_said':>11} {'tool_ok':>8} {'agent_ok':>9} {'called':>7}"
@@ -223,6 +270,12 @@ def print_summary(results: list[CaseResult]) -> None:
 
 
 def print_raw_outputs(results: list[CaseResult]) -> None:
+    """
+    Print raw agent outputs for cases without ground truth or with mismatched results.
+    
+    Parameters:
+    	results (list[CaseResult]): Case results to inspect and print.
+    """
     print("\n" + "=" * 80)
     print("RAW AGENT OUTPUTS (for cases with no ground truth, or mismatches)")
     print("=" * 80)
@@ -241,6 +294,13 @@ def print_raw_outputs(results: list[CaseResult]) -> None:
 
 
 async def main_async(group: str, case_ids: list[str] | None) -> None:
+    """
+    Run the configured benchmark cases for a group and print their results.
+    
+    Parameters:
+        group (str): Group label used to format each case query.
+        case_ids (list[str] | None): Optional case identifiers to run. If provided identifiers match no cases, the process exits with status 1.
+    """
     from aiida import load_profile
     from aiida_agents._logging import suppress_noisy_loggers
     from aiida_agents._settings import LoggingSettings
@@ -269,6 +329,7 @@ async def main_async(group: str, case_ids: list[str] | None) -> None:
 
 
 def main() -> None:
+    """Parse command-line arguments and run the extras-query benchmark."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "--group",

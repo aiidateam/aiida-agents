@@ -32,6 +32,12 @@ GROUP = "workchain/PBEsol/wannier/lumi/final/bxsf"
 
 
 def case_metallic() -> tuple[str, int, int | list]:
+    """
+    Query the group for metallic nodes and provide the expected count alongside the result.
+    
+    Returns:
+        tuple[str, int, int | list]: The case identifier, expected count, and query result.
+    """
     spec = QueryNodesSpec(
         group_label=GROUP,
         filters=FieldFilter(field="insulator", operator="==", value=False),
@@ -41,6 +47,12 @@ def case_metallic() -> tuple[str, int, int | list]:
 
 
 def case_cubic() -> tuple[str, int, int | list]:
+    """
+    Count nodes whose space-group number is at least 195.
+    
+    Returns:
+        tuple[str, int, int | list]: The case identifier, expected count, and query result.
+    """
     spec = QueryNodesSpec(
         group_label=GROUP,
         filters=FieldFilter(field="spacegroup_number", operator=">=", value=195),
@@ -50,6 +62,12 @@ def case_cubic() -> tuple[str, int, int | list]:
 
 
 def case_metallic_no_overlap() -> tuple[str, int, int | list]:
+    """
+    Count nodes that are metallic and have no overlapping semicore.
+    
+    Returns:
+        tuple[str, int, int | list]: The case identifier, expected count, and query result.
+    """
     spec = QueryNodesSpec(
         group_label=GROUP,
         filters=FilterGroup(
@@ -65,6 +83,12 @@ def case_metallic_no_overlap() -> tuple[str, int, int | list]:
 
 
 def case_cov() -> tuple[str, int, int | list]:
+    """Query nodes with the CoV formula and report the expected count.
+    
+    Returns:
+        tuple[str, int, int | list]: The case identifier, expected count of 1,
+            and the query result.
+    """
     spec = QueryNodesSpec(
         group_label=GROUP,
         filters=FieldFilter(field="formula_hill", operator="==", value="CoV"),
@@ -74,6 +98,11 @@ def case_cov() -> tuple[str, int, int | list]:
 
 
 def case_negative_control() -> tuple[str, int, int | list]:
+    """Verify that combining a cubic-structure filter with a nonexistent formula produces no matches.
+    
+    Returns:
+    	tuple[str, int, int | list]: The case identifier, expected count of zero, and query result.
+    """
     spec = QueryNodesSpec(
         group_label=GROUP,
         filters=FilterGroup(
@@ -89,10 +118,11 @@ def case_negative_control() -> tuple[str, int, int | list]:
 
 
 def case_or_logic() -> tuple[str, int, int | list]:
-    """The case query_nodes_by_extras got wrong: agent reported 9313,
-    correct combined OR count is 13829 (9313 + 12130 - 7614, per the
-    earlier manual sub-query breakdown). Expressed here as a single
-    native OR filter instead of a multi-call workaround.
+    """
+    Verify the count produced by an OR filter combining insulating nodes and nodes with space group numbers below 195.
+    
+    Returns:
+        tuple[str, int, int | list]: The case identifier, expected count, and query result.
     """
     spec = QueryNodesSpec(
         group_label=GROUP,
@@ -109,10 +139,12 @@ def case_or_logic() -> tuple[str, int, int | list]:
 
 
 def case_range_query() -> tuple[str, int | None, int | list]:
-    """No independently-verified ground truth yet for this one — the
-    agent reported 5905 via query_nodes_by_extras, but that hasn't been
-    checked against a raw QueryBuilder script. Treat the expected value
-    here as "to be confirmed", not verified ground truth.
+    """Count nodes with space-group numbers from 100 through 195.
+    
+    The expected count is unset because it has not been independently verified.
+    
+    Returns:
+        tuple[str, int | None, int | list]: The case identifier, expected count, and query result.
     """
     spec = QueryNodesSpec(
         group_label=GROUP,
@@ -129,6 +161,12 @@ def case_range_query() -> tuple[str, int | None, int | list]:
 
 
 def case_ranking() -> tuple[str, None, list]:
+    """Query the group for the five nodes with the highest plane-wave bandgap.
+    
+    Returns:
+        tuple[str, None, list]: The case identifier, no expected value, and the
+            projected query result rows.
+    """
     spec = QueryNodesSpec(
         group_label=GROUP,
         filters=None,
@@ -153,6 +191,11 @@ CASES = [
 
 
 def main() -> None:
+    """
+    Run all query verification cases and print their results.
+    
+    The report shows expected and actual values with a pass/fail status for scalar results, and summarizes cases that return row lists or lack verified expected values.
+    """
     from aiida import load_profile
     from aiida_agents._logging import suppress_noisy_loggers
     from aiida_agents._settings import LoggingSettings
