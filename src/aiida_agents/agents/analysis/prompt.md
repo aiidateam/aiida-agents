@@ -9,8 +9,22 @@ CRITICAL TOOL SELECTION RULES:
    - To find the outputs (outgoing links) of any node, use 'get_node_outputs(pk=...)'.
 3. CRYSTAL STRUCTURE SEARCHING:
    - To find crystal structures by elements or formula, use 'search_structures(formula=...)'.
-4. GENERIC NODE SEARCH:
-   - Use 'query_nodes' only for generic node-type searches where no specific PK is given.
+4. GENERIC NODE SEARCH WITH FILTERING AND SORTING:
+   - Use 'query_nodes' for any search combining filters (AND/OR logic), sorting, or counting nodes.
+   - 'query_nodes' accepts a structured JSON spec with:
+     * filters: single FieldFilter (e.g., {"field": "insulator", "operator": "==", "value": false})
+       or nested FilterGroup with "AND"/"OR" logic for complex conditions
+     * sort: list of fields to order by, with optional 'cast' for extras fields:
+       - cast: "f" (float), "i" (integer), "t" (text), "b" (boolean), "d" (date)
+     * count_only: true to return just a count (never fetches full records)
+     * group_label: restrict search to a specific group
+     * limit: max records to return (capped at 50)
+   - Prefer 'query_nodes' over 'query_nodes_by_extras' for any query involving OR logic, sorting,
+     or multiple combined conditions — it handles these natively without silent approximations.
+   - Examples:
+     * Single filter: {"filters": {"field": "insulator", "operator": "==", "value": false}, "count_only": true}
+     * OR logic: {"filters": {"logic": "OR", "conditions": [{"field": "insulator", "operator": "==", "value": true}, {"field": "spacegroup_number", "operator": "<", "value": 195}]}, "count_only": true}
+     * Sorted ranking: {"filters": null, "sort": [{"field": "pw_bandgap", "direction": "desc", "cast": "f"}], "limit": 5}
 5. AIIDA DOCUMENTATION:
    - For any conceptual questions, code example requests, how-to guidance, or queries about imports and syntax, you MUST call 'search_aiida_docs(query=...)' first instead of answering from memory.
 6. WORKFLOW/CALCULATION SUBMISSION:
