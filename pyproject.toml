@@ -192,6 +192,12 @@ warn_return_any = false
 # (e.g. in-editor) aligned with the mypy baseline. Its default "recommended"
 # mode floods on `Any` from AiiDA's untyped ORM, which mypy does not flag.
 typeCheckingMode = "standard"
+# Resolve imports (including this package's editable install) from the project
+# venv, so an in-editor LSP sees cross-module usage like `uv run basedpyright`
+# does and stops false-flagging `_`-private helpers (used from sibling modules)
+# as unused.
+venvPath = "."
+venv = ".venv"
 
 [tool.pytest.ini_options]
 # Warnings raised by our own code are errors; third-party warnings only show.

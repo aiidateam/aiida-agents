@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import NamedTuple
+from typing import Literal, NamedTuple, TypeAlias
 
 import rich_click as click
 from pydantic import ValidationError
@@ -19,6 +19,7 @@ from pydantic_settings import BaseSettings
 from rich.table import Table
 
 from aiida_agents._settings import (
+    _API_KEY_UNSET,
     _SETTINGS_GROUPS,
     ModelSettings,
     _dotenv_keys,
@@ -57,7 +58,7 @@ def _display_value(obj: BaseSettings, field_name: str) -> str:
     """User-facing string for a field's effective value, masking secrets."""
     value = getattr(obj, field_name)
     if field_name.endswith("_key"):
-        return "set" if value and value != "api-key-not-set" else "unset"
+        return "set" if value and value != _API_KEY_UNSET else "unset"
     if value is None:
         return "unset"
     return str(value)
@@ -109,18 +110,22 @@ def _invalid_fields(exc: ValidationError) -> dict[str, str]:
     }
 
 
-class ConfigRow(NamedTuple):
-    """One row of ``config show``: a setting's effective value and its provenance."""
+# Where a setting's effective value came from, for the "Source" column.
+_ValueSource: TypeAlias = Literal["flag", "env", ".env", "default"]
+
+
+class _ConfigRow(NamedTuple):
+    """One row of ``config show``: a setting's effective value and its source."""
 
     group: str
     setting: str
     value: str
     env_var: str
-    source: str
+    source: _ValueSource
 
 
-def _config_rows(provider: str | None, model: str | None) -> list[ConfigRow]:
-    """A :class:`ConfigRow` for every recognised setting.
+def _config_rows(provider: str | None, model: str | None) -> list[_ConfigRow]:
+    """A :class:`_ConfigRow` for every recognised setting.
 
     Iterates :data:`_SETTINGS_GROUPS` so it stays in step with ``config init`` and
     the typo-detector, and no setting is silently omitted. ``source`` is where the
@@ -134,7 +139,7 @@ def _config_rows(provider: str | None, model: str | None) -> list[ConfigRow]:
         _env_var_for(ModelSettings, "model"): model is not None,
     }
 
-    def source(env_var: str) -> str:
+    def source(env_var: str) -> _ValueSource:
         if flagged.get(env_var):
             return "flag"
         if env_var.upper() in env_keys:
@@ -143,7 +148,7 @@ def _config_rows(provider: str | None, model: str | None) -> list[ConfigRow]:
             return ".env"
         return "default"
 
-    rows: list[ConfigRow] = []
+    rows: list[_ConfigRow] = []
     for cls in _SETTINGS_GROUPS:
         # ModelSettings honours the --provider/--model overrides; the other
         # groups read only env / .env / defaults. config show is the debugging
@@ -168,7 +173,7 @@ def _config_rows(provider: str | None, model: str | None) -> list[ConfigRow]:
             else:
                 value = _display_value(obj, field_name)
             rows.append(
-                ConfigRow(
+                _ConfigRow(
                     _group_label(cls), field_name, value, env_var, source(env_var)
                 )
             )

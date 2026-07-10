@@ -7,7 +7,8 @@ cli
 
 The command surface is split by concern:
 
-* ``commands``: the root group and the core commands (chat/ask/check/warm/doctor)
+* ``commands``: the root group and the core commands (chat/ask/check/warm)
+* ``doctor``: the ``doctor`` command and its health checks (profile/model/RAG/docs)
 * ``config``: the ``config`` group and the effective-settings data behind it
 * ``rag``: the ``rag`` group and the docs-toolchain provisioning helpers
 * ``mcp``: the ``mcp`` group (run the MCP server from the CLI)

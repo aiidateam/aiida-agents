@@ -90,3 +90,20 @@ def test_log_tool_calls_debug(
 def test_format_duration(seconds: float, expected: str) -> None:
     """Sub-minute times read as seconds; a minute or more as ``Xm Ys``."""
     assert _format_duration(seconds) == expected
+
+
+def test_print_agent_renders_labelled_reply(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A reply prints under a bold 'Agent:' label with its body rendered as
+    markdown, so emphasis and tables show instead of raw ``**`` syntax.
+    """
+    from aiida_agents.cli.output import _print_agent
+
+    _print_agent("hello **world**")
+
+    out = capsys.readouterr().out
+    assert "Agent:" in out
+    assert "hello" in out
+    assert "world" in out
+    assert "**" not in out  # markdown was rendered, not echoed verbatim

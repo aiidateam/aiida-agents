@@ -2,12 +2,18 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
+import rich_click
 from click.testing import CliRunner
 
 from aiida_agents.cli import cli
+
+
+def _raise_called_process_error(spec: str) -> None:
+    raise subprocess.CalledProcessError(1, "pip")
 
 
 @pytest.mark.parametrize(
@@ -98,6 +104,35 @@ def test_rag_search_errors_cleanly_without_an_index(
     assert "No RAG index" in result.output
 
 
+@pytest.mark.parametrize(
+    "results, needle",
+    [
+        pytest.param(
+            [{"source": "howto.md", "section": "Run", "text": "use verdi run"}],
+            "verdi run",
+            id="renders-a-match",
+        ),
+        pytest.param([], "No matching documentation", id="empty-is-clean"),
+    ],
+)
+def test_rag_search_renders_results(
+    monkeypatch: pytest.MonkeyPatch,
+    results: list[dict[str, str]],
+    needle: str,
+) -> None:
+    """With an index, matches render (source and body shown); no matches is a
+    clean message, not an error.
+    """
+    monkeypatch.setattr("aiida_agents.cli._guards.find_unrecognized_settings", list)
+    monkeypatch.setattr("aiida_agents.rag.retriever.docs_index_available", lambda: True)
+    monkeypatch.setattr("aiida_agents.rag.query_docs", lambda query, limit: results)
+
+    result = CliRunner().invoke(cli, ["rag", "search", "how to run"])
+
+    assert result.exit_code == 0
+    assert needle in result.output
+
+
 def test_rag_status_reports_unbuilt_index(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -174,3 +209,104 @@ def test_rag_clear_honours_confirmation(
     assert result.exit_code == 0
     assert marker in result.output
     assert store.exists() == (not removed)
+
+
+@pytest.mark.parametrize(
+    "name, missing",
+    [
+        pytest.param("os", False, id="stdlib-present"),
+        pytest.param("aiida_agents", False, id="own-package-present"),
+        pytest.param("definitely_not_a_real_module_zzz", True, id="absent"),
+    ],
+)
+def test_module_missing(name: str, missing: bool) -> None:
+    """Reports a module's absence; the docs-toolchain check depends on this
+    True-means-missing sense (easy to get backwards).
+    """
+    from aiida_agents.cli.rag import _module_missing
+
+    assert _module_missing(name) is missing
+
+
+def test_ensure_docs_toolchain_noop_when_sphinx_present(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """With sphinx already importable, nothing is prompted or installed."""
+    from aiida_agents.cli import rag
+
+    asked: list[int] = []
+
+    def _confirm(*args: object, **kwargs: object) -> bool:
+        asked.append(1)
+        return True
+
+    monkeypatch.setattr(rag, "_module_missing", lambda name: False)
+    monkeypatch.setattr(rich_click, "confirm", _confirm)
+
+    rag._ensure_docs_toolchain()  # returns without raising
+
+    assert asked == []
+
+
+def test_ensure_docs_toolchain_declined_raises_actionable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Declining the install gives a clean error naming the manual command."""
+    from aiida_agents.cli import rag
+
+    monkeypatch.setattr(rag, "_module_missing", lambda name: True)
+    monkeypatch.setattr(rich_click, "confirm", lambda *a, **k: False)
+
+    with pytest.raises(rich_click.ClickException) as exc_info:
+        rag._ensure_docs_toolchain()
+
+    assert "aiida-core[docs]" in str(exc_info.value)
+
+
+def test_ensure_docs_toolchain_installs_on_accept(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Accepting installs the docs extra and, once importable, returns cleanly."""
+    from aiida_agents.cli import rag
+
+    # Missing at the first check, importable after the install runs.
+    checks = iter([True, False])
+    installed: list[str] = []
+    monkeypatch.setattr(rag, "_module_missing", lambda name: next(checks))
+    monkeypatch.setattr(rich_click, "confirm", lambda *a, **k: True)
+    monkeypatch.setattr(rag, "_pip_install", lambda spec: installed.append(spec))
+
+    rag._ensure_docs_toolchain()  # returns without raising
+
+    assert installed == ["aiida-core[docs]"]
+
+
+@pytest.mark.parametrize(
+    "pip_install, needle",
+    [
+        pytest.param(
+            lambda spec: None, "still not importable", id="install-did-not-take"
+        ),
+        pytest.param(
+            _raise_called_process_error, "Install failed", id="install-command-failed"
+        ),
+    ],
+)
+def test_ensure_docs_toolchain_install_failure_raises(
+    monkeypatch: pytest.MonkeyPatch,
+    pip_install: object,
+    needle: str,
+) -> None:
+    """A failed install, or one that leaves sphinx still unimportable, is a clean
+    error telling the user to install it manually.
+    """
+    from aiida_agents.cli import rag
+
+    monkeypatch.setattr(rag, "_module_missing", lambda name: True)
+    monkeypatch.setattr(rich_click, "confirm", lambda *a, **k: True)
+    monkeypatch.setattr(rag, "_pip_install", pip_install)
+
+    with pytest.raises(rich_click.ClickException) as exc_info:
+        rag._ensure_docs_toolchain()
+
+    assert needle in str(exc_info.value)

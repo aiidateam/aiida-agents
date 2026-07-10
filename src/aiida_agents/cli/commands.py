@@ -1,28 +1,29 @@
 """Root Click group for aiida-agents and its core model-facing commands.
 
 The surface is split by concern: the ``config``, ``rag``, and ``mcp`` groups
-live in their own modules and are registered onto the root group at the bottom
-of this file. What stays here is the root group (the global ``--provider`` /
-``--model`` / ``--profile`` overrides and logging setup) plus the small
-model-facing commands: ``chat``, ``ask``, ``check``, ``warm``, and ``doctor``.
+and the ``doctor`` command live in their own modules and are registered onto
+the root group at the bottom of this file. What stays here is the root group
+(the global ``--provider`` / ``--model`` / ``--profile`` overrides and logging
+setup) plus the small model-facing commands: ``chat``, ``ask``, ``check``, and
+``warm``.
 """
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import NamedTuple
 
 import rich_click as click
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents._logging import _configure_logging
-from aiida_agents._settings import _PROVIDER_CHOICES, LoggingSettings, ModelSettings
+from aiida_agents._settings import _PROVIDER_CHOICES, LoggingSettings
 from aiida_agents.cli._guards import _needs_recognized_settings
 from aiida_agents.cli.config import config
+from aiida_agents.cli.doctor import doctor
 from aiida_agents.cli.mcp import mcp
 from aiida_agents.cli.output import _format_duration, _render_tool_calls, console
-from aiida_agents.cli.rag import _module_missing, rag
+from aiida_agents.cli.rag import rag
 from aiida_agents.cli.repl import _run_repl
 from aiida_agents.cli.agent import (
     _build_agent,
@@ -79,9 +80,8 @@ def cli(
 @_needs_recognized_settings
 def chat(ctx: click.Context) -> None:  # pragma: no cover
     """Start the interactive REPL (the default when no subcommand is given)."""
-    agent, settings = _build_agent(
-        ctx.obj["provider"], ctx.obj["model"], ctx.obj["profile"]
-    )
+    settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
+    agent = _build_agent(settings, ctx.obj["profile"])
     _run_repl(agent, settings)
 
 
@@ -89,9 +89,10 @@ def chat(ctx: click.Context) -> None:  # pragma: no cover
 @click.argument("question")
 @click.pass_context
 @_needs_recognized_settings
-def ask_cmd(ctx: click.Context, question: str) -> None:  # pragma: no cover
+def ask_cmd(ctx: click.Context, question: str) -> None:
     """Answer a single question and exit (one-shot)."""
-    agent, _ = _build_agent(ctx.obj["provider"], ctx.obj["model"], ctx.obj["profile"])
+    settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
+    agent = _build_agent(settings, ctx.obj["profile"])
     result = asyncio.run(ask(agent, question))
     _render_tool_calls(result.new_messages(), console)  # debug-gated; no spinner here
     if isinstance(result.output, DeferredToolRequests):
@@ -107,7 +108,7 @@ def ask_cmd(ctx: click.Context, question: str) -> None:  # pragma: no cover
 @cli.command()
 @click.pass_context
 @_needs_recognized_settings
-def check(ctx: click.Context) -> None:  # pragma: no cover
+def check(ctx: click.Context) -> None:
     """Verify config, endpoint reachability, and model availability.
 
     Fast and read-only: it never loads or runs the model. Use `warm` to
@@ -125,7 +126,7 @@ def check(ctx: click.Context) -> None:  # pragma: no cover
 @cli.command()
 @click.pass_context
 @_needs_recognized_settings
-def warm(ctx: click.Context) -> None:  # pragma: no cover
+def warm(ctx: click.Context) -> None:
     """Warm the model with one tiny generation, so the first query isn't cold.
 
     Mainly useful for a local Ollama model before a session; for a cloud model
@@ -142,114 +143,8 @@ def warm(ctx: click.Context) -> None:  # pragma: no cover
     click.echo(f"✓ warmed in {_format_duration(time.monotonic() - start)}")
 
 
-def _short_reason(exc: Exception) -> str:
-    """First non-empty line of ``exc``'s message, truncated for a table cell.
-
-    Guards the empty-message case (``"".splitlines()`` is ``[]``, so ``[0]``
-    would raise): a health check that fails with a message-less error (a bare
-    ``ValueError``, or ``asyncio.TimeoutError`` whose ``str`` is empty) must
-    still yield a printable detail, never an ``IndexError`` that aborts the
-    whole diagnostics report.
-    """
-    lines = [line for line in str(exc).splitlines() if line.strip()]
-    return lines[0][:100] if lines else ""
-
-
-class DiagnosticRow(NamedTuple):
-    """One ``doctor`` health-check result: a label, pass/fail, and a detail."""
-
-    label: str
-    ok: bool
-    detail: str
-
-
-def _run_diagnostics(
-    settings: ModelSettings, profile: str | None
-) -> list[DiagnosticRow]:  # pragma: no cover
-    """Run each health check, returning a :class:`DiagnosticRow` per check.
-
-    Every check is isolated in its own ``try`` so one failure (an unreachable
-    model, an unloadable profile) never aborts the rest of the report. The model
-    check uses the no-generation reachability probe, so ``doctor`` never warms
-    the model.
-    """
-    from aiida_agents.cli.agent import _probe_reachable
-
-    rows: list[DiagnosticRow] = []
-
-    try:
-        from aiida import load_profile
-
-        loaded = load_profile(profile)
-        rows.append(DiagnosticRow("AiiDA profile loads", True, loaded.name))
-    except Exception as exc:
-        rows.append(DiagnosticRow("AiiDA profile loads", False, _short_reason(exc)))
-
-    model_label = f"Model reachable ({settings.provider}:{settings.model})"
-    try:
-        endpoint, _, model_ok = _probe_reachable(settings)
-        if model_ok:
-            rows.append(DiagnosticRow(model_label, True, endpoint))
-        elif settings.provider == "ollama":
-            rows.append(
-                DiagnosticRow(
-                    model_label,
-                    False,
-                    f"model not pulled (ollama pull {settings.model})",
-                )
-            )
-        else:
-            rows.append(
-                DiagnosticRow(
-                    model_label, True, "reachable; model not listed (may still work)"
-                )
-            )
-    except Exception as exc:
-        rows.append(DiagnosticRow(model_label, False, _short_reason(exc)))
-
-    try:
-        from aiida_agents.rag.store import index_status
-
-        built = index_status().built
-        rows.append(
-            DiagnosticRow(
-                "RAG index built",
-                built,
-                "" if built else "run `aiida-agents rag build`",
-            )
-        )
-    except Exception as exc:
-        rows.append(DiagnosticRow("RAG index built", False, _short_reason(exc)))
-
-    has_sphinx = not _module_missing("sphinx")
-    rows.append(
-        DiagnosticRow(
-            "Docs toolchain (sphinx)",
-            has_sphinx,
-            "" if has_sphinx else "needed only for `rag build`",
-        )
-    )
-    return rows
-
-
-@cli.command()
-@click.pass_context
-@_needs_recognized_settings
-def doctor(ctx: click.Context) -> None:  # pragma: no cover
-    """Diagnose the setup: profile, model, RAG index, and docs toolchain."""
-    settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
-    click.echo("Running diagnostics ...\n")
-    all_ok = True
-    for label, ok, detail in _run_diagnostics(settings, ctx.obj["profile"]):
-        mark = "[green]✓[/]" if ok else "[red]✗[/]"
-        suffix = f" [dim]({detail})[/]" if detail else ""
-        console.print(f"{mark} {label}{suffix}")
-        all_ok = all_ok and ok
-    if not all_ok:
-        raise SystemExit(1)
-
-
-# Register the command groups that live in their own modules onto the root.
+# Register the commands and groups that live in their own modules onto the root.
 cli.add_command(config)
 cli.add_command(rag)
 cli.add_command(mcp)
+cli.add_command(doctor)

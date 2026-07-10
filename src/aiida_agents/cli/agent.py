@@ -82,9 +82,9 @@ def _resolve_settings_or_fail(provider: str | None, model: str | None) -> ModelS
 
 
 def _build_agent(
-    provider: str | None, model: str | None, profile: str | None
-) -> tuple[Agent, ModelSettings]:  # pragma: no cover
-    """Load the profile and build the agent with CLI overrides applied.
+    settings: ModelSettings, profile: str | None
+) -> Agent:  # pragma: no cover
+    """Load the profile and build the agent from resolved settings.
 
     The aiida / agent-stack imports stay local so ``--help`` and shell completion
     don't pay for loading AiiDA. Expected configuration failures are surfaced as
@@ -94,17 +94,16 @@ def _build_agent(
     from aiida_agents.agents import get_agent
 
     try:
-        settings = _resolve_settings_or_fail(provider, model)
         _ensure_ollama_model(settings)
         load_profile(profile)
         agent = get_agent(model_settings=settings)
     except (UserError, ValueError) as exc:
         # UserError: pydantic-ai, for a missing cloud API key. ValueError:
-        # get_model for an openai-compatible endpoint without base_url, and
-        # pydantic's ValidationError (a subclass) for a bad provider/setting.
-        # All are "fix your config", not bugs, so show a clean error.
+        # get_model for an openai-compatible endpoint without a base_url. Both
+        # are "fix your config", not bugs (a bad provider/setting value is
+        # already caught upstream at resolution), so show a clean error.
         raise click.ClickException(str(exc)) from exc
-    return agent, settings
+    return agent
 
 
 def _probe_model(settings: ModelSettings) -> None:  # pragma: no cover
@@ -125,11 +124,15 @@ def _probe_model(settings: ModelSettings) -> None:  # pragma: no cover
 _REACHABILITY_TIMEOUT = 8.0
 
 
+# ``client`` is the provider's async SDK client (openai.AsyncOpenAI /
+# anthropic.AsyncAnthropic), reached through ``model.client`` which the base
+# pydantic-ai ``Model`` doesn't type; ``Any`` avoids a faithful-but-heavy
+# Protocol for an object we only poke dynamically.
 async def _list_model_ids(client: Any) -> set[str]:
     """Model ids the endpoint advertises, via a cheap listing under a timeout."""
     try:
         page = await asyncio.wait_for(
-            client.models.list(), timeout=_REACHABILITY_TIMEOUT
+            fut=client.models.list(), timeout=_REACHABILITY_TIMEOUT
         )
     except asyncio.TimeoutError as exc:
         # ``asyncio.TimeoutError``, not the builtin: on Python 3.10 (our minimum)
@@ -143,7 +146,7 @@ async def _list_model_ids(client: Any) -> set[str]:
     return {item.id for item in page.data}
 
 
-class Reachability(NamedTuple):
+class _Reachability(NamedTuple):
     """What a no-generation reachability probe learns about the endpoint."""
 
     endpoint: str
@@ -151,7 +154,7 @@ class Reachability(NamedTuple):
     model_ok: bool
 
 
-def _probe_reachable(settings: ModelSettings) -> Reachability:
+def _probe_reachable(settings: ModelSettings) -> _Reachability:
     """Reachability facts without a generation: ``(endpoint, n_models, model_ok)``.
 
     Builds the model (validating provider / base_url / key presence), then lists
@@ -173,10 +176,12 @@ def _probe_reachable(settings: ModelSettings) -> Reachability:
     if settings.provider == "ollama" and ":" not in wanted:
         wanted = f"{wanted}:latest"
     model_ok = wanted in ids or settings.model in ids
-    return Reachability(str(client.base_url), len(ids), model_ok)
+    return _Reachability(
+        endpoint=str(client.base_url), n_models=len(ids), model_ok=model_ok
+    )
 
 
-def _check_reachable(settings: ModelSettings) -> None:  # pragma: no cover
+def _check_reachable(settings: ModelSettings) -> None:
     """Print ``check``'s reachability report; exit non-zero on a real problem.
 
     Reachability / auth failures raise for the caller to diagnose. A configured
@@ -201,9 +206,7 @@ def _check_reachable(settings: ModelSettings) -> None:  # pragma: no cover
     )
 
 
-def _diagnose_probe_failure(
-    settings: ModelSettings, exc: Exception
-) -> None:  # pragma: no cover
+def _diagnose_probe_failure(settings: ModelSettings, exc: Exception) -> None:
     """Turn a probe failure into an actionable message, offering an Ollama pull."""
     msg = str(exc).lower()
     if settings.provider == "ollama" and ("not found" in msg or "404" in msg):

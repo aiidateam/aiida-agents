@@ -21,7 +21,7 @@ from aiida_agents._logging import ToolPart, trace_response, trace_tool_part
 console = Console()
 
 
-def _print_agent(text: str) -> None:  # pragma: no cover
+def _print_agent(text: str) -> None:
     """Print an agent reply, blank-line padded so it stands clear of the ``You:``
     turns on either side: a highlighted label, then the body as markdown so
     tables and formatting render.

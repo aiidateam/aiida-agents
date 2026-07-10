@@ -97,7 +97,11 @@ class _SentenceTransformerEmbedding:
         # sentence-transformers eagerly would force torch (and its CUDA wheel
         # stack) onto every install, even ones that never touch this fallback.
         try:
-            from sentence_transformers import SentenceTransformer
+            # Optional (the ``rag-fallback`` extra); mypy ignores it via a
+            # per-module override, basedpyright needs the inline hint.
+            from sentence_transformers import (  # pyright: ignore[reportMissingImports]
+                SentenceTransformer,
+            )
         except ImportError as exc:
             msg = (
                 "The sentence-transformers fallback embedder is not installed. "

@@ -32,12 +32,13 @@ def _ollama_lists_model(model: str, list_output: str) -> bool:
     return wanted in names
 
 
-def _ollama_has_model(model: str) -> bool:  # pragma: no cover
-    """Whether the local Ollama server already has ``model``.
+def _should_skip_ollama_pull(model: str) -> bool:
+    """Whether to skip offering an ``ollama pull`` for ``model``.
 
-    Returns ``True`` when the check can't run (no ``ollama`` on PATH, server
-    down): a presence check we couldn't perform must never block the session, so
-    a genuinely missing model instead surfaces on the first query.
+    ``True`` when the model is already present, and also when the presence check
+    can't run (no ``ollama`` on PATH, server down): a check we couldn't perform
+    must never block the session with a doomed pull prompt, so a genuinely
+    missing model instead surfaces on the first query.
     """
     try:
         result = subprocess.run(
@@ -57,16 +58,16 @@ def _ollama_pull(model: str) -> None:  # pragma: no cover
     subprocess.run(["ollama", "pull", model], check=False)  # noqa: S607
 
 
-def _prompt_pull_ollama_model(model: str) -> None:  # pragma: no cover
+def _prompt_pull_ollama_model(model: str) -> None:
     """Offer to pull a missing local Ollama model (a one-time download prompt)."""
-    if _ollama_has_model(model):
+    if _should_skip_ollama_pull(model):
         return
     click.echo(f"Ollama model '{model}' is not pulled.")
     if click.confirm("Pull it now?", default=True):
         _ollama_pull(model)
 
 
-def _ensure_ollama_model(settings: ModelSettings) -> None:  # pragma: no cover
+def _ensure_ollama_model(settings: ModelSettings) -> None:
     """For a local Ollama chat model that isn't pulled, offer to pull it.
 
     Turns a missing model into a one-time download prompt rather than a 404 on

@@ -80,7 +80,13 @@ def get_agent(
     cfg = agent_settings if agent_settings is not None else AgentSettings()
     toolset = RetryOnToolError(FunctionToolset(_READ_TOOLS))
 
-    agent: Agent = Agent(
+    # ``output_type=(str, DeferredToolRequests)`` makes the real type
+    # ``Agent[None, str | DeferredToolRequests]``, but agents are annotated as the
+    # bare ``Agent`` throughout (mypy takes that as-is; basedpyright resolves bare
+    # ``Agent`` to its PEP 696 default ``Agent[None, str]`` and flags the mismatch).
+    # Keep it bare until the multi-agent architecture (Orchestrator/Workflow)
+    # settles how agent types are shared; this ignore is basedpyright-only.
+    agent: Agent = Agent(  # pyright: ignore[reportAssignmentType]
         get_model(model_settings=model_settings, ollama_settings=ollama_settings),
         toolsets=[toolset],
         retries=cfg.tool_retries,

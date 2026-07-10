@@ -18,7 +18,12 @@ from __future__ import annotations
 
 import pytest
 from aiida import orm
-from pydantic_ai.messages import ToolCallPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ToolCallPart,
+    ToolReturnPart,
+)
 from pydantic_ai.toolsets import FunctionToolset
 from pydantic_ai.tools import DeferredToolRequests, ToolDenied
 
@@ -120,20 +125,165 @@ class TestTriageSubmissions:
         assert previews == [(call, None, None)]
 
 
-@pytest.mark.parametrize(
-    "raw, expected",
-    [
-        pytest.param({"a": 1}, {"a": 1}, id="dict-passthrough"),
-        pytest.param('{"a": 1}', {"a": 1}, id="json-string"),
-        pytest.param("not json", {}, id="malformed-json"),
-        pytest.param(None, {}, id="none"),
-        pytest.param("[1, 2]", {}, id="json-but-not-a-dict"),
-    ],
-)
-def test_parse_args_coerces_to_dict(
-    raw: str | dict[str, object] | None, expected: dict[str, object]
+def test_run_submissions_records_one_outcome_per_call(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Tool-call args become a dict whether they arrive as a dict, JSON, or junk."""
-    from aiida_agents.cli.hitl import _parse_args
+    """Each approval gets exactly one outcome, keyed by its tool-call id: an
+    auto-denied input carries its denial, a non-executable tool is skipped, a
+    raising submission records its error, and a successful one records the run
+    result.
+    """
+    from aiida_agents.cli.hitl import _Preview, _run_submissions
 
-    assert _parse_args(raw) == expected
+    def _fake_run_submission(
+        entry_point: str, process_class: object, resolved: object
+    ) -> dict[str, object]:
+        if entry_point == "boom":
+            raise RuntimeError("submit exploded")
+        return {"workflow": entry_point, "pk": 7, "state": "created"}
+
+    monkeypatch.setattr(
+        "aiida_agents.tools.submit._run_submission", _fake_run_submission
+    )
+
+    ok = ToolCallPart(
+        tool_name="submit_workflow",
+        args={"entry_point": "core.arithmetic.add"},
+        tool_call_id="ok",
+    )
+    err = ToolCallPart(
+        tool_name="submit_workflow", args={"entry_point": "boom"}, tool_call_id="err"
+    )
+    other = ToolCallPart(tool_name="other", args={}, tool_call_id="skip")
+    previews = [
+        _Preview(ok, object(), {"x": 1}),
+        _Preview(err, object(), {"x": 1}),
+        _Preview(other, None, None),  # not an executable submission
+    ]
+
+    outcomes = _run_submissions(previews, {"denied": ToolDenied("bad inputs")})
+
+    assert outcomes == {
+        "denied": {"rejected": "bad inputs"},
+        "ok": {"workflow": "core.arithmetic.add", "pk": 7, "state": "created"},
+        "err": {"error": "submit exploded"},
+        "skip": {"skipped": "other"},
+    }
+
+
+def test_splice_outcomes_appends_one_tool_return_per_approval() -> None:
+    """Every approval's outcome returns as its own ToolReturnPart, so the next
+    turn has no unanswered tool call for pydantic-ai to reject.
+    """
+    from aiida_agents.cli.hitl import _splice_outcomes
+
+    prior = ModelRequest(parts=[])
+    call_a = ToolCallPart(tool_name="submit_workflow", args={}, tool_call_id="a")
+    call_b = ToolCallPart(tool_name="submit_workflow", args={}, tool_call_id="b")
+    pending = DeferredToolRequests(approvals=[call_a, call_b])
+
+    class _Result:
+        def all_messages(self) -> list[ModelMessage]:
+            return [prior]
+
+    spliced = _splice_outcomes(
+        _Result(), pending, {"a": {"pk": 1}, "b": {"skipped": "x"}}
+    )
+
+    assert spliced[0] is prior
+    added = spliced[1]
+    assert isinstance(added, ModelRequest)
+    returns = [part for part in added.parts if isinstance(part, ToolReturnPart)]
+    assert len(returns) == len(added.parts)  # every part is a tool return
+    assert [(part.tool_call_id, part.content) for part in returns] == [
+        ("a", {"pk": 1}),
+        ("b", {"skipped": "x"}),
+    ]
+
+
+class TestConfirmAndSubmit:
+    @pytest.mark.parametrize("mode", ["declined", "ctrl-c-abort"])
+    def test_cancel_submits_nothing(
+        self, monkeypatch: pytest.MonkeyPatch, mode: str
+    ) -> None:
+        """Declining, or Ctrl-C/Ctrl-D at the prompt (click.Abort), returns the
+        pre-turn history unchanged and never runs a submission.
+        """
+        import rich_click
+
+        from aiida_agents.cli import hitl
+
+        def _confirm(*args: object, **kwargs: object) -> bool:
+            if mode == "ctrl-c-abort":
+                raise rich_click.Abort
+            return False
+
+        submitted: list[int] = []
+
+        def _record(previews: object, auto: object) -> dict[str, object]:
+            submitted.append(1)
+            return {}
+
+        monkeypatch.setattr(hitl, "_print_previews", lambda previews: None)
+        monkeypatch.setattr(rich_click, "confirm", _confirm)
+        monkeypatch.setattr(hitl, "_run_submissions", _record)
+
+        history: list[ModelMessage] = []
+        out = hitl._confirm_and_submit(
+            None, DeferredToolRequests(approvals=[]), {}, [], history
+        )
+
+        assert out is history
+        assert submitted == []
+
+    def test_proceed_runs_then_splices(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """On approval the outcomes are computed then spliced into history."""
+        import rich_click
+
+        from aiida_agents.cli import hitl
+
+        spliced: list[ModelMessage] = [ModelRequest(parts=[])]
+        monkeypatch.setattr(hitl, "_print_previews", lambda previews: None)
+        monkeypatch.setattr(rich_click, "confirm", lambda *a, **k: True)
+        monkeypatch.setattr(
+            hitl, "_run_submissions", lambda previews, auto: {"id": {"pk": 1}}
+        )
+        monkeypatch.setattr(
+            hitl, "_splice_outcomes", lambda result, pending, outcomes: spliced
+        )
+
+        out = hitl._confirm_and_submit(
+            None, DeferredToolRequests(approvals=[]), {}, [], []
+        )
+
+        assert out is spliced
+
+
+def test_print_previews_shows_resolved_submission_and_raw_fallback(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A resolved submission shows its entry point and formatted inputs; any other
+    approval-gated tool falls back to its raw args.
+    """
+    from aiida_agents.cli import hitl
+    from aiida_agents.cli.hitl import _Preview
+
+    monkeypatch.setattr(
+        "aiida_agents.tools.submit._format_resolved_inputs", lambda resolved: "INPUTS"
+    )
+
+    submit = ToolCallPart(
+        tool_name="submit_workflow",
+        args={"entry_point": "core.arithmetic.add"},
+        tool_call_id="s",
+    )
+    other = ToolCallPart(tool_name="other", args={"k": "v"}, tool_call_id="o")
+    hitl._print_previews(
+        [_Preview(submit, object(), {"x": 1}), _Preview(other, None, None)]
+    )
+
+    out = capsys.readouterr().out
+    assert "core.arithmetic.add" in out
+    assert "INPUTS" in out
+    assert "other" in out
+    assert "{'k': 'v'}" in out  # raw args shown for the non-submit tool

@@ -28,7 +28,7 @@ from aiida_agents.cli.ollama import _prompt_pull_ollama_model
 from aiida_agents.cli.output import console
 
 
-def _module_missing(name: str) -> bool:  # pragma: no cover
+def _module_missing(name: str) -> bool:
     """True when importable module ``name`` is not available in this env."""
     import importlib.util
 
@@ -45,7 +45,7 @@ def _pip_install(spec: str) -> None:  # pragma: no cover
     subprocess.run(cmd, check=True)
 
 
-def _ensure_docs_toolchain() -> None:  # pragma: no cover
+def _ensure_docs_toolchain() -> None:
     """Offer to install the docs toolchain if sphinx is missing.
 
     Building the RAG corpus shells out to sphinx (shipped by ``aiida-core[docs]``).

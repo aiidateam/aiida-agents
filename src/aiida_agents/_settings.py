@@ -105,6 +105,11 @@ def _choices(alias: object) -> tuple[str, ...]:
 # advertise a provider the settings don't accept (or omit a new one).
 _PROVIDER_CHOICES = _choices(_Provider)
 
+# Non-empty sentinel default for the openai-compatible ``api_key`` (so keyless
+# local servers work); ``config show`` tells a set key from this placeholder by
+# comparing against it, hence the shared constant.
+_API_KEY_UNSET = "api-key-not-set"
+
 
 class ModelSettings(_Base):
     """LLM model/provider configuration (``AIIDA_AGENTS_*``)."""
@@ -118,7 +123,7 @@ class ModelSettings(_Base):
     base_url: str | None = None
     """Base URL for provider=openai-compatible (e.g. https://api.deepseek.com/v1)."""
 
-    api_key: str = "api-key-not-set"
+    api_key: str = _API_KEY_UNSET
     """API key for provider=openai-compatible (with AIIDA_AGENTS_BASE_URL), or a
     dummy for keyless local servers. A secret: never commit it."""
 

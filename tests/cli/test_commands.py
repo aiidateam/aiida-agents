@@ -61,27 +61,6 @@ def test_check_and_warm_use_distinct_probes(
     assert calls == expected_calls
 
 
-@pytest.mark.parametrize(
-    "exc, expected",
-    [
-        pytest.param(ValueError(), "", id="empty-message"),
-        pytest.param(ValueError("boom"), "boom", id="single-line"),
-        pytest.param(ValueError("first\nsecond"), "first", id="first-line-only"),
-        pytest.param(ValueError("\n\n  \nreal"), "real", id="skips-blank-lines"),
-        pytest.param(ValueError("x" * 200), "x" * 100, id="truncated-to-100"),
-    ],
-)
-def test_short_reason_summarizes_exception(exc: Exception, expected: str) -> None:
-    """A failing health check yields a one-line, bounded detail for the `doctor`
-    table. An empty-message exception (a bare ``ValueError``, or
-    ``asyncio.TimeoutError``) yields '' instead of crashing the whole report with
-    ``IndexError`` (regression for the ``str(exc).splitlines()[0]`` guard).
-    """
-    from aiida_agents.cli.commands import _short_reason
-
-    assert _short_reason(exc) == expected
-
-
 def test_version_option_prints_version() -> None:
     """`--version` reports the installed package version and exits cleanly."""
     from importlib.metadata import version
@@ -119,3 +98,83 @@ def test_provider_flag_rejects_unknown_choice() -> None:
     assert result.exit_code == 2  # Click usage error, before any work
     assert "bogus" in result.output
     assert "ollama" in result.output  # the derived choices are listed
+
+
+@pytest.mark.parametrize(
+    "command, probe",
+    [
+        pytest.param("check", "_check_reachable", id="check"),
+        pytest.param("warm", "_probe_model", id="warm"),
+    ],
+)
+def test_probe_failure_is_diagnosed_and_exits(
+    monkeypatch: pytest.MonkeyPatch, command: str, probe: str
+) -> None:
+    """A probe failure routes through `_diagnose_probe_failure` and exits 1,
+    never a raw traceback.
+    """
+    from aiida_agents.cli import commands
+
+    def _boom(settings: object) -> None:
+        raise RuntimeError("endpoint down")
+
+    diagnosed: list[str] = []
+    monkeypatch.setattr(f"aiida_agents.cli.commands.{probe}", _boom)
+    monkeypatch.setattr(
+        commands,
+        "_diagnose_probe_failure",
+        lambda settings, exc: diagnosed.append(str(exc)),
+    )
+
+    result = CliRunner().invoke(cli, [command])
+
+    assert result.exit_code == 1
+    assert diagnosed == ["endpoint down"]
+
+
+class _FakeResult:
+    def __init__(self, output: object) -> None:
+        self.output = output
+
+    def new_messages(self) -> list[object]:
+        return []
+
+
+def test_ask_prints_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A one-shot `ask` prints the agent's reply and exits cleanly."""
+    from aiida_agents.cli import commands
+
+    async def _fake_ask(
+        agent: object, question: str, message_history: object = None
+    ) -> _FakeResult:
+        return _FakeResult("42 is the answer")
+
+    monkeypatch.setattr(commands, "_build_agent", lambda settings, profile: object())
+    monkeypatch.setattr(commands, "ask", _fake_ask)
+
+    result = CliRunner().invoke(cli, ["ask", "what is 6 times 7"])
+
+    assert result.exit_code == 0
+    assert "42 is the answer" in result.output
+
+
+def test_ask_rejects_a_deferred_write(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A write proposed in one-shot mode can't be approved interactively, so `ask`
+    explains and exits 2 rather than silently dropping it.
+    """
+    from pydantic_ai.tools import DeferredToolRequests
+
+    from aiida_agents.cli import commands
+
+    async def _fake_ask(
+        agent: object, question: str, message_history: object = None
+    ) -> _FakeResult:
+        return _FakeResult(DeferredToolRequests(approvals=[]))
+
+    monkeypatch.setattr(commands, "_build_agent", lambda settings, profile: object())
+    monkeypatch.setattr(commands, "ask", _fake_ask)
+
+    result = CliRunner().invoke(cli, ["ask", "please submit a workflow"])
+
+    assert result.exit_code == 2
+    assert "interactive approval" in result.output
