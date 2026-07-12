@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from aiida_agents.tools.workflows.schemas import KNOWN_WORKFLOWS
+from aiida_agents.tools.workflows.schemas import KNOWN_WORKFLOWS, WorkflowSpec
 from aiida_agents.tools.workflows.spec_generation import generate_workflow_spec
 from aiida_agents.tools.workflows.spec_validation import validate_workflow_spec
 
@@ -12,7 +12,7 @@ from aiida_agents.tools.workflows.spec_validation import validate_workflow_spec
 class TestSpecGeneration:
     """Test standard spec generation outputs across workflows."""
 
-    def test_spec_is_dict_not_string(self):
+    def test_spec_is_dict_not_string(self) -> None:
         """Spec should be a dict (JSON-serializable), not a string."""
         spec = generate_workflow_spec(
             description="Test relax",
@@ -22,7 +22,7 @@ class TestSpecGeneration:
         )
         assert isinstance(spec, dict), "Spec must be dict, not string"
 
-    def test_spec_has_required_keys(self):
+    def test_spec_has_required_keys(self) -> None:
         """Spec must have workflow_type, inputs, metadata."""
         spec = generate_workflow_spec(
             description="Test relax",
@@ -34,7 +34,7 @@ class TestSpecGeneration:
         assert "inputs" in spec
         assert "metadata" in spec
 
-    def test_spec_inputs_has_parameters(self):
+    def test_spec_inputs_has_parameters(self) -> None:
         """Inputs must contain parameters sub-dict."""
         spec = generate_workflow_spec(
             description="Test relax",
@@ -45,7 +45,7 @@ class TestSpecGeneration:
         assert "parameters" in spec["inputs"]
         assert isinstance(spec["inputs"]["parameters"], dict)
 
-    def test_spec_parameters_have_numeric_values(self):
+    def test_spec_parameters_have_numeric_values(self) -> None:
         """Numeric parameters should not be strings."""
         spec = generate_workflow_spec(
             description="Test relax",
@@ -58,7 +58,7 @@ class TestSpecGeneration:
         assert isinstance(params["system"]["ecutwfc"], (int, float))
         assert isinstance(params["system"]["ecutrho"], (int, float))
 
-    def test_all_six_workflows_produce_valid_specs(self):
+    def test_all_six_workflows_produce_valid_specs(self) -> None:
         """Test every known workflow generates a valid specification."""
         for wf_type in KNOWN_WORKFLOWS.keys():
             spec = generate_workflow_spec(
@@ -74,7 +74,7 @@ class TestSpecGeneration:
 class TestSpecGenerationEdgeCases:
     """Test edge cases and conflict handling for spec generation and validation."""
 
-    def test_unknown_workflow_type(self):
+    def test_unknown_workflow_type(self) -> None:
         """If KNOWN_WORKFLOWS doesn't have the requested workflow, generate_workflow_spec should raise ValueError."""
         with pytest.raises(ValueError, match="Unknown workflow_type"):
             generate_workflow_spec(
@@ -84,7 +84,7 @@ class TestSpecGenerationEdgeCases:
                 optimization_level="standard",
             )
 
-    def test_invalid_structure_type_or_optimization_level(self):
+    def test_invalid_structure_type_or_optimization_level(self) -> None:
         """Ensure boundary validation rejects invalid structure_type or optimization_level."""
         with pytest.raises(ValueError, match="structure_type must be"):
             generate_workflow_spec(
@@ -102,9 +102,9 @@ class TestSpecGenerationEdgeCases:
                 optimization_level="ultra_super_high",
             )
 
-    def test_conflict_between_toplevel_and_nested_parameters(self):
+    def test_conflict_between_toplevel_and_nested_parameters(self) -> None:
         """Test handling when user provides both flat ecutwfc and nested system.ecutwfc (conflict)."""
-        spec = {
+        spec: WorkflowSpec = {
             "workflow_type": "aiida.workflows:PwRelaxWorkChain",
             "inputs": {
                 "pw_code_label": "qe-pw-6.8",

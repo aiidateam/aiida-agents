@@ -46,7 +46,7 @@ class PastWorkflowSummary(TypedDict, total=False):
 class AvailableCodeInfo(TypedDict, total=False):
     """Information about available computation codes."""
 
-    codes: list[dict]
+    codes: list[dict[str, t.Any]]
     """List of available codes with versions"""
 
     recommended_version: str | None
@@ -271,19 +271,16 @@ def _query_available_codes(filters: dict[str, t.Any]) -> dict[str, t.Any]:
             "note": f"No codes found matching {code_filter!r} in active AiiDA profile.",
         }
 
-    if not codes_list and (
-        not code_filter
-        or "qe-pw" in str(code_filter).lower()
-        or "pw" in str(code_filter).lower()
-    ):
-        codes_list = [
-            {
-                "label": "qe-pw-6.8",
-                "plugin": "quantumespresso.pw",
-                "description": "Standard Quantum ESPRESSO pw.x code (schema recommendation for unconfigured profiles)",
-            }
-        ]
-        recommended = "qe-pw-6.8"
+    if not codes_list:
+        return {
+            "query_type": "available_codes",
+            "codes": [],
+            "recommended_version": None,
+            "note": (
+                "No codes found in the active AiiDA profile. "
+                "Please set up a code first: verdi code setup"
+            ),
+        }
 
     return {
         "query_type": "available_codes",
@@ -366,7 +363,11 @@ def _query_available_pseudos(filters: dict[str, t.Any]) -> dict[str, t.Any]:
 
     try:
         qb = orm.QueryBuilder()
-        qb.append(orm.Group, project=["label", "type_string", "description"])
+        qb.append(
+            orm.Group,
+            filters={"type_string": {"like": "aiida_pseudo%"}},
+            project=["label", "type_string", "description"],
+        )
         all_groups = qb.all()
     except Exception as exc:
         logger.debug("Could not query Groups for pseudopotentials: %s", exc)
@@ -374,17 +375,13 @@ def _query_available_pseudos(filters: dict[str, t.Any]) -> dict[str, t.Any]:
 
     pseudo_families: list[dict[str, t.Any]] = []
     for label, type_str, desc in all_groups:
-        if any(
-            keyword in str(label).lower() or keyword in str(type_str).lower()
-            for keyword in ("sssp", "pseudo", "upf", "paw", "uspp", "pbe")
-        ):
-            pseudo_families.append(
-                {
-                    "label": str(label),
-                    "type_string": str(type_str),
-                    "description": str(desc) if desc else "",
-                }
-            )
+        pseudo_families.append(
+            {
+                "label": str(label),
+                "type_string": str(type_str),
+                "description": str(desc) if desc else "",
+            }
+        )
 
     try:
         upf_count = orm.QueryBuilder().append(orm.UpfData).count()

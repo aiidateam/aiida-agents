@@ -81,25 +81,32 @@ def get_workflow_templates(
                 if k in PARAMETER_SCHEMA:
                     relevant_params[k] = _sanitize_for_json(PARAMETER_SCHEMA[k])
 
-        return _sanitize_for_json(
-            {
-                "workflow_type": workflow_type,
-                "description": info.get("description", ""),
-                "required_inputs": info.get("required_inputs", []),
-                "optional_inputs": info.get("optional_inputs", []),
-                "for_structure_types": info.get("for_structure_types", ["all"]),
-                "typical_walltime_hours": info.get("typical_walltime_hours"),
-                "parameters_schema": relevant_params,
-                "example_successful_runs": [
-                    {
-                        "structure_type": "metallic",
-                        "parameters": {"ecutwfc": 65, "ecutrho": 520, "conv_thr": 1e-8}
-                        if "Vasp" not in workflow_type
-                        else {"ENCUT": 520.0, "EDIFF": 1e-6, "PREC": "Accurate"},
-                        "success": True,
-                    }
-                ],
-            }
+        return t.cast(
+            dict[str, t.Any],
+            _sanitize_for_json(
+                {
+                    "workflow_type": workflow_type,
+                    "description": info.get("description", ""),
+                    "required_inputs": info.get("required_inputs", []),
+                    "optional_inputs": info.get("optional_inputs", []),
+                    "for_structure_types": info.get("for_structure_types", ["all"]),
+                    "typical_walltime_hours": info.get("typical_walltime_hours"),
+                    "parameters_schema": relevant_params,
+                    "example_successful_runs": [
+                        {
+                            "structure_type": "metallic",
+                            "parameters": {
+                                "ecutwfc": 65,
+                                "ecutrho": 520,
+                                "conv_thr": 1e-8,
+                            }
+                            if "Vasp" not in workflow_type
+                            else {"ENCUT": 520.0, "EDIFF": 1e-6, "PREC": "Accurate"},
+                            "success": True,
+                        }
+                    ],
+                }
+            ),
         )
 
     # If no workflow_type provided, return catalog of all known workflows
@@ -110,11 +117,14 @@ def get_workflow_templates(
             "required_inputs": data.get("required_inputs", []),
         }
 
-    return _sanitize_for_json(
-        {
-            "query_type": "all_workflow_templates",
-            "total_workflows": len(catalog),
-            "workflows": catalog,
-            "note": "Use get_workflow_templates(workflow_type='...') to see full parameter bounds and typical values.",
-        }
+    return t.cast(
+        dict[str, t.Any],
+        _sanitize_for_json(
+            {
+                "query_type": "all_workflow_templates",
+                "total_workflows": len(catalog),
+                "workflows": catalog,
+                "note": "Use get_workflow_templates(workflow_type='...') to see full parameter bounds and typical values.",
+            }
+        ),
     )

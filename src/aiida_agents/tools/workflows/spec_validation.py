@@ -124,7 +124,7 @@ def validate_workflow_spec(
                     if not is_valid:
                         errors.append(
                             {
-                                "error": error_msg,
+                                "error": error_msg or "Unknown validation error",
                                 "parameter": f"{param_name}.{nested_name}",
                                 "suggestion": _suggest_parameter_fix(
                                     nested_name, nested_value, structure_type
@@ -138,7 +138,7 @@ def validate_workflow_spec(
                 if not is_valid:
                     errors.append(
                         {
-                            "error": error_msg,
+                            "error": error_msg or "Unknown validation error",
                             "parameter": param_name,
                             "suggestion": _suggest_parameter_fix(
                                 param_name, param_value, structure_type
@@ -183,6 +183,21 @@ def validate_workflow_spec(
             warnings.append(
                 f"Metallic structure with only {flat_params['scf_kpoints']} k-points may be insufficient. "
                 "Consider 30+ points for accurate electronic structure."
+            )
+
+    # ========================================================================
+    # Check 7: Pseudopotential family existence in the active AiiDA profile
+    # ========================================================================
+
+    pseudo_family = inputs.get("pseudo_family")
+    if pseudo_family and isinstance(pseudo_family, str):
+        _pseudo_ok, _pseudo_note = _check_pseudo_family_exists(pseudo_family)
+        if not _pseudo_ok:
+            warnings.append(
+                f"Pseudopotential family {pseudo_family!r} is not installed in the active AiiDA profile. "
+                f"{_pseudo_note} "
+                "Run: aiida-pseudo install sssp -v 1.3 -x PBE -p efficiency — "
+                "this must be done before submitting."
             )
 
     # ========================================================================
@@ -236,3 +251,42 @@ def _suggest_parameter_fix(
     }
 
     return suggestions.get(param_name, "Check the parameter value and try again")
+
+
+def _check_pseudo_family_exists(pseudo_family: str) -> tuple[bool, str]:
+    """Check whether a pseudopotential family label exists in the active AiiDA profile.
+
+    Returns:
+        (True, "") if found, or (False, note_message) if not found.
+    """
+    try:
+        from aiida import orm
+
+        # First: exact label match (most reliable)
+        qb = orm.QueryBuilder()
+        qb.append(orm.Group, filters={"label": pseudo_family})
+        if qb.count() > 0:
+            return True, ""
+
+        # Second: list only real pseudo family groups (type_string from aiida-pseudo)
+        qb2 = orm.QueryBuilder()
+        qb2.append(
+            orm.Group,
+            filters={"type_string": {"like": "aiida_pseudo%"}},
+            project=["label"],
+        )
+        pseudo_labels = [row[0] for row in qb2.all()]
+
+        if pseudo_labels:
+            available = ", ".join(pseudo_labels[:5])
+            return (
+                False,
+                f"Family {pseudo_family!r} not found. Installed pseudo families: {available}.",
+            )
+        return False, (
+            "No pseudopotential families are installed in the active AiiDA profile. "
+            "Install one first: aiida-pseudo install sssp -v 1.3 -x PBE -p efficiency"
+        )
+    except Exception:
+        # If AiiDA is not loaded (e.g., in tests), skip this check
+        return True, ""

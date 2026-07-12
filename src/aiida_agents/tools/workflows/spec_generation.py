@@ -21,6 +21,29 @@ logger = logging.getLogger(__name__)
 __all__ = ["generate_workflow_spec"]
 
 
+def _get_default_pw_code() -> str:
+    """Query the active AiiDA profile for the first installed quantumespresso.pw code.
+
+    Returns the code label if found, otherwise a placeholder that will be
+    caught by validate_workflow_spec and reported to the agent.
+    """
+    try:
+        from aiida import orm
+
+        qb = orm.QueryBuilder()
+        qb.append(
+            orm.Code,
+            filters={"attributes.input_plugin": "quantumespresso.pw"},
+            project=["label"],
+        )
+        results = qb.all(flat=True)
+        if results:
+            return str(results[0])
+    except Exception as exc:
+        logger.debug("Could not query pw codes from AiiDA: %s", exc)
+    return "<no-pw-code-found>"
+
+
 def generate_workflow_spec(
     description: str = Field(
         description="What calculation the user wants (e.g. 'Geometry optimization of CoV')"
@@ -93,7 +116,7 @@ def generate_workflow_spec(
 
     if workflow_type == "aiida.workflows:PwRelaxWorkChain":
         spec["inputs"] = {
-            "pw_code_label": "qe-pw-6.8",
+            "pw_code_label": _get_default_pw_code(),
             "pseudo_family": PSEUDO_FAMILIES[0],
             "structure": None,
             "parameters": _build_relax_parameters(structure_type, optimization_level),
@@ -105,7 +128,7 @@ def generate_workflow_spec(
 
     elif workflow_type == "aiida.workflows:PwBandsWorkChain":
         spec["inputs"] = {
-            "pw_code_label": "qe-pw-6.8",
+            "pw_code_label": _get_default_pw_code(),
             "pseudo_family": PSEUDO_FAMILIES[0],
             "structure": None,
             "scf_kpoints_distance": 0.2,
@@ -116,7 +139,7 @@ def generate_workflow_spec(
 
     elif workflow_type == "aiida.workflows:PwDosWorkChain":
         spec["inputs"] = {
-            "pw_code_label": "qe-pw-6.8",
+            "pw_code_label": _get_default_pw_code(),
             "pseudo_family": PSEUDO_FAMILIES[0],
             "structure": None,
             "parameters": _build_scf_parameters(structure_type, optimization_level),
@@ -127,7 +150,7 @@ def generate_workflow_spec(
 
     elif workflow_type == "aiida.workflows:PwCalculation":
         spec["inputs"] = {
-            "pw_code_label": "qe-pw-6.8",
+            "pw_code_label": _get_default_pw_code(),
             "pseudo_family": PSEUDO_FAMILIES[0],
             "structure": None,
             "parameters": _build_scf_parameters(structure_type, optimization_level),
@@ -137,8 +160,8 @@ def generate_workflow_spec(
 
     elif workflow_type == "aiida.workflows:PhRelaxWorkChain":
         spec["inputs"] = {
-            "pw_code_label": "qe-pw-6.8",
-            "ph_code_label": "qe-ph-6.8",
+            "pw_code_label": _get_default_pw_code(),
+            "ph_code_label": "<no-ph-code-found>",
             "pseudo_family": PSEUDO_FAMILIES[0],
             "structure": None,
             "parameters": _build_relax_parameters(structure_type, optimization_level),
@@ -148,7 +171,7 @@ def generate_workflow_spec(
 
     elif workflow_type == "aiida.workflows:PwSecondOrderWorkChain":
         spec["inputs"] = {
-            "pw_code_label": "qe-pw-6.8",
+            "pw_code_label": _get_default_pw_code(),
             "pseudo_family": PSEUDO_FAMILIES[0],
             "structure": None,
             "parameters": _build_scf_parameters(structure_type, optimization_level),
@@ -193,12 +216,14 @@ def generate_workflow_spec(
     return spec
 
 
-def _build_relax_parameters(structure_type: str, optimization_level: str) -> dict:
+def _build_relax_parameters(
+    structure_type: str, optimization_level: str
+) -> dict[str, t.Any]:
     """Build relaxation parameters based on structure type and accuracy.
 
     Fallback to hardcoded defaults if query_analysis_agent fails.
     """
-    base_params = {
+    base_params: dict[str, t.Any] = {
         "system": {},
         "electrons": {"conv_thr": 1e-8},
         "ions": {"ion_dynamics": "bfgs"},
@@ -224,12 +249,14 @@ def _build_relax_parameters(structure_type: str, optimization_level: str) -> dic
     return base_params
 
 
-def _build_scf_parameters(structure_type: str, optimization_level: str) -> dict:
+def _build_scf_parameters(
+    structure_type: str, optimization_level: str
+) -> dict[str, t.Any]:
     """Build SCF parameters for band structure / DOS calculations.
 
     Fallback to hardcoded defaults if query_analysis_agent fails.
     """
-    base_params = {
+    base_params: dict[str, t.Any] = {
         "system": {},
         "electrons": {},
     }

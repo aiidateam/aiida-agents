@@ -323,7 +323,7 @@ PSEUDO_FAMILIES: list[str] = [
 # Parameter compatibility rules
 # ============================================================================
 
-PARAMETER_COMPAT_RULES = [
+PARAMETER_COMPAT_RULES: list[dict[str, t.Any]] = [
     {
         "rule": "ecutrho ≈ 8 × ecutwfc (±10% tolerance)",
         "tolerance": 0.1,

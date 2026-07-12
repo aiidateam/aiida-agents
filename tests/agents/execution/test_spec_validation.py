@@ -3,15 +3,16 @@
 from __future__ import annotations
 
 
+from aiida_agents.tools.workflows.schemas import WorkflowSpec
 from aiida_agents.tools.workflows.spec_validation import validate_workflow_spec
 
 
 class TestSpecValidationCatchesErrors:
     """Verify validate_workflow_spec catches missing inputs and parameter errors."""
 
-    def test_catches_missing_required_structure(self):
+    def test_catches_missing_required_structure(self) -> None:
         """Spec missing required input should fail validation."""
-        spec = {
+        spec: WorkflowSpec = {
             "workflow_type": "aiida.workflows:PwRelaxWorkChain",
             "inputs": {
                 "pw_code_label": "qe-pw-6.8",
@@ -24,9 +25,9 @@ class TestSpecValidationCatchesErrors:
         assert not result["valid"]
         assert any("structure" in err["error"] for err in result["errors"])
 
-    def test_catches_ecutwfc_too_low(self):
+    def test_catches_ecutwfc_too_low(self) -> None:
         """Spec with too-low ecutwfc (< 20 Ry) should fail validation."""
-        spec = {
+        spec: WorkflowSpec = {
             "workflow_type": "aiida.workflows:PwRelaxWorkChain",
             "inputs": {
                 "structure": "node_123",
@@ -44,9 +45,9 @@ class TestSpecValidationCatchesErrors:
         assert not result["valid"]
         assert any("ecutwfc" in err["error"] for err in result["errors"])
 
-    def test_catches_type_mismatch_string_instead_of_float(self):
+    def test_catches_type_mismatch_string_instead_of_float(self) -> None:
         """Should catch string value where float expected, while still running checks safely without TypeError."""
-        spec = {
+        spec: WorkflowSpec = {
             "workflow_type": "aiida.workflows:PwRelaxWorkChain",
             "inputs": {
                 "structure": "node_123",
@@ -66,9 +67,9 @@ class TestSpecValidationCatchesErrors:
             "expected float, got str" in err["error"] for err in result["errors"]
         )
 
-    def test_catches_bad_ecutrho_ratio(self):
+    def test_catches_bad_ecutrho_ratio(self) -> None:
         """Should warn when ecutrho != 8x ecutwfc."""
-        spec = {
+        spec: WorkflowSpec = {
             "workflow_type": "aiida.workflows:PwRelaxWorkChain",
             "inputs": {
                 "structure": "node_123",
@@ -85,9 +86,9 @@ class TestSpecValidationCatchesErrors:
         result = validate_workflow_spec(spec, structure_type="metallic")
         assert any("ecutrho" in w.lower() for w in result["warnings"])
 
-    def test_passes_valid_spec(self):
+    def test_passes_valid_spec(self) -> None:
         """A properly structured spec should pass validation cleanly."""
-        spec = {
+        spec: WorkflowSpec = {
             "workflow_type": "aiida.workflows:PwRelaxWorkChain",
             "inputs": {
                 "structure": "node_123",
@@ -110,9 +111,9 @@ class TestSpecValidationCatchesErrors:
 class TestSpecValidationEdgeCases:
     """Test validation behavior under unusual or unknown parameters."""
 
-    def test_unknown_structure_type_handled_gracefully(self):
+    def test_unknown_structure_type_handled_gracefully(self) -> None:
         """If structure_type is unknown or non-standard, validation should complete cleanly using defaults."""
-        spec = {
+        spec: WorkflowSpec = {
             "workflow_type": "aiida.workflows:PwRelaxWorkChain",
             "inputs": {
                 "structure": "node_123",

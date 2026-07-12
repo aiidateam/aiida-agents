@@ -9,6 +9,7 @@ from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents.agents.execution import get_agent
 from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
+from aiida_agents.tools.workflows.schemas import WorkflowSpec
 from aiida_agents.tools.workflows.spec_generation import generate_workflow_spec
 from aiida_agents.tools.workflows.spec_validation import validate_workflow_spec
 
@@ -16,7 +17,7 @@ from aiida_agents.tools.workflows.spec_validation import validate_workflow_spec
 class TestFullWorkflowIntegration:
     """Test full workflow progression: query → generate → validate → execution."""
 
-    def test_full_successful_workflow(self):
+    def test_full_successful_workflow(self) -> None:
         """Complete workflow should succeed: query → generate → validate."""
         # Step 1: Query for context
         context = query_analysis_agent(
@@ -47,10 +48,10 @@ class TestFullWorkflowIntegration:
         result = validate_workflow_spec(spec, structure_type="metallic")
         assert result["valid"] is True, f"Validation failed: {result.get('errors')}"
 
-    def test_workflow_with_regeneration_on_error(self):
+    def test_workflow_with_regeneration_on_error(self) -> None:
         """Workflow should allow regeneration when validation fails."""
         # Generate with bad parameters
-        spec = {
+        spec: WorkflowSpec = {
             "workflow_type": "aiida.workflows:PwRelaxWorkChain",
             "inputs": {
                 "structure": 12345,
@@ -83,7 +84,7 @@ class TestFullWorkflowIntegration:
         result = validate_workflow_spec(spec_corrected, structure_type="metallic")
         assert result["valid"] is True
 
-    def test_workflow_across_different_structure_types(self):
+    def test_workflow_across_different_structure_types(self) -> None:
         """Workflow should work for metallic, insulator, semiconductor."""
         for structure_type in ["metallic", "insulator", "semiconductor"]:
             query_analysis_agent(
@@ -107,7 +108,7 @@ class TestFullWorkflowIntegration:
                 f"Failed for {structure_type}: {result.get('errors')}"
             )
 
-    def test_verify_submit_workflow_invoked(self):
+    def test_verify_submit_workflow_invoked(self) -> None:
         """Verify that calling submit_workflow actually invokes the submission tool/function."""
         from aiida_agents.tools.submit import submit_workflow
 
@@ -133,7 +134,7 @@ class TestFullWorkflowIntegration:
                 assert res["pk"] == 999
                 assert res["state"] == "created"
 
-    def test_full_workflow_generation_validation_execution(self):
+    def test_full_workflow_generation_validation_execution(self) -> None:
         """Test: user request → spec generation → validation → ready for execution preview (approval)."""
         # 1. User asks for geometry optimization
         spec = generate_workflow_spec(
@@ -160,7 +161,7 @@ class TestFullWorkflowIntegration:
 class TestEdgeCasesAndFallbacks:
     """Test robustness: fallbacks when historical data or queries fail."""
 
-    def test_spec_generation_fallback_if_query_fails(self):
+    def test_spec_generation_fallback_if_query_fails(self) -> None:
         """Even with no prior context, generate_workflow_spec must produce valid spec using defaults."""
         spec = generate_workflow_spec(
             description="No historical data available",

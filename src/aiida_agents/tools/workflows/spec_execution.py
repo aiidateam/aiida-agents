@@ -11,6 +11,7 @@ import typing as t
 
 from pydantic import Field
 
+from aiida_agents.tools._types import SubmitResult
 from aiida_agents.tools.submit import submit_workflow
 from aiida_agents.tools.workflows.schemas import KNOWN_WORKFLOWS
 
@@ -26,7 +27,7 @@ def execute_workflow_spec(
             description="The exact dictionary produced by generate_workflow_spec and verified by validate_workflow_spec."
         ),
     ],
-) -> dict[str, t.Any]:
+) -> SubmitResult:
     """Execute a validated workflow specification by submitting it to the AiiDA engine.
 
     This tool takes a validated spec containing `workflow_type` and `inputs`, verifies the structure,

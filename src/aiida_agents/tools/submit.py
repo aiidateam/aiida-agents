@@ -200,7 +200,7 @@ def _resolve_schema_inputs(
 
     # 3. Resolve kpoints_distance
     if "kpoints_distance" in inputs:
-        base_relax["kpoints_distance"] = orm.Float(float(inputs["kpoints_distance"]))
+        base_relax["kpoints_distance"] = orm.Float(float(inputs["kpoints_distance"]))  # type: ignore[no-untyped-call]
 
     # 4. Resolve parameters
     if "parameters" in inputs:
@@ -218,7 +218,7 @@ def _resolve_schema_inputs(
                 and "calculation" not in upper_params["CONTROL"]
             ):
                 upper_params["CONTROL"]["calculation"] = "vc-relax"
-            pw["parameters"] = orm.Dict(dict=upper_params)
+            pw["parameters"] = orm.Dict(dict=upper_params)  # type: ignore[no-untyped-call]
 
     # 5. Resolve pseudo_family / pseudos
     pseudo_val = inputs.get("pseudo_family") or inputs.get("pseudos")
@@ -242,7 +242,7 @@ def _resolve_schema_inputs(
                 pw["pseudos"] = group.get_pseudos(structure=structure)
         except Exception as exc:
             raise SubmissionInputError(
-                f"Could not resolve pseudopotential family {pseudo_val!r} for structure {structure.get_formula() if hasattr(structure, 'get_formula') else structure}: {exc}. "
+                f"Could not resolve pseudopotential family {pseudo_val!r} for structure {structure.get_formula() if hasattr(structure, 'get_formula') else structure}: {exc}. "  # type: ignore[no-untyped-call]
                 f"Please ensure the pseudo family is installed via 'aiida-pseudo install'."
             ) from exc
 

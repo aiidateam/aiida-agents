@@ -14,7 +14,7 @@ from aiida_agents.tools.workflows.schemas import (
 class TestSchemas:
     """Test schema constants and basic parameter validation logic."""
 
-    def test_known_workflows_structure(self):
+    def test_known_workflows_structure(self) -> None:
         """Ensure KNOWN_WORKFLOWS has expected profiles and keys."""
         assert "aiida.workflows:PwRelaxWorkChain" in KNOWN_WORKFLOWS
         assert "aiida.workflows:PwCalculation" in KNOWN_WORKFLOWS
@@ -26,13 +26,13 @@ class TestSchemas:
             assert "optional_inputs" in spec
             assert "for_structure_types" in spec
 
-    def test_parameter_schema_structure(self):
+    def test_parameter_schema_structure(self) -> None:
         """Ensure PARAMETER_SCHEMA defines type and ranges for critical cutoffs."""
         assert "ecutwfc" in PARAMETER_SCHEMA
         assert PARAMETER_SCHEMA["ecutwfc"]["type"] in ("float", float)
         assert PARAMETER_SCHEMA["ecutwfc"]["min"] > 0
 
-    def test_validate_parameter_valid(self):
+    def test_validate_parameter_valid(self) -> None:
         """Test validate_parameter accepts valid floats and ints for float parameters."""
         valid, msg = validate_parameter("ecutwfc", 65.0)
         assert valid, f"Expected valid float ecutwfc, got error: {msg}"
@@ -42,23 +42,25 @@ class TestSchemas:
             f"Expected int accepted for float ecutwfc, got error: {msg_int}"
         )
 
-    def test_validate_parameter_invalid_type(self):
+    def test_validate_parameter_invalid_type(self) -> None:
         """Test validate_parameter rejects string where float is expected."""
         valid, msg = validate_parameter("ecutwfc", "65")
         assert not valid
+        assert msg is not None
         assert "expected float, got str" in msg
 
-    def test_validate_parameter_out_of_range(self):
+    def test_validate_parameter_out_of_range(self) -> None:
         """Test validate_parameter rejects out of range numeric values."""
         valid_low, msg_low = validate_parameter("ecutwfc", -10.0)
         assert not valid_low
+        assert msg_low is not None
         assert "minimum" in msg_low.lower()
 
 
 class TestParameterCompatibilityRules:
     """Test all parameter compatibility checks thoroughly across structure types."""
 
-    def test_ecutrho_ecutwfc_ratio_rule(self):
+    def test_ecutrho_ecutwfc_ratio_rule(self) -> None:
         """Test ecutrho ≈ 8 × ecutwfc rule."""
         # Good ratio
         params_good = {"ecutwfc": 65.0, "ecutrho": 520.0}
@@ -72,7 +74,7 @@ class TestParameterCompatibilityRules:
         warnings = check_parameter_compatibility(params_bad, structure_type="insulator")
         assert any("ecutrho" in w.lower() for w in warnings)
 
-    def test_smearing_and_degauss_rule(self):
+    def test_smearing_and_degauss_rule(self) -> None:
         """Test rule requiring degauss when smearing is specified."""
         # smearing without degauss
         params_bad = {"smearing": "gaussian"}
@@ -84,7 +86,7 @@ class TestParameterCompatibilityRules:
         warnings = check_parameter_compatibility(params_good, structure_type="metallic")
         assert not any("degauss" in w.lower() for w in warnings)
 
-    def test_metallic_smearing_type_rule(self):
+    def test_metallic_smearing_type_rule(self) -> None:
         """Test smearing type rule for metallic structures."""
         params_bad = {"smearing": "methfessel-paxton"}
         warnings = check_parameter_compatibility(params_bad, structure_type="metallic")
@@ -101,7 +103,7 @@ class TestParameterCompatibilityRules:
             for w in warnings_insulator
         )
 
-    def test_k_points_distance_metallic_vs_insulator(self):
+    def test_k_points_distance_metallic_vs_insulator(self) -> None:
         """k_points_distance rule triggers specifically for metallic structures when > 0.3 Å^-1."""
         params = {"kpoints_distance": 0.4}
         # Metallic should warn because 0.4 > 0.3
@@ -123,7 +125,7 @@ class TestParameterCompatibilityRules:
         )
         assert not any("k_points_distance" in w.lower() for w in warnings_good)
 
-    def test_conv_thr_vs_scf_maxiter_rule(self):
+    def test_conv_thr_vs_scf_maxiter_rule(self) -> None:
         """Stricter conv_thr (< 1e-8) requires high scf_maxiter (>= 150)."""
         params_strict_low_iter = {"conv_thr": 1e-10, "scf_maxiter": 80}
         warnings = check_parameter_compatibility(
@@ -137,7 +139,7 @@ class TestParameterCompatibilityRules:
         )
         assert not any("scf_maxiter >= 150" in w.lower() for w in warnings_ok)
 
-    def test_geometry_optimization_forces_rule(self):
+    def test_geometry_optimization_forces_rule(self) -> None:
         """Test rule requiring conv_thr_forces when conv_thr is set for geometry optimization."""
         params_missing_forces = {"conv_thr": 1e-8}
         warnings = check_parameter_compatibility(

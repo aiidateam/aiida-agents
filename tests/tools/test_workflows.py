@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import pytest
 
+from aiida_agents.tools.workflows.schemas import WorkflowSpec
 from aiida_agents.tools.workflows import (
     KNOWN_WORKFLOWS,
     execute_workflow_spec,
@@ -84,7 +85,7 @@ class TestValidateWorkflowSpecTool:
 
     def test_valid_spec_returns_true_with_no_errors(self) -> None:
         """A complete, valid specification returns valid=True and empty error list."""
-        spec = {
+        spec: WorkflowSpec = {
             "workflow_type": "aiida.workflows:PwRelaxWorkChain",
             "inputs": {
                 "structure": "node_123",
@@ -99,7 +100,7 @@ class TestValidateWorkflowSpecTool:
 
     def test_invalid_spec_returns_false_and_suggestions(self) -> None:
         """An invalid ecutwfc returns valid=False and actionable suggestions."""
-        spec = {
+        spec: WorkflowSpec = {
             "workflow_type": "aiida.workflows:PwRelaxWorkChain",
             "inputs": {
                 "structure": "node_123",
