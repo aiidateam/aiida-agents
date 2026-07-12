@@ -27,7 +27,7 @@ models.ALLOW_MODEL_REQUESTS = False
 EXPECTED_TOOLS = {
     "get_process_status",
     "list_processes",
-    "query_nodes",
+    "query",
     "get_node_inputs",
     "get_node_outputs",
     "search_structures",

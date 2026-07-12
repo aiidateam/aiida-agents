@@ -95,6 +95,17 @@ def _cap_history(messages: list[ModelMessage], max_turns: int) -> list[ModelMess
     return messages[starts[-max_turns] :] if len(starts) > max_turns else messages
 
 
+def _extract_submission_args(call: Any) -> tuple[str, dict[str, Any]]:
+    """Extract entry_point and inputs from either submit_workflow or execute_workflow_spec arguments."""
+    args = _parse_args(call.args)
+    if call.tool_name == "execute_workflow_spec":
+        spec = args.get("validated_spec", {})
+        if isinstance(spec, dict):
+            return spec.get("workflow_type", ""), spec.get("inputs", {})
+        return "", {}
+    return args.get("entry_point", ""), args.get("inputs", {})
+
+
 def _triage_submissions(
     pending: DeferredToolRequests,
 ) -> tuple[dict[str, Any], list[_Preview]]:
@@ -103,12 +114,12 @@ def _triage_submissions(
     Returns ``(auto_denials, previews)``:
 
     * ``auto_denials`` maps a tool-call id to a ``ToolDenied`` for any
-      ``submit_workflow`` whose inputs fail resolution or validation. These go
+      ``submit_workflow`` or ``execute_workflow_spec`` whose inputs fail resolution or validation. These go
       straight back to the model so it can correct its own mistakes without
       bothering the user.
     * ``previews`` lists ``(call, process_class, resolved)`` for the calls the
       user must decide on: ``process_class`` / ``resolved`` are the loaded
-      process class and resolved-inputs dict for a valid ``submit_workflow``
+      process class and resolved-inputs dict for a valid submission
       (so the caller can submit on the main thread), or ``None`` for any other
       approval-gated tool.
     """
@@ -119,18 +130,16 @@ def _triage_submissions(
     auto: dict[str, Any] = {}
     previews: list[_Preview] = []
     for call in pending.approvals:
-        if call.tool_name != "submit_workflow":
+        if call.tool_name not in ("submit_workflow", "execute_workflow_spec"):
             previews.append((call, None, None))
             continue
-        args = _parse_args(call.args)
+        entry_point, inputs = _extract_submission_args(call)
         try:
-            process_class, resolved = _prepare_submission(
-                args.get("entry_point", ""), args.get("inputs", {})
-            )
+            process_class, resolved = _prepare_submission(entry_point, inputs)
         except SubmissionInputError as exc:
             auto[call.tool_call_id] = ToolDenied(
                 f"Submission rejected before reaching the user: {exc} "
-                "Correct the inputs and call submit_workflow again."
+                f"Correct the inputs and call {call.tool_name} again."
             )
             continue
         previews.append((call, process_class, resolved))
@@ -147,8 +156,8 @@ def _print_previews(previews: list[_Preview]) -> None:  # pragma: no cover
         if resolved is None:
             print(f"   Inputs: {_parse_args(call.args)}")
             continue
-        args = _parse_args(call.args)
-        print(f"   Entry : {args.get('entry_point', '<unknown>')}")
+        entry_point, _ = _extract_submission_args(call)
+        print(f"   Entry : {entry_point or '<unknown>'}")
         print(f"   Inputs (resolved):\n{_format_resolved_inputs(resolved)}")
 
 
@@ -200,7 +209,7 @@ def _handle_deferred(
                     )
                     outcomes[call.tool_call_id] = {"skipped": call.tool_name}
                     continue
-                entry_point = _parse_args(call.args).get("entry_point", "")
+                entry_point, _ = _extract_submission_args(call)
                 try:
                     res = _run_submission(entry_point, process_class, resolved)
                 except Exception as exc:
@@ -373,6 +382,7 @@ def _print_agent(text: str) -> None:  # pragma: no cover
 
 def main() -> None:  # pragma: no cover
     """Interactive REPL for the AiiDA agent."""
+    import argparse
     from aiida import load_profile
     from aiida_agents.agents import get_agent
     from aiida_agents._settings import (
@@ -382,6 +392,19 @@ def main() -> None:  # pragma: no cover
         warn_on_unrecognized_settings,
     )
 
+    parser = argparse.ArgumentParser(
+        description="Interactive REPL for the AiiDA agent."
+    )
+    parser.add_argument(
+        "--agent",
+        "-a",
+        choices=["analysis", "execution"],
+        default="analysis",
+        help="Which agent to launch ('analysis' or 'execution')",
+    )
+    args, _ = parser.parse_known_args()
+    active_agent_name = args.agent.lower()
+
     # Logging first, so the unrecognized-settings warnings come out formatted.
     _configure_logging(LoggingSettings())
     warn_on_unrecognized_settings()
@@ -389,7 +412,7 @@ def main() -> None:  # pragma: no cover
     settings = ModelSettings()
     repl_cfg = ReplSettings()
     load_profile()
-    agent = get_agent()
+    agent = get_agent(active_agent_name)
 
     history_file = _history_file()
     history_file.parent.mkdir(parents=True, exist_ok=True)
@@ -401,8 +424,8 @@ def main() -> None:  # pragma: no cover
     )
 
     print(
-        f"AiiDA Agent [{settings.provider}:{settings.model}] - "
-        "type 'quit' to exit, '/clear' to start a new conversation, "
+        f"AiiDA {active_agent_name.capitalize()} Agent [{settings.provider}:{settings.model}] - "
+        "type 'quit' to exit, '/clear' to clear history, '/agent [name]' to switch agent, "
         "Esc then Enter (Alt+Enter) for a new line\n"
     )
 
@@ -431,6 +454,21 @@ def main() -> None:  # pragma: no cover
         if question.lower() == "/clear":
             history = []
             print("Conversation cleared.\n")
+            continue
+
+        if question.lower().startswith("/agent"):
+            parts = question.split()
+            if len(parts) >= 2 and parts[1].lower() in ("analysis", "execution"):
+                active_agent_name = parts[1].lower()
+                agent = get_agent(active_agent_name)
+                history = []
+                print(
+                    f"Switched to {active_agent_name.capitalize()} Agent. Conversation cleared.\n"
+                )
+            else:
+                print(
+                    f"Current agent: {active_agent_name.capitalize()} Agent. Usage: /agent analysis OR /agent execution\n"
+                )
             continue
 
         try:

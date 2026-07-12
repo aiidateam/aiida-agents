@@ -7,15 +7,23 @@ the database-writing tool is not grabbed as casually as a read (HITL-gated, ADR-
 
 from __future__ import annotations
 
-from aiida_agents.tools.nodes import get_node_inputs, get_node_outputs, query_nodes
+from aiida_agents.tools.nodes import get_node_inputs, get_node_outputs
 from aiida_agents.tools.processes import get_process_status, list_processes
 from aiida_agents.tools.structures import search_structures
+from aiida_agents.tools.querybuilder import query
+from aiida_agents.tools.workflows.spec_generation import generate_workflow_spec
+from aiida_agents.tools.workflows.spec_validation import validate_workflow_spec
+from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
 
 __all__ = [
     "get_node_inputs",
     "get_node_outputs",
     "get_process_status",
     "list_processes",
-    "query_nodes",
+    "query",
     "search_structures",
+    "generate_workflow_spec",
+    "validate_workflow_spec",
+    "query_analysis_agent",
+    "submit_workflow",
 ]

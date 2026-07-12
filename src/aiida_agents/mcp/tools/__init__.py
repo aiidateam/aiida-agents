@@ -16,7 +16,7 @@ from aiida_agents.tools import (
     get_node_outputs,
     get_process_status,
     list_processes,
-    query_nodes,
+    query,
     search_structures,
 )
 
@@ -39,5 +39,5 @@ def register_all(mcp: FastMCP) -> None:
     register_tool(mcp, list_processes)
     register_tool(mcp, get_node_inputs)
     register_tool(mcp, get_node_outputs)
-    register_tool(mcp, query_nodes)
+    register_tool(mcp, query)
     register_tool(mcp, search_structures)

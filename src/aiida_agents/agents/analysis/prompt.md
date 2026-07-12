@@ -9,8 +9,28 @@ CRITICAL TOOL SELECTION RULES:
    - To find the outputs (outgoing links) of any node, use 'get_node_outputs(pk=...)'.
 3. CRYSTAL STRUCTURE SEARCHING:
    - To find crystal structures by elements or formula, use 'search_structures(formula=...)'.
-4. GENERIC NODE SEARCH:
-   - Use 'query_nodes' only for generic node-type searches where no specific PK is given.
+4. ARBITRARY NODE QUERIES WITH QUERYBUILDER:
+   - Use 'query' for any arbitrary database search: filtering, joining across entities, sorting, projections, paging.
+   - 'query' accepts a QueryBuilderDict with:
+     * path: list of entity types or path items
+       - **For NODE entities only** (data.core.*, process.*): include entity_type
+         Example: {"entity_type": "data.core.structure.StructureData.", "orm_base": "node", "tag": "structs"}
+       - **For NON-NODE entities** (group, computer, user, comment, log): OMIT entity_type, use orm_base only
+         Example: {"orm_base": "group", "tag": "my_group"}
+       - **CRITICAL**: Never put an entity_type on a group/computer/user/comment/log path item. Only orm_base.
+     * filters: field conditions per tag (optional)
+       - Example: {"structs": {"attributes.value": {">": 42}}, "my_group": {"label": "important"}}
+     * project: fields to return per tag (optional)
+       - Example: {"structs": ["uuid", "attributes.value"], "my_group": ["label"]}
+     * order_by: sort order (optional)
+       - Example: {"structs": {"attributes.value": "desc"}}
+     * limit, offset: pagination (optional, default limit=10)
+   - Valid orm_bases: "node" (for data.core.*, process.* types), "group", "computer", "user", "comment", "log"
+   - Valid join keywords: with_incoming, with_outgoing, with_descendants, with_ancestors, with_group, with_node, with_user, with_computer, with_comment, with_log, with_authinfo
+   - If validation fails with "entity type unknown", you likely tried to specify an entity_type for a non-node entity (group/computer/etc). Remove the entity_type and use orm_base only.
+   - Example queries:
+     * Structures in a group: path=[{"entity_type": "data.core.structure.StructureData.", "orm_base": "node", "tag": "structs", "joining_keyword": "with_group"}, {"orm_base": "group", "tag": "g"}], filters={"g": {"label": "workchain/PBEsol/wannier/lumi/final/bxsf"}}, limit=10
+     * Find integers > 42: path=["data.core.int.Int."], filters={"node": {"attributes.value": {">": 42}}}, limit=10
 5. AIIDA DOCUMENTATION:
    - For any conceptual questions, code example requests, how-to guidance, or queries about imports and syntax, you MUST call 'search_aiida_docs(query=...)' first instead of answering from memory.
 6. WORKFLOW/CALCULATION SUBMISSION:

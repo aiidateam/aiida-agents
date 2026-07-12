@@ -28,7 +28,7 @@ from aiida_agents.tools import (
     get_node_outputs,
     get_process_status,
     list_processes,
-    query_nodes,
+    query,
     search_structures,
 )
 from aiida_agents.tools.submit import submit_workflow
@@ -43,7 +43,7 @@ from aiida_agents.rag import search_aiida_docs
 _READ_TOOLS: list[Any] = [
     get_process_status,
     list_processes,
-    query_nodes,
+    query,
     get_node_inputs,
     get_node_outputs,
     search_structures,

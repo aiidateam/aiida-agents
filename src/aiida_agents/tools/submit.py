@@ -59,6 +59,23 @@ _WRAPPABLE_TYPES: tuple[type, ...] = tuple(
     dict.fromkeys(node for nodes in _COMPATIBLE_NODES.values() for node in nodes)
 )
 
+_ENTRY_POINT_ALIASES: dict[str, str] = {
+    "aiida.workflows:PwRelaxWorkChain": "quantumespresso.pw.relax",
+    "PwRelaxWorkChain": "quantumespresso.pw.relax",
+    "aiida.workflows:PwBandsWorkChain": "quantumespresso.pw.bands",
+    "PwBandsWorkChain": "quantumespresso.pw.bands",
+    "aiida.workflows:PwDosWorkChain": "quantumespresso.pdos",
+    "PwDosWorkChain": "quantumespresso.pdos",
+    "aiida.workflows:PwCalculation": "quantumespresso.pw",
+    "PwCalculation": "quantumespresso.pw",
+    "aiida.workflows:PhRelaxWorkChain": "quantumespresso.ph",
+    "PhRelaxWorkChain": "quantumespresso.ph",
+    "aiida.workflows:VaspWorkChain": "vasp.vasp",
+    "VaspWorkChain": "vasp.vasp",
+    "aiida.workflows:VaspRelaxWorkChain": "vasp.relax",
+    "VaspRelaxWorkChain": "vasp.relax",
+}
+
 
 def _load_process_class(entry_point: str) -> type[Process]:
     """Load an AiiDA process class from its entry point string.
@@ -68,12 +85,15 @@ def _load_process_class(entry_point: str) -> type[Process]:
     point that fails to import (a broken plugin) raises its own error rather
     than being masked as "not found".
     """
+    ep = _ENTRY_POINT_ALIASES.get(entry_point, entry_point)
     for group in ("aiida.calculations", "aiida.workflows"):
         try:
-            return cast("type[Process]", load_entry_point(group, entry_point))
+            return cast("type[Process]", load_entry_point(group, ep))
         except MissingEntryPointError:
             continue
     msg = f"Entry point not found: {entry_point!r}"
+    if ep != entry_point:
+        msg += f" (resolved alias: {ep!r})"
     raise SubmissionInputError(msg)
 
 
@@ -83,25 +103,18 @@ def _resolve_node_reference(ref: dict[str, Any], port_name: str) -> orm.Node:
     Supported reference forms:
         {"pk": 42}                  — load by PK
         {"uuid": "abc-..."}         — load by UUID
-        {"label": "bash@localhost"} — load Code by label (Code ports only)
-
-    Args:
-        ref: The reference dict from the user.
-        port_name: Port name, used only for error messages.
-
-    Returns:
-        The loaded AiiDA node.
+        {"label": "name@computer"}  — load Code by label
 
     Raises:
-        SubmissionInputError: If the reference form is unrecognised or the node
-            is not found.
+        SubmissionInputError: If the reference format is unrecognised, malformed,
+            or the target node does not exist.
     """
     if "pk" in ref:
         try:
             return orm.load_node(ref["pk"])
         except Exception as exc:
             raise SubmissionInputError(
-                f"No node found with pk={ref['pk']!r} for input {port_name!r}"
+                f"No node found with pk={ref['pk']} for input {port_name!r}"
             ) from exc
 
     if "uuid" in ref:
@@ -117,13 +130,12 @@ def _resolve_node_reference(ref: dict[str, Any], port_name: str) -> orm.Node:
             return orm.load_code(ref["label"])
         except Exception as exc:
             raise SubmissionInputError(
-                f"No Code found with label={ref['label']!r} for input {port_name!r}. "
-                f"Use the format 'name@computer', e.g. 'bash@localhost'."
+                f"No Code found with label={ref['label']!r} for input {port_name!r}"
             ) from exc
 
     raise SubmissionInputError(
-        f"Unrecognised node reference for input {port_name!r}: {ref!r}. "
-        f'Use one of: {{"pk": N}}, {{"uuid": "..."}}, {{"label": "name@computer"}}.'
+        f"Input {port_name!r} has invalid reference dict {ref!r}: "
+        f"must contain 'pk', 'uuid', or 'label'."
     )
 
 
@@ -141,6 +153,118 @@ def _is_reference_type(expected_types: tuple[type, ...]) -> bool:
     return bool(expected_types) and not any(
         isinstance(t, type) and issubclass(t, _WRAPPABLE_TYPES) for t in expected_types
     )
+
+
+def _resolve_schema_inputs(
+    entry_point: str, inputs: dict[str, Any], process_class: type[Process]
+) -> dict[str, Any] | None:
+    """Normalize high-level natural language schema inputs into nested AiiDA process inputs."""
+    ep = _ENTRY_POINT_ALIASES.get(entry_point, entry_point)
+    if ep != "quantumespresso.pw.relax" or "base_relax" in inputs:
+        return None
+
+    resolved: dict[str, Any] = {}
+
+    # 1. Resolve structure (required top-level port)
+    if "structure" in inputs:
+        val = inputs["structure"]
+        if isinstance(val, orm.Node):
+            resolved["structure"] = val
+        elif isinstance(val, dict) and {"pk", "uuid", "label"} & val.keys():
+            resolved["structure"] = _resolve_node_reference(val, "structure")
+        else:
+            resolved["structure"] = val
+
+    structure = resolved.get("structure")
+
+    base_relax: dict[str, Any] = {}
+    pw: dict[str, Any] = {}
+
+    # 2. Resolve code
+    code_val = (
+        inputs.get("pw_code_label") or inputs.get("code_label") or inputs.get("code")
+    )
+    if code_val:
+        if isinstance(code_val, orm.Code):
+            pw["code"] = code_val
+        elif isinstance(code_val, str):
+            try:
+                pw["code"] = orm.load_code(code_val)
+            except Exception as exc:
+                raise SubmissionInputError(
+                    f"Code {code_val!r} not found or could not be loaded: {exc}. "
+                    f"Please verify available codes using 'verdi code list'."
+                ) from exc
+        elif isinstance(code_val, dict) and {"pk", "uuid", "label"} & code_val.keys():
+            pw["code"] = _resolve_node_reference(code_val, "pw_code_label")
+
+    # 3. Resolve kpoints_distance
+    if "kpoints_distance" in inputs:
+        base_relax["kpoints_distance"] = orm.Float(float(inputs["kpoints_distance"]))
+
+    # 4. Resolve parameters
+    if "parameters" in inputs:
+        params = inputs["parameters"]
+        if isinstance(params, orm.Dict):
+            pw["parameters"] = params
+        elif isinstance(params, dict):
+            upper_params: dict[str, Any] = {}
+            for k, v in params.items():
+                upper_params[k.upper()] = v
+            if "CONTROL" not in upper_params:
+                upper_params["CONTROL"] = {}
+            if (
+                isinstance(upper_params["CONTROL"], dict)
+                and "calculation" not in upper_params["CONTROL"]
+            ):
+                upper_params["CONTROL"]["calculation"] = "vc-relax"
+            pw["parameters"] = orm.Dict(dict=upper_params)
+
+    # 5. Resolve pseudo_family / pseudos
+    pseudo_val = inputs.get("pseudo_family") or inputs.get("pseudos")
+    if isinstance(pseudo_val, dict):
+        pw["pseudos"] = pseudo_val
+    elif isinstance(pseudo_val, str) and isinstance(structure, orm.StructureData):
+        try:
+            from aiida.orm import QueryBuilder, Group
+
+            groups = (
+                QueryBuilder()
+                .append(Group, filters={"label": pseudo_val})
+                .all(flat=True)
+            )
+            if not groups:
+                raise ValueError(
+                    f"Pseudopotential family {pseudo_val!r} not found in database."
+                )
+            group = groups[0]
+            if hasattr(group, "get_pseudos"):
+                pw["pseudos"] = group.get_pseudos(structure=structure)
+        except Exception as exc:
+            raise SubmissionInputError(
+                f"Could not resolve pseudopotential family {pseudo_val!r} for structure {structure.get_formula() if hasattr(structure, 'get_formula') else structure}: {exc}. "
+                f"Please ensure the pseudo family is installed via 'aiida-pseudo install'."
+            ) from exc
+
+    if pw:
+        base_relax["pw"] = pw
+    if base_relax:
+        resolved["base_relax"] = base_relax
+
+    for k, v in inputs.items():
+        if k not in (
+            "structure",
+            "pw_code_label",
+            "code_label",
+            "code",
+            "kpoints_distance",
+            "parameters",
+            "pseudo_family",
+            "pseudos",
+        ):
+            resolved[k] = v
+
+    return resolved
 
 
 def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
@@ -186,6 +310,10 @@ def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
             reference-only port receives a bare primitive.
     """
     process_class = _load_process_class(entry_point)
+    schema_resolved = _resolve_schema_inputs(entry_point, inputs, process_class)
+    if schema_resolved is not None:
+        return schema_resolved
+
     spec = process_class.spec()
     resolved: dict[str, Any] = {}
 
