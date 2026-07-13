@@ -326,3 +326,32 @@ class TestSubmitWorkflow:
             submit_workflow("core.arithmetic.add", {})
 
         assert called == []
+
+
+class TestDeeplyNestedNamespaceResolution:
+    """Verify recursive port/namespace resolution across 5+ levels of nesting."""
+
+    def test_five_level_nested_namespace(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Ensure _resolve_inputs and _format_resolved_inputs handle deeply nested namespaces smoothly."""
+        from aiida.engine.processes.ports import InputPort, PortNamespace
+        from aiida_agents.tools.submit import _resolve_namespace_inputs
+
+        # Construct 5 levels of nested namespaces: l1 -> l2 -> l3 -> l4 -> l5 -> cutoff
+        ns1 = PortNamespace("l1")
+        ns2 = ns1.create_port_namespace("l2")
+        ns3 = ns2.create_port_namespace("l3")
+        ns4 = ns3.create_port_namespace("l4")
+        ns5 = ns4.create_port_namespace("l5")
+        ns5["cutoff"] = InputPort("cutoff", valid_type=orm.Float)
+
+        raw_inputs = {"l1": {"l2": {"l3": {"l4": {"l5": {"cutoff": 65.0}}}}}}
+
+        resolved = _resolve_namespace_inputs(raw_inputs["l1"], ns1)
+        # Check deep nesting structure
+        val_node = resolved["l2"]["l3"]["l4"]["l5"]["cutoff"]
+        assert isinstance(val_node, orm.Float)
+        assert val_node.value == 65.0
+
+        # Check hierarchical formatting displays deep path clearly
+        formatted = _format_resolved_inputs({"l1": resolved})
+        assert "l1.l2.l3.l4.l5.cutoff: Float(value=65.0)  [new]" in formatted

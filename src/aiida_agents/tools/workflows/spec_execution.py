@@ -10,11 +10,13 @@ from __future__ import annotations
 import logging
 import typing as t
 
+from aiida.common.exceptions import MissingEntryPointError
+from aiida.plugins.entry_point import load_entry_point
 from pydantic import Field
 
 from aiida_agents.tools._types import SubmitResult
 from aiida_agents.tools.submit import submit_workflow
-from aiida_agents.tools.workflows.schemas import KNOWN_WORKFLOWS, WorkflowSpec
+from aiida_agents.tools.workflows.schemas import WorkflowSpec
 
 logger = logging.getLogger(__name__)
 
@@ -25,14 +27,14 @@ def execute_workflow_spec(
     validated_spec: t.Annotated[
         WorkflowSpec,
         Field(
-            description="The exact WorkflowSpec produced by generate_workflow_spec and verified by validate_workflow_spec."
+            description="The exact WorkflowSpec dictionary to execute, containing 'workflow_type' and 'inputs'."
         ),
     ],
 ) -> SubmitResult:
     """Execute a validated workflow specification by submitting it to the AiiDA engine.
 
-    This tool takes a validated WorkflowSpec containing ``workflow_type`` and
-    ``inputs``, verifies the structure, and safely delegates to ``submit_workflow``.
+    This tool takes a WorkflowSpec containing ``workflow_type`` and ``inputs``,
+    verifies the structure and entry point, and safely delegates to ``submit_workflow``.
     Because this triggers actual calculation execution and database creation, this
     tool requires Human-In-The-Loop confirmation (``requires_approval=True``).
 
@@ -61,8 +63,20 @@ def execute_workflow_spec(
         msg = "validated_spec is missing required 'inputs' dictionary."
         raise ValueError(msg)
 
-    if workflow_type not in KNOWN_WORKFLOWS:
-        msg = f"Workflow {workflow_type!r} is not known. Must be validated first."
+    found = False
+    for group in ("aiida.workflows", "aiida.calculations"):
+        try:
+            load_entry_point(group, workflow_type)
+            found = True
+            break
+        except MissingEntryPointError:
+            continue
+        except Exception as exc:
+            msg = f"Workflow {workflow_type!r} failed to load: {exc}"
+            raise ValueError(msg) from exc
+
+    if not found:
+        msg = f"Workflow {workflow_type!r} is not a known AiiDA entry point."
         raise ValueError(msg)
 
     # Delegate to our secure engine submission function
