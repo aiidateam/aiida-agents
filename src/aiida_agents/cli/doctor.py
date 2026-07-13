@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import rich_click as click
+from typing_extensions import assert_never
 
 from aiida_agents._settings import ModelSettings
 from aiida_agents.cli._guards import _needs_recognized_settings
@@ -51,7 +52,7 @@ def _run_diagnostics(
     check uses the no-generation reachability probe, so ``doctor`` never warms
     the model.
     """
-    from aiida_agents.cli.agent import _probe_reachable
+    from aiida_agents.cli.agent import _model_availability, _probe_reachable
 
     rows: list[_DiagnosticRow] = []
 
@@ -66,9 +67,10 @@ def _run_diagnostics(
     model_label = f"Model reachable ({settings.provider}:{settings.model})"
     try:
         reach = _probe_reachable(settings)
-        if reach.model_ok:
+        availability = _model_availability(reach, settings.provider)
+        if availability == "available":
             rows.append(_DiagnosticRow(model_label, True, reach.endpoint))
-        elif settings.provider == "ollama":
+        elif availability == "not_pulled":
             rows.append(
                 _DiagnosticRow(
                     model_label,
@@ -76,12 +78,14 @@ def _run_diagnostics(
                     f"model not pulled (ollama pull {settings.model})",
                 )
             )
-        else:
+        elif availability == "unlisted":
             rows.append(
                 _DiagnosticRow(
                     model_label, True, "reachable; model not listed (may still work)"
                 )
             )
+        else:
+            assert_never(availability)  # pragma: no cover
     except Exception as exc:
         rows.append(_DiagnosticRow(model_label, False, _short_reason(exc)))
 

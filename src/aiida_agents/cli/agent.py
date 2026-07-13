@@ -10,15 +10,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, NamedTuple
+from typing import Any, Literal, NamedTuple, TypeAlias
 
 import rich_click as click
 from pydantic import ValidationError
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.messages import ModelMessage
+from typing_extensions import assert_never
 
-from aiida_agents._settings import ModelSettings, _format_validation_error
+from aiida_agents._settings import ModelSettings, _Provider, _format_validation_error
 from aiida_agents.cli.ollama import _ensure_ollama_model, _ollama_pull
 from aiida_agents.cli.output import _trace_tool_calls
 
@@ -181,6 +182,26 @@ def _probe_reachable(settings: ModelSettings) -> _Reachability:
     )
 
 
+# How a probed model's availability maps to a single policy decision, shared by
+# ``check`` and ``doctor`` so the "is it usable?" rule lives in one place.
+_ModelAvailability: TypeAlias = Literal["available", "not_pulled", "unlisted"]
+
+
+def _model_availability(
+    reach: _Reachability, provider: _Provider
+) -> _ModelAvailability:
+    """Classify whether the configured model is usable at the probed endpoint.
+
+    Ollama's ``/models`` listing is authoritative, so a model absent from it is
+    genuinely not pulled; a cloud (or openai-compatible) endpoint's listing may be
+    partial, so an absent model is only "unlisted" and may still work. Callers
+    render this as they need (``check`` echoes and exits; ``doctor`` builds a row).
+    """
+    if reach.model_ok:
+        return "available"
+    return "not_pulled" if provider == "ollama" else "unlisted"
+
+
 def _check_reachable(settings: ModelSettings) -> None:
     """Print ``check``'s reachability report; exit non-zero on a real problem.
 
@@ -189,21 +210,25 @@ def _check_reachable(settings: ModelSettings) -> None:
     authoritative, so it means "not pulled"), but only a warning for cloud or
     openai-compatible endpoints, whose ``/models`` listing may be partial.
     """
-    endpoint, n_models, model_ok = _probe_reachable(settings)
-    click.echo(f"Endpoint: {endpoint}")
-    click.echo(f"{_OK} reachable ({n_models} models advertised)")
-    if model_ok:
+    reach = _probe_reachable(settings)
+    click.echo(f"Endpoint: {reach.endpoint}")
+    click.echo(f"{_OK} reachable ({reach.n_models} models advertised)")
+    availability = _model_availability(reach, settings.provider)
+    if availability == "available":
         click.echo(f"{_OK} model '{settings.model}' is available")
         return
-    if settings.provider == "ollama":
+    if availability == "not_pulled":
         click.echo(f"{_FAIL} model '{settings.model}' is not pulled.", err=True)
         click.echo(f"  Pull it with: ollama pull {settings.model}", err=True)
         raise SystemExit(1)
-    click.echo(
-        f"{_WARN} model '{settings.model}' is not in this endpoint's list "
-        "(it may be partial; the model may still work).",
-        err=True,
-    )
+    if availability == "unlisted":
+        click.echo(
+            f"{_WARN} model '{settings.model}' is not in this endpoint's list "
+            "(it may be partial; the model may still work).",
+            err=True,
+        )
+        return
+    assert_never(availability)  # pragma: no cover
 
 
 def _diagnose_probe_failure(settings: ModelSettings, exc: Exception) -> None:
