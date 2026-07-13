@@ -53,10 +53,9 @@ def _print_reply(text: str, *, raw: bool = False) -> None:
 
 def _tool_parts(messages: list[ModelMessage]) -> Iterator[ToolPart]:
     """All tool call/return parts of ``messages``, in message order."""
-    for msg in messages:
-        for part in msg.parts:
-            if isinstance(part, ToolPart):
-                yield part
+    return (
+        part for msg in messages for part in msg.parts if isinstance(part, ToolPart)
+    )
 
 
 def _render_part(part: ToolPart, console: Console) -> None:

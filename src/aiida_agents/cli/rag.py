@@ -10,6 +10,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import sys
+from typing import TYPE_CHECKING
 
 import rich_click as click
 from rich.panel import Panel
@@ -26,6 +27,9 @@ from rich.text import Text
 from aiida_agents.cli._guards import _needs_recognized_settings
 from aiida_agents.cli.ollama import _prompt_pull_ollama_model
 from aiida_agents.cli.output import console
+
+if TYPE_CHECKING:
+    from aiida_agents.rag import IndexOutcome
 
 
 def _module_missing(name: str) -> bool:
@@ -83,24 +87,16 @@ def rag() -> None:
     """Manage the AiiDA documentation RAG index."""
 
 
-@rag.command("build")
-@click.option("--force", is_flag=True, help="Rebuild even if an index already exists.")
-@_needs_recognized_settings
-def rag_build(force: bool) -> None:  # pragma: no cover
-    """Build (or rebuild) the AiiDA docs RAG index."""
-    from aiida_agents._settings import RagSettings
-    from aiida_agents.rag import IndexOutcome, index_docs
+def _build_with_progress(force: bool) -> IndexOutcome:  # pragma: no cover
+    """Run ``index_docs`` behind a live progress bar, turning an operational
+    build failure into a clean CLI error.
 
-    # Provision what the build needs before starting: the docs toolchain and,
-    # for the default local embedder, the Ollama embedding model.
-    _ensure_docs_toolchain()
-    rag_cfg = RagSettings()
-    if rag_cfg.embed_backend == "ollama":
-        _prompt_pull_ollama_model(rag_cfg.embed_model)
+    The bar auto-refreshes on its own thread, so it animates while the (blocking)
+    build runs: indeterminate during the clone + sphinx phase, then a real chunk
+    count + ETA once embedding starts (via ``index_docs``'s callback).
+    """
+    from aiida_agents.rag import index_docs
 
-    # The bar auto-refreshes on its own thread, so it animates while the
-    # (blocking) build runs: indeterminate during the clone + sphinx phase, then
-    # a real chunk count + ETA once embedding starts (via index_docs's callback).
     try:
         with Progress(
             SpinnerColumn(),
@@ -137,7 +133,7 @@ def rag_build(force: bool) -> None:  # pragma: no cover
                     total=total,
                 )
 
-            outcome = index_docs(force=force, progress=_report)
+            return index_docs(force=force, progress=_report)
     except (RuntimeError, OSError) as exc:
         # Any operational failure during the build becomes a clean CLI error
         # rather than a traceback: a failed sphinx build (RuntimeError), or the
@@ -145,14 +141,36 @@ def rag_build(force: bool) -> None:  # pragma: no cover
         # HTTPError/URLError, both OSError subclasses).
         raise click.ClickException(f"RAG build failed: {exc}") from exc
 
-    # Report what actually happened, so re-running on an up-to-date index reads
-    # as a deliberate no-op rather than a fresh build.
+
+def _report_build_outcome(outcome: IndexOutcome) -> None:
+    """Print what the build actually did, so re-running on an up-to-date index
+    reads as a deliberate no-op rather than a fresh build.
+    """
+    from aiida_agents.rag import IndexOutcome
+
     if outcome is IndexOutcome.ALREADY_PRESENT:
         click.echo("✓ RAG index already built (pass --force to rebuild).")
     elif outcome is IndexOutcome.EMPTY_CORPUS:
         click.echo("⚠ No documentation chunks were produced; index left unchanged.")
     else:
         click.echo("✓ RAG index ready.")
+
+
+@rag.command("build")
+@click.option("--force", is_flag=True, help="Rebuild even if an index already exists.")
+@_needs_recognized_settings
+def rag_build(force: bool) -> None:  # pragma: no cover
+    """Build (or rebuild) the AiiDA docs RAG index."""
+    from aiida_agents._settings import RagSettings
+
+    # Provision what the build needs before starting: the docs toolchain and,
+    # for the default local embedder, the Ollama embedding model.
+    _ensure_docs_toolchain()
+    rag_cfg = RagSettings()
+    if rag_cfg.embed_backend == "ollama":
+        _prompt_pull_ollama_model(rag_cfg.embed_model)
+
+    _report_build_outcome(_build_with_progress(force))
 
 
 @rag.command("status")
@@ -199,12 +217,19 @@ def rag_status() -> None:
     show_default=True,
     help="Maximum number of matches to show.",
 )
+@click.option(
+    "--refs-only",
+    is_flag=True,
+    help="List only each match's source and section, not the full text.",
+)
 @_needs_recognized_settings
-def rag_search(query: str, limit: int) -> None:
+def rag_search(query: str, limit: int, refs_only: bool) -> None:
     """Search the docs index directly for QUERY and print the top matches.
 
     A read-only shortcut to the same retrieval the agent uses, handy for
-    checking what the index returns without starting a chat.
+    checking what the index returns without starting a chat. ``--refs-only``
+    prints just the ``source § section`` of each match (one per line), for
+    scanning or piping.
     """
     from aiida_agents.rag import query_docs
     from aiida_agents.rag.retriever import docs_index_available
@@ -221,6 +246,9 @@ def rag_search(query: str, limit: int) -> None:
         source = result.get("source", "unknown")
         section = result.get("section", "")
         title = f"{source}  §  {section}" if section else source
+        if refs_only:
+            click.echo(title)  # plain one-liner, so the list stays pipeable
+            continue
         # Text() renders the body literally: chunks contain bracketed headers
         # that rich's markup parser would otherwise swallow as style tags.
         console.print(
@@ -229,9 +257,14 @@ def rag_search(query: str, limit: int) -> None:
 
 
 @rag.command("clear")
-@click.option("--yes", is_flag=True, help="Delete without the confirmation prompt.")
+@click.option(
+    "-f",
+    "--force",
+    is_flag=True,
+    help="Delete without the confirmation prompt.",
+)
 @_needs_recognized_settings
-def rag_clear(yes: bool) -> None:
+def rag_clear(force: bool) -> None:
     """Delete the RAG store (vector index and cached text corpus)."""
     from aiida_agents._settings import RagSettings
 
@@ -239,7 +272,9 @@ def rag_clear(yes: bool) -> None:
     if not path.exists():
         click.echo("No RAG store to clear.")
         return
-    if not yes and not click.confirm(f"Delete the RAG store at {path}?", default=False):
+    if not force and not click.confirm(
+        f"Delete the RAG store at {path}?", default=False
+    ):
         click.echo("Cancelled.")
         return
     shutil.rmtree(path)

@@ -133,6 +133,25 @@ def test_rag_search_renders_results(
     assert needle in result.output
 
 
+def test_rag_search_refs_only_lists_sources(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`--refs-only` prints each match's source/section, not the body text."""
+    monkeypatch.setattr("aiida_agents.cli._guards.find_unrecognized_settings", list)
+    monkeypatch.setattr("aiida_agents.rag.retriever.docs_index_available", lambda: True)
+    monkeypatch.setattr(
+        "aiida_agents.rag.query_docs",
+        lambda query, limit: [
+            {"source": "howto/query", "section": "Shortcuts", "text": "use verdi run"}
+        ],
+    )
+
+    result = CliRunner().invoke(cli, ["rag", "search", "qb", "--refs-only"])
+
+    assert result.exit_code == 0
+    assert "howto/query" in result.output
+    assert "Shortcuts" in result.output
+    assert "verdi run" not in result.output  # the body is omitted
+
+
 def test_rag_status_reports_unbuilt_index(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
@@ -185,7 +204,9 @@ def test_rag_clear_no_store_is_clean(
 @pytest.mark.parametrize(
     ("args", "stdin", "marker", "removed"),
     [
-        pytest.param(["rag", "clear", "--yes"], None, "Removed", True, id="yes-flag"),
+        pytest.param(
+            ["rag", "clear", "--force"], None, "Removed", True, id="force-flag"
+        ),
         pytest.param(["rag", "clear"], "y\n", "Removed", True, id="confirm-yes"),
         pytest.param(["rag", "clear"], "n\n", "Cancelled", False, id="confirm-no"),
     ],
@@ -198,7 +219,7 @@ def test_rag_clear_honours_confirmation(
     marker: str,
     removed: bool,
 ) -> None:
-    """`--yes` deletes without prompting; an interactive `y` deletes, `n` keeps."""
+    """`--force` deletes without prompting; an interactive `y` deletes, `n` keeps."""
     monkeypatch.setattr("aiida_agents.cli._guards.find_unrecognized_settings", list)
     store = tmp_path / "vdb"
     monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(store))
