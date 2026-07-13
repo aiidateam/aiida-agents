@@ -61,14 +61,9 @@ def execute_querybuilder(spec: QueryBuilderDict) -> dict[str, t.Any]:
 
         # Fetch preview
         for row in qb.iterall():
-            # Row is typically a tuple or list; convert to dict if we have project info
+            # Row is typically a tuple or list; convert to dict for consistency
             if isinstance(row, (tuple, list)):
-                # If spec.project is set, zip with field names; otherwise just pass as-is
-                if spec.project:
-                    # This is a simplified approach; real logic would be more complex
-                    preview_rows.append({"values": row})
-                else:
-                    preview_rows.append({"values": row})
+                preview_rows.append({"values": row})
             else:
                 preview_rows.append({"value": row})
     except Exception as e:

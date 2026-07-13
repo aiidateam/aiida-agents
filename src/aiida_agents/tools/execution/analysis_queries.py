@@ -11,14 +11,13 @@ import logging
 import typing as t
 
 from pydantic import Field
-from typing_extensions import TypedDict
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["query_analysis_agent"]
 
 
-class PastWorkflowSummary(TypedDict, total=False):
+class PastWorkflowSummary(t.TypedDict, total=False):
     """Summary of past successful workflows of a certain type."""
 
     count: int
@@ -43,7 +42,7 @@ class PastWorkflowSummary(TypedDict, total=False):
     """Sample structure formulas"""
 
 
-class AvailableCodeInfo(TypedDict, total=False):
+class AvailableCodeInfo(t.TypedDict, total=False):
     """Information about available computation codes."""
 
     codes: list[dict[str, t.Any]]
@@ -57,15 +56,26 @@ class AvailableCodeInfo(TypedDict, total=False):
 
 
 def query_analysis_agent(
-    query_type: str = Field(
-        description=(
-            "What to ask Analysis Agent. Options: "
-            "'past_successful_workflows', 'available_codes', 'failed_attempts', 'available_pseudos'"
-        )
-    ),
-    filters: dict[str, t.Any] = Field(
-        description="Context-specific filters (e.g. structure_type, composition, workflow_type)"
-    ),
+    query_type: t.Annotated[
+        str,
+        Field(
+            description=(
+                "What to ask Analysis Agent. Options: "
+                "'past_successful_workflows', 'available_codes', "
+                "'failed_attempts', 'available_pseudos'"
+            )
+        ),
+    ],
+    filters: t.Annotated[
+        dict[str, t.Any],
+        Field(
+            description=(
+                "Context-specific filters (e.g. structure_type, composition, workflow_type). "
+                "Note: 'structure_type' is not a database-level filter — AiiDA stores no "
+                "per-node material-class attribute. It is echoed back as metadata only."
+            )
+        ),
+    ],
 ) -> dict[str, t.Any]:
     """Query the Analysis Agent for context before generating a workflow spec.
 
@@ -74,24 +84,17 @@ def query_analysis_agent(
     query_analysis_agent() and gets back structured context.
 
     The Execution Agent uses this context to:
-    1. Learn what parameters worked for similar structures in the past
-    2. Check what codes are available
-    3. Understand why similar setups failed
-    4. Make better parameter choices
+    1. Learn what parameters worked for similar structures in the past.
+    2. Check what codes are available.
+    3. Understand why similar setups failed.
+    4. Make better parameter choices.
 
     Args:
-        query_type: The kind of information to retrieve
-        filters: Context that narrows the query (workflow_type, structure_type, etc.)
+        query_type: The kind of information to retrieve.
+        filters: Context that narrows the query (workflow_type, structure_type, etc.).
 
     Returns:
-        dict with context-specific data (past runs, codes, failures, etc.)
-
-    Example usage in Execution Agent prompt:
-        "Before generating a PwRelaxWorkChain spec for a metallic CoV structure,
-        call query_analysis_agent(
-            query_type='past_successful_workflows',
-            filters={'workflow_type': 'PwRelaxWorkChain', 'structure_type': 'metallic'}
-        ) to see what parameters worked before."
+        dict with context-specific data (past runs, codes, failures, etc.).
     """
     if not isinstance(filters, dict):
         filters = {}
@@ -102,24 +105,24 @@ def query_analysis_agent(
         filters,
     )
 
-    # ========================================================================
-    # Real AiiDA ORM Queries (No Mock Data)
-    # ========================================================================
     if query_type == "past_successful_workflows":
         return _query_past_workflows(filters)
 
-    elif query_type == "available_codes":
+    if query_type == "available_codes":
         return _query_available_codes(filters)
 
-    elif query_type == "failed_attempts":
+    if query_type == "failed_attempts":
         return _query_failed_attempts(filters)
 
-    elif query_type in ("available_pseudos", "installed_pseudos", "pseudo_families"):
+    if query_type in ("available_pseudos", "installed_pseudos", "pseudo_families"):
         return _query_available_pseudos(filters)
 
-    else:
-        msg = f"Unknown query_type: {query_type!r}. Try 'past_successful_workflows', 'available_codes', 'failed_attempts', or 'available_pseudos'"
-        raise ValueError(msg)
+    msg = (
+        f"Unknown query_type: {query_type!r}. "
+        "Try 'past_successful_workflows', 'available_codes', "
+        "'failed_attempts', or 'available_pseudos'"
+    )
+    raise ValueError(msg)
 
 
 # ============================================================================
@@ -128,7 +131,13 @@ def query_analysis_agent(
 
 
 def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
-    """Query real AiiDA database for completed workflow statistics."""
+    """Query real AiiDA database for completed workflow statistics.
+
+    Note: ``structure_type`` in *filters* is not applied as a database predicate.
+    AiiDA stores no per-node material-class attribute, so all finished workflows
+    of the requested type are included regardless of ``structure_type``.
+    The value is echoed back in the return dict as metadata.
+    """
     from aiida import orm
     from statistics import median
 
@@ -159,6 +168,10 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
             "query_type": "past_successful_workflows",
             "workflow_type": workflow_type,
             "structure_type": structure_type,
+            "structure_type_filter_note": (
+                "structure_type is not filterable at the database level; "
+                "all finished workflows of this type are included."
+            ),
             "count": 0,
             "success_rate": 0.0,
             "median_ecutwfc": None,
@@ -184,8 +197,8 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
                     formula = node.inputs.structure.get_formula()
                     if formula not in example_structs:
                         example_structs.append(formula)
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("Could not read formula for node %s: %s", row[1], exc)
             if "parameters" in node.inputs:
                 params_dict = node.inputs.parameters.get_dict()
                 if "SYSTEM" in params_dict and "ecutwfc" in params_dict["SYSTEM"]:
@@ -208,13 +221,17 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
                 failure_modes.append(f"Exit status {row[0]}: {fnode.exit_message}")
             else:
                 failure_modes.append(f"Exit status {row[0]}")
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.debug("Could not load failed node %s: %s", row[1], exc)
 
     return {
         "query_type": "past_successful_workflows",
         "workflow_type": workflow_type,
         "structure_type": structure_type,
+        "structure_type_filter_note": (
+            "structure_type is not filterable at the database level; "
+            "all finished workflows of this type are included."
+        ),
         "count": len(successful_runs),
         "success_rate": success_rate,
         "median_ecutwfc": med_ecutwfc,
@@ -333,7 +350,8 @@ def _query_failed_attempts(filters: dict[str, t.Any]) -> dict[str, t.Any]:
                     structure_pk
                 ):
                     continue
-            except Exception:
+            except Exception as exc:
+                logger.debug("Could not load node %s for structure filter: %s", pk, exc)
                 continue
         attempts.append(
             {
@@ -385,13 +403,14 @@ def _query_available_pseudos(filters: dict[str, t.Any]) -> dict[str, t.Any]:
 
     try:
         upf_count = orm.QueryBuilder().append(orm.UpfData).count()
-    except Exception:
+    except Exception as exc:
+        logger.debug("Could not count UpfData nodes: %s", exc)
         upf_count = 0
 
     if not pseudo_families and upf_count == 0:
         note = (
-            "No pseudopotential families or UpfData nodes are currently installed in the active AiiDA profile. "
-            "To install the recommended SSSP family, run:\n"
+            "No pseudopotential families or UpfData nodes are currently installed "
+            "in the active AiiDA profile. To install the recommended SSSP family, run:\n"
             "  aiida-pseudo install sssp -v 1.3 -x PBE -p efficiency"
         )
     elif not pseudo_families:

@@ -25,6 +25,10 @@ class TestAnalysisQueries:
         assert "common_parameters" in res
         assert "common_failure_modes" in res
         assert "example_structures" in res
+        assert "structure_type_filter_note" in res, (
+            "structure_type_filter_note must be present so the model knows "
+            "structure_type is not a DB-level filter"
+        )
 
     def test_query_available_codes_returns_list(self, arithmetic_add_code: Any) -> None:
         """Querying available codes returns a list of codes with expected structure.
@@ -74,6 +78,7 @@ class TestAnalysisQueriesEdgeCases:
         assert res["count"] == 0
         assert "note" in res
         assert "Using defaults" in res["note"]
+        assert "structure_type_filter_note" in res
 
     def test_query_available_codes_empty_results(self) -> None:
         """Querying an unknown code should return an empty codes list."""

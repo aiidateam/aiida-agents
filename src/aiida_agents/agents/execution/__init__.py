@@ -1,10 +1,4 @@
-"""Execution Agent — workflow generation, validation, and submission.
-
-FIXED VERSION:
-- All tools properly imported and wrapped
-- Uses existing submit_workflow from aiida_agents.tools.submit
-- Complete tool list with query_analysis_agent included
-"""
+"""Execution Agent — workflow generation, validation, and submission."""
 
 from __future__ import annotations
 
@@ -19,25 +13,18 @@ from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
 
-# Import all Execution Agent tools
 from aiida_agents.tools.workflows.retrieval import get_workflow_templates
 from aiida_agents.tools.workflows.spec_execution import execute_workflow_spec
 from aiida_agents.tools.workflows.spec_generation import generate_workflow_spec
 from aiida_agents.tools.workflows.spec_validation import validate_workflow_spec
 from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
 
-# Reuse existing submit tool from Analysis Agent
-from aiida_agents.tools.submit import submit_workflow
-
-logger_setup = True  # Placeholder for logging setup if needed
-
 # Read-only tools: wrapped by RetryOnToolError so tool failures become ModelRetry
-# All four are read-only or query-only, not write operations
 _READ_TOOLS: list[Any] = [
-    query_analysis_agent,  # Query Analysis Agent for context (read-only)
-    get_workflow_templates,  # Retrieve workflow templates and parameter schemas (read-only)
-    generate_workflow_spec,  # Generate spec (read-only, no AiiDA writes)
-    validate_workflow_spec,  # Validate spec (read-only, no AiiDA writes)
+    query_analysis_agent,  # Query the AiiDA database for context (read-only)
+    get_workflow_templates,  # Inspect workflow schemas and parameter bounds (read-only)
+    generate_workflow_spec,  # Generate a spec (read-only, no AiiDA writes)
+    validate_workflow_spec,  # Validate a spec (read-only, no AiiDA writes)
 ]
 
 # Load system prompt
@@ -54,22 +41,22 @@ def get_agent(
     """Build and return the Execution Agent.
 
     The Execution Agent:
-    1. Queries Analysis Agent for context on past runs (query_analysis_agent)
+    1. Queries the AiiDA database for context on past runs (query_analysis_agent)
     2. Inspects workflow schemas and parameter bounds (get_workflow_templates)
     3. Generates workflow specs (generate_workflow_spec)
     4. Validates specs (validate_workflow_spec)
-    5. Submits validated specs (execute_workflow_spec or submit_workflow, requires HITL approval)
+    5. Submits validated specs (execute_workflow_spec, requires HITL approval)
 
     All read tools are wrapped by RetryOnToolError so tool failures
     (e.g., hallucinated parameters) become recoverable retries instead of crashes.
 
-    submit_workflow and execute_workflow_spec are registered with requires_approval=True
-    so the agent pauses for human confirmation before executing.
+    ``execute_workflow_spec`` is registered with ``requires_approval=True`` so the
+    agent pauses for human confirmation before anything is written to the database.
 
     Args:
         model_settings: Model/provider config. Read from env/.env if not given.
         ollama_settings: Ollama endpoint config. Read from env/.env if not given.
-        agent_settings: Agent behavior (retry budget). Read from env/.env if not given.
+        agent_settings: Agent behaviour (retry budget). Read from env/.env if not given.
 
     Returns:
         Agent: Ready-to-use Execution Agent instance.
@@ -79,7 +66,6 @@ def get_agent(
     # Wrap read tools with RetryOnToolError for automatic retry on failures
     toolset = RetryOnToolError(FunctionToolset(_READ_TOOLS))
 
-    # Build agent with wrapped tools
     agent: Agent = Agent(
         get_model(model_settings=model_settings, ollama_settings=ollama_settings),
         toolsets=[toolset],
@@ -88,9 +74,9 @@ def get_agent(
         output_type=(str, DeferredToolRequests),
     )
 
-    # Register the write tools with HITL approval required
-    # This pauses the agent run and waits for human confirmation before execution
-    agent.tool_plain(requires_approval=True)(submit_workflow)
+    # execute_workflow_spec is the single HITL-gated write tool.
+    # It delegates to submit_workflow internally, so submit_workflow is NOT
+    # registered separately — doing so would expose it twice and confuse the model.
     agent.tool_plain(requires_approval=True)(execute_workflow_spec)
 
     return agent

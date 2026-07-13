@@ -3,7 +3,8 @@
 Defines:
 - WorkflowSpec: The structured JSON spec that the model generates
 - ValidationResult: The return type of validate_workflow_spec
-- KNOWN_WORKFLOWS: Expanded Phase 1 workflow templates (6+ workflows)
+- KNOWN_WORKFLOWS: Supported workflow templates (must stay in sync with
+  ``_ENTRY_POINT_ALIASES`` in ``tools/submit.py``).
 - PARAMETER_SCHEMA: Complete parameter definitions and ranges
 """
 
@@ -55,7 +56,8 @@ class ValidationResult(TypedDict, total=False):
 
 
 # ============================================================================
-# Phase 1: Expanded hardcoded workflow templates (6+ workflows)
+# Known workflow templates — must stay in sync with _ENTRY_POINT_ALIASES in
+# tools/submit.py. Only list workflows that can be resolved and submitted.
 # ============================================================================
 
 KNOWN_WORKFLOWS: dict[str, dict[str, t.Any]] = {
@@ -110,13 +112,6 @@ KNOWN_WORKFLOWS: dict[str, dict[str, t.Any]] = {
         "for_structure_types": ["all"],
         "typical_walltime_hours": 12,
         "note": "Requires both pw and ph codes",
-    },
-    "aiida.workflows:PwSecondOrderWorkChain": {
-        "description": "Second-order elastic constants calculation",
-        "required_inputs": ["pw_code_label", "structure", "pseudo_family"],
-        "optional_inputs": ["parameters", "kpoints_distance", "displacement"],
-        "for_structure_types": ["all"],
-        "typical_walltime_hours": 8,
     },
     "aiida.workflows:VaspWorkChain": {
         "description": "Single point SCF calculation using VASP",

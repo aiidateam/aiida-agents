@@ -1,7 +1,4 @@
-"""Tool for validating workflow specifications against AiiDA schema.
-
-Enhanced version with parameter compatibility checking.
-"""
+"""Tool for validating workflow specifications against AiiDA schema and best practices."""
 
 from __future__ import annotations
 
@@ -25,28 +22,33 @@ __all__ = ["validate_workflow_spec"]
 
 
 def validate_workflow_spec(
-    spec: WorkflowSpec = Field(
-        description="The workflow spec to validate (output from generate_workflow_spec)"
-    ),
-    structure_type: str = Field(
-        description="Structure type: metallic, insulator, or semiconductor"
-    ),
+    spec: t.Annotated[
+        WorkflowSpec,
+        Field(
+            description="The workflow spec to validate (output from generate_workflow_spec)"
+        ),
+    ],
+    structure_type: t.Annotated[
+        str,
+        Field(description="Structure type: metallic, insulator, or semiconductor"),
+    ],
 ) -> ValidationResult:
     """Validate a workflow specification against known AiiDA schema and best practices.
 
     This tool checks:
-    1. Workflow type is known
-    2. All required inputs are present
-    3. Parameter types and ranges are valid
-    4. Parameter compatibility (ecutrho ≈ 8×ecutwfc, etc.)
-    5. K-point density sensible for structure type
+    1. Workflow type is known and submittable.
+    2. All required inputs are present (``None`` values produce a warning, not an error,
+       because the model cannot know the user's structure reference at generation time).
+    3. Parameter types and ranges are valid.
+    4. Parameter compatibility (ecutrho ≈ 8×ecutwfc, etc.).
+    5. K-point density sensible for structure type.
 
     Args:
-        spec: The WorkflowSpec to validate
-        structure_type: What kind of structure (metallic/insulator/semiconductor)
+        spec: The WorkflowSpec to validate.
+        structure_type: What kind of structure (metallic/insulator/semiconductor).
 
     Returns:
-        ValidationResult with valid=True or False, plus errors/suggestions
+        ValidationResult with valid=True or False, plus errors/suggestions.
     """
     logger.debug(
         "validate_workflow_spec(workflow_type=%r, structure_type=%r)",
@@ -89,6 +91,10 @@ def validate_workflow_spec(
 
     # ========================================================================
     # Check 2: Required inputs are present
+    # A required input that is completely *absent* is an error.
+    # A required input that is explicitly ``None`` is a warning — the model
+    # cannot supply the user's structure reference at generation time; the user
+    # must fill it in before submission.
     # ========================================================================
 
     if workflow_type in KNOWN_WORKFLOWS:
@@ -97,13 +103,19 @@ def validate_workflow_spec(
         inputs = spec.get("inputs", {})
 
         for req_input in required:
-            if req_input not in inputs or inputs[req_input] is None:
+            if req_input not in inputs:
                 errors.append(
                     {
                         "error": f"Missing required input: {req_input}",
                         "parameter": req_input,
                         "suggestion": f"Provide a value for {req_input}",
                     }
+                )
+            elif inputs[req_input] is None:
+                warnings.append(
+                    f"Required input '{req_input}' is null (placeholder). "
+                    f"The user must supply the actual reference before submission "
+                    f'(e.g. {{"pk": <node_pk>}} or {{"label": "name@computer"}}).'
                 )
 
     # ========================================================================
@@ -112,13 +124,14 @@ def validate_workflow_spec(
 
     inputs = spec.get("inputs", {})
     parameters = inputs.get("parameters", {})
-    flat_params = {}  # Flatten nested parameters for compatibility checks
+    flat_params: dict[
+        str, t.Any
+    ] = {}  # Flatten nested parameters for compatibility checks
 
     if isinstance(parameters, dict):
         for param_name, param_value in parameters.items():
-            # Flatten nested parameters (system.ecutwfc -> ecutwfc for schema lookup)
+            # Flatten nested parameters (system.ecutwfc → ecutwfc for schema lookup)
             if isinstance(param_value, dict):
-                # Nested structure like {"system": {"ecutwfc": 65}}
                 for nested_name, nested_value in param_value.items():
                     is_valid, error_msg = validate_parameter(nested_name, nested_value)
                     if not is_valid:
@@ -148,7 +161,7 @@ def validate_workflow_spec(
                 flat_params[param_name] = param_value
 
     # ========================================================================
-    # Check 4: Parameter compatibility (NEW)
+    # Check 4: Parameter compatibility
     # ========================================================================
 
     compat_warnings = check_parameter_compatibility(flat_params, structure_type)
@@ -237,10 +250,11 @@ def _suggest_parameter_fix(
     param_name: str, param_value: t.Any, structure_type: str
 ) -> str:
     """Generate a suggestion for fixing a parameter."""
-
     suggestions = {
-        "ecutwfc": f"Try ecutwfc={65 if structure_type == 'metallic' else 50 if structure_type == 'insulator' else 55}. "
-        f"{structure_type.capitalize()} structures typically use this range.",
+        "ecutwfc": (
+            f"Try ecutwfc={65 if structure_type == 'metallic' else 50 if structure_type == 'insulator' else 55}. "
+            f"{structure_type.capitalize()} structures typically use this range."
+        ),
         "ecutrho": "Set ecutrho = 8 × ecutwfc. For ecutwfc=65, use ecutrho=520.",
         "conv_thr": "Use scientific notation: 1e-8 for standard, 1e-9 for high accuracy",
         "conv_thr_forces": "For geometry optimization, 1e-4 Ry/Bohr is typical",
@@ -249,7 +263,6 @@ def _suggest_parameter_fix(
         "scf_maxiter": "Typical: 100 iterations. Increase if convergence is slow.",
         "mixing_beta": "For difficult SCF: 0.3-0.5. For easy: 0.7. Typical: 0.7",
     }
-
     return suggestions.get(param_name, "Check the parameter value and try again")
 
 
@@ -257,7 +270,7 @@ def _check_pseudo_family_exists(pseudo_family: str) -> tuple[bool, str]:
     """Check whether a pseudopotential family label exists in the active AiiDA profile.
 
     Returns:
-        (True, "") if found, or (False, note_message) if not found.
+        (True, \"\") if found, or (False, note_message) if not found or AiiDA unavailable.
     """
     try:
         from aiida import orm
@@ -287,6 +300,7 @@ def _check_pseudo_family_exists(pseudo_family: str) -> tuple[bool, str]:
             "No pseudopotential families are installed in the active AiiDA profile. "
             "Install one first: aiida-pseudo install sssp -v 1.3 -x PBE -p efficiency"
         )
-    except Exception:
-        # If AiiDA is not loaded (e.g., in tests), skip this check
+    except Exception as exc:
+        # AiiDA not loaded (e.g. in tests) — skip the check rather than blocking
+        logger.debug("Pseudo family existence check skipped: %s", exc)
         return True, ""

@@ -27,8 +27,12 @@ class TestFullWorkflowIntegration:
                 "structure_type": "metallic",
             },
         )
-        assert context["count"] >= 0, (
-            "Count should be non-negative integer from real ORM query"
+        assert isinstance(context["count"], int)
+        assert context["count"] >= 0
+        assert "success_rate" in context
+        assert "structure_type_filter_note" in context, (
+            "structure_type_filter_note must be present to inform the model "
+            "that structure_type is not a DB-level filter"
         )
 
         # Step 2: Generate spec
@@ -151,11 +155,11 @@ class TestFullWorkflowIntegration:
 
         # 3. Execution preview: agent invokes submit_workflow (requires_approval=True pauses for human check)
         agent = get_agent()
-        with agent.override(model=TestModel(call_tools=["submit_workflow"])):
+        with agent.override(model=TestModel(call_tools=["execute_workflow_spec"])):
             res = agent.run_sync("Please submit the calculation.")
             assert isinstance(res.output, DeferredToolRequests)
             assert len(res.output.approvals) == 1
-            assert res.output.approvals[0].tool_name == "submit_workflow"
+            assert res.output.approvals[0].tool_name == "execute_workflow_spec"
 
 
 class TestEdgeCasesAndFallbacks:

@@ -121,9 +121,11 @@ class TestGetWorkflowTemplatesTool:
 
     def test_get_all_templates_when_none(self) -> None:
         """If workflow_type is None, returns catalog of all known templates."""
+        from aiida_agents.tools.workflows.schemas import KNOWN_WORKFLOWS
+
         res = get_workflow_templates()
         assert res["query_type"] == "all_workflow_templates"
-        assert res["total_workflows"] >= 8
+        assert res["total_workflows"] == len(KNOWN_WORKFLOWS)
         assert "aiida.workflows:PwRelaxWorkChain" in res["workflows"]
         assert "aiida.workflows:VaspRelaxWorkChain" in res["workflows"]
 

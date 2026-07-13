@@ -58,7 +58,7 @@ class TestSpecGeneration:
         assert isinstance(params["system"]["ecutwfc"], (int, float))
         assert isinstance(params["system"]["ecutrho"], (int, float))
 
-    def test_all_six_workflows_produce_valid_specs(self) -> None:
+    def test_all_known_workflows_produce_valid_specs(self) -> None:
         """Test every known workflow generates a valid specification."""
         for wf_type in KNOWN_WORKFLOWS.keys():
             spec = generate_workflow_spec(
