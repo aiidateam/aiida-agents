@@ -110,12 +110,17 @@ def test_history_file_location(
 
 
 def test_key_bindings_flip_enter_and_newline() -> None:
-    """Exactly Enter and Esc+Enter are bound (the deliberate flip of
-    prompt_toolkit's multiline default; see ``_key_bindings``). ``Keys.Enter``
-    is the ``ControlM`` alias prompt_toolkit stores for a bare ``"enter"``.
+    """Enter submits; Esc+Enter and Ctrl+J (``ControlJ``, which most terminals
+    also send for Ctrl+Enter) insert a newline: the deliberate flip of
+    prompt_toolkit's multiline default (see ``_key_bindings``). ``Keys.Enter`` is
+    the ``ControlM`` alias prompt_toolkit stores for a bare ``"enter"``.
     """
     bound = {binding.keys for binding in _key_bindings().bindings}
-    assert bound == {(Keys.Enter,), (Keys.Escape, Keys.Enter)}
+    assert bound == {
+        (Keys.Enter,),
+        (Keys.Escape, Keys.Enter),
+        (Keys.ControlJ,),
+    }
 
 
 def test_prompt_continuation_aligns_under_prompt() -> None:

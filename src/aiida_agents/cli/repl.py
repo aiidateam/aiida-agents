@@ -57,12 +57,19 @@ def _history_file() -> Path:
 
 
 def _key_bindings() -> KeyBindings:
-    """Bind Enter to submit and Alt/Esc+Enter to insert a newline.
+    """Bind Enter to submit; Esc+Enter or Ctrl+J to insert a newline.
 
     prompt_toolkit's multiline default is the reverse (Enter inserts a
     newline, Meta+Enter submits), which is wrong for a chat REPL where
     single-line turns dominate. Flipping it keeps the common case a single
     keystroke while still allowing a multi-line turn on demand.
+
+    Ctrl+J is bound as a second newline key: it sends ``\\n`` (``ControlJ``),
+    distinct from Enter's ``\\r`` (``ControlM``), and most terminals (Windows
+    Terminal included) emit that same ``\\n`` for Ctrl+Enter, so Ctrl+Enter
+    works too. It also sidesteps Esc+Enter's awkwardness in vi mode, where Esc
+    is the mode switch. (Shift+Enter can't be bound: terminals don't send a
+    distinct byte for it.)
     """
     bindings = KeyBindings()
 
@@ -76,6 +83,7 @@ def _key_bindings() -> KeyBindings:
         event.current_buffer.validate_and_handle()
 
     @bindings.add("escape", "enter")
+    @bindings.add("c-j")
     def _newline(
         event: KeyPressEvent,
     ) -> None:  # pragma: no cover  # pyright: ignore[reportUnusedFunction]
