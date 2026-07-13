@@ -7,6 +7,8 @@ config rather than blowing up deep inside a tool call.
 
 from __future__ import annotations
 
+from typing_extensions import assert_never
+
 from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel, OpenAIChatModelSettings
 from pydantic_ai.providers.ollama import OllamaProvider
@@ -106,7 +108,7 @@ def get_model(
             settings=OpenAIChatModelSettings(max_tokens=cfg.max_tokens),
         )
 
-    # Unreachable: Literal validation catches bad providers at settings load.
-    # Included for type checker completeness.
-    msg = f"Unsupported provider {cfg.provider!r}"  # pragma: no cover
-    raise ValueError(msg)  # pragma: no cover
+    # Every provider in the Literal is handled above; assert_never makes mypy
+    # enforce that a newly added provider gets a branch here (compile-time
+    # exhaustiveness), instead of silently falling through to a runtime error.
+    assert_never(cfg.provider)  # pragma: no cover

@@ -15,11 +15,13 @@ source = { editable = "." }
 dependencies = [
     { name = "aiida-core" },
     { name = "aiida-restapi" },
+    { name = "click" },
     { name = "fastmcp" },
     { name = "prompt-toolkit" },
     { name = "pydantic-ai-slim", extra = ["anthropic", "openai"] },
     { name = "pydantic-settings" },
     { name = "rich" },
+    { name = "rich-click" },
     { name = "typing-extensions" },
     { name = "uvicorn" },
 ]
@@ -63,6 +65,7 @@ requires-dist = [
     { name = "aiida-restapi", git = "https://github.com/edan-bainglass/aiida-restapi?rev=deps" },
     { name = "chromadb", marker = "extra == 'rag'", specifier = ">=1.5.9" },
     { name = "chromadb", marker = "extra == 'rag-fallback'", specifier = ">=1.5.9" },
+    { name = "click", specifier = ">=8" },
     { name = "fastmcp", specifier = ">=3.0.0" },
     { name = "mypy", marker = "extra == 'lint'" },
     { name = "mypy", marker = "extra == 'pre-commit'" },
@@ -74,6 +77,7 @@ requires-dist = [
     { name = "pytest", marker = "extra == 'tests'" },
     { name = "pytest-cov", marker = "extra == 'tests'" },
     { name = "rich", specifier = ">=13" },
+    { name = "rich-click", specifier = ">=1.7" },
     { name = "ruff", marker = "extra == 'lint'" },
     { name = "ruff", marker = "extra == 'pre-commit'" },
     { name = "sentence-transformers", marker = "extra == 'rag-fallback'", specifier = ">=5.5.1" },
@@ -5116,6 +5120,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c0/8f/0722ca900cc807c13a6a0c696dacf35430f72e0ec571c4275d2371fca3e9/rich-15.0.0.tar.gz", hash = "sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36", size = 230680, upload-time = "2026-04-12T08:24:00.75Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl", hash = "sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb", size = 310654, upload-time = "2026-04-12T08:24:02.83Z" },
+]
+
+[[package]]
+name = "rich-click"
+version = "1.9.8"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "click" },
+    { name = "colorama", marker = "sys_platform == 'win32'" },
+    { name = "rich" },
+    { name = "typing-extensions", marker = "python_full_version < '3.11'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f7/ea/21e4867ea0ef881ffd4c0550fc21a061435e50d6324bcd034396633cbc18/rich_click-1.9.8.tar.gz", hash = "sha256:4008f921da88b5d91646c134ec881c1500e5a6b3f093e90e8f29400e09608371", size = 75363, upload-time = "2026-05-28T19:54:59.144Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6d/97/a87901aef6b7e7e4a34c6dd6cc17dca8594a592ef9d9dd765fca2b7facf7/rich_click-1.9.8-py3-none-any.whl", hash = "sha256:12873865396e6927835d4eabb1cc3996edcd65b7ac9b2391a29eca4f335a2f93", size = 72189, upload-time = "2026-05-28T19:54:57.867Z" },
 ]
 
 [[package]]

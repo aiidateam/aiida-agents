@@ -41,7 +41,7 @@ class TestQueryDocs:
         mock_collection = MagicMock()
         mock_collection.query.return_value = {
             "documents": [["doc text"]],
-            "metadatas": [[{"source": "topics/foo.txt", "section": "Foo"}]],
+            "metadatas": [[{"source": "topics/foo", "section": "Foo"}]],
         }
         mock_client.get_collection.return_value = mock_collection
 
@@ -55,5 +55,5 @@ class TestQueryDocs:
             results = query_docs("What is Foo?", limit=1)
 
         assert results == [
-            {"text": "doc text", "source": "topics/foo.txt", "section": "Foo"}
+            {"text": "doc text", "source": "topics/foo", "section": "Foo"}
         ]

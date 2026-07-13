@@ -10,11 +10,13 @@ from __future__ import annotations
 
 import typing as t
 
+from pydantic_ai import Agent
+
 from aiida_agents.agents.analysis import get_agent as get_analysis_agent
 from aiida_agents.agents.execution import get_agent as get_execution_agent
 
 
-def get_agent(agent_type: str = "analysis", **kwargs: t.Any) -> t.Any:
+def get_agent(agent_type: str = "analysis", **kwargs: t.Any) -> Agent:
     """Build and return the specified AiiDA agent (`"analysis"` or `"execution"`)."""
     if agent_type.lower() == "execution":
         return get_execution_agent(**kwargs)

@@ -6,21 +6,25 @@ index_docs()
     Build (or rebuild) the ChromaDB vector index from the sphinx text corpus.
     Call once before querying; subsequent calls are no-ops unless ``force=True``.
 
+IndexOutcome
+    Enum returned by ``index_docs`` (``BUILT`` / ``ALREADY_PRESENT`` /
+    ``EMPTY_CORPUS``) so a caller can report what the build actually did.
+
 query_docs(query, limit=3)
     Low-level semantic search — returns raw result dicts with ``text``,
     ``source``, and ``section`` keys.
 
 search_aiida_docs(query)
     Pydantic AI tool — wraps ``query_docs`` with formatted output suitable for
-    an LLM context window.  Register this directly in an ``Agent(tools=[...])``.
+    an LLM context window. Register this directly in an ``Agent(tools=[...])``.
 """
 
 from __future__ import annotations
 
-from aiida_agents.rag.indexing import index_docs
+from aiida_agents.rag.indexing import IndexOutcome, index_docs
 from aiida_agents.rag.retriever import docs_index_available, query_docs
 
-__all__ = ["index_docs", "query_docs", "search_aiida_docs"]
+__all__ = ["IndexOutcome", "index_docs", "query_docs", "search_aiida_docs"]
 
 
 def search_aiida_docs(query: str) -> str:
@@ -48,9 +52,9 @@ def search_aiida_docs(query: str) -> str:
             return (
                 "The AiiDA documentation index has not been built yet, so "
                 "documentation search is unavailable. It must be built once by "
-                'running this in a shell: python -c "from aiida_agents.rag import '
-                'index_docs; index_docs()". Tell the user to run that; do not '
-                "answer AiiDA documentation questions from memory in the meantime."
+                "running `aiida-agents rag build` in a shell. Tell the user to "
+                "run that; do not answer AiiDA documentation questions from "
+                "memory in the meantime."
             )
         return "No relevant AiiDA documentation found for this query."
 

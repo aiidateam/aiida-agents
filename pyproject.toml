@@ -23,17 +23,22 @@ classifiers = [
 dependencies = [
     "aiida-core @ git+https://github.com/aiidateam/aiida-core.git",
     "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
+    # Reached only through rich_click (which itself requires click>=8); no
+    # speculative upper bound. Reproducibility comes from uv.lock, and a ceiling
+    # is added reactively (with the breaking version noted) if CI ever hits one.
+    "click>=8",
     "fastmcp>=3.0.0",
     "prompt-toolkit>=3",
     "pydantic-ai-slim[openai,anthropic]>=0.1",
     "pydantic-settings>=2.14.1",
     "rich>=13",
+    "rich-click>=1.7",
     "typing-extensions>=4.12",
     "uvicorn>=0.33",
 ]
 
 [project.scripts]
-aiida-agents = "aiida_agents.cli:main"
+aiida-agents = "aiida_agents.cli:cli"
 
 [project.optional-dependencies]
 docs = [
@@ -117,6 +122,10 @@ fail_under = 80
 exclude = [
     ".aiida_agents_vector_db",
 ]
+# Ruff's defaults (E/F) plus T20: no bare ``print()`` in the package; user-facing
+# output goes through ``click.echo`` / ``console.print``. The carve-outs below are
+# staged for a later pass that broadens the selection to their families.
+lint.extend-select = ["T20"]
 lint.ignore = [
     "TRY003",  # https://docs.astral.sh/ruff/rules/raise-vanilla-args/
     "EM101",   # https://docs.astral.sh/ruff/rules/raw-string-in-exception/
@@ -178,11 +187,26 @@ module = "aiida_agents.rag._textbuild"
 disallow_subclassing_any = false
 warn_return_any = false
 
-[tool.basedpyright]
-# Not run in CI (mypy is the type checker); this just keeps local basedpyright
-# (e.g. in-editor) aligned with the mypy baseline. Its default "recommended"
-# mode floods on `Any` from AiiDA's untyped ORM, which mypy does not flag.
+[tool.pyright]
+# Under [tool.pyright] (not [tool.basedpyright]) so both tools read it: vanilla
+# pyright (what some editors run) reads only [tool.pyright]; basedpyright reads
+# it too. Not run in CI (mypy is the type checker); this just keeps an in-editor
+# LSP aligned with the mypy baseline. "standard" mode because basedpyright's
+# default "recommended" floods on `Any` from AiiDA's untyped ORM, which mypy
+# does not flag.
 typeCheckingMode = "standard"
+# Resolve imports (including this package's editable install) from the project
+# venv, so the LSP resolves third-party and first-party modules instead of
+# reporting them unresolved.
+venvPath = "."
+venv = ".venv"
+# The cli/ package deliberately uses `_`-prefixed helpers imported across sibling
+# modules (e.g. agent._build_agent, called from commands.py). Pyright treats a
+# `_`-name as module-private and does not count a cross-module import as usage,
+# so it flags every such helper "not accessed" [reportUnusedFunction]. There is
+# no "package-private" notion to make it accurate; genuinely dead code is still
+# caught by the coverage gate and ruff.
+reportUnusedFunction = "none"
 
 [tool.pytest.ini_options]
 # Warnings raised by our own code are errors; third-party warnings only show.

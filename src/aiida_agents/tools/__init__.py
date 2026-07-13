@@ -1,8 +1,17 @@
 """Surface-agnostic AiiDA tools, shared by the MCP server and the agent.
 
-Read tools are re-exported flat (``from aiida_agents.tools import query_nodes``);
+Read tools are re-exported flat (``from aiida_agents.tools import query``);
 the write tool ``submit_workflow`` stays an explicit ``tools.submit`` import, so
 the database-writing tool is not grabbed as casually as a read (HITL-gated, ADR-08).
+
+Public API
+----------
+query, get_node_inputs, get_node_outputs, list_processes,
+get_process_status, search_structures, generate_workflow_spec,
+validate_workflow_spec, query_analysis_agent
+    Read-only AiiDA query and workflow-spec tools, safe to register on an agent
+    or expose over MCP. The write tool ``submit_workflow`` is intentionally not
+    re-exported here; import it from ``tools.submit`` (HITL-gated, ADR-08).
 """
 
 from __future__ import annotations
@@ -25,5 +34,4 @@ __all__ = [
     "generate_workflow_spec",
     "validate_workflow_spec",
     "query_analysis_agent",
-    "submit_workflow",
 ]

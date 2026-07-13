@@ -30,7 +30,7 @@ __all__ = [
 # without requiring JSON quotes; the loader coerces a purely numeric
 # identifier back to an integer pk.
 Identifier = t.Annotated[
-    str, Field(description="Node pk or uuid (e.g. '42' or '0cef…')")
+    str, Field(description="Node pk or uuid (e.g. '42' or '0cef...')")
 ]
 
 

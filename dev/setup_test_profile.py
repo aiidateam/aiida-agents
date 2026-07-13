@@ -12,7 +12,7 @@ RabbitMQ auto-detection) and starts the daemon.
 Usage:
     verdi presto --profile-name agent-test --use-zmq   # broker + daemon
     uv run python dev/setup_test_profile.py
-    uv run python -c "from aiida import load_profile; load_profile('agent-test'); from aiida_agents.cli import main; main()"
+    aiida-agents --profile agent-test chat             # drive the agent
 """
 
 from __future__ import annotations

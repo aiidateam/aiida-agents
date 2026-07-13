@@ -82,6 +82,13 @@ def _configure_logging(log_cfg: LoggingSettings) -> None:
     """
     console_handler = logging.StreamHandler(sys.stderr)
     console_handler.addFilter(_ConsoleFilter())
+    # The console honours log_level directly. The default (WARNING) keeps an
+    # interactive session uncluttered; INFO-level operational logs would both
+    # duplicate the rich output and collide with its live regions, so raise the
+    # level explicitly to surface them. The file handler, when enabled, still
+    # captures the full tool-call/agent-reply traces regardless: the trace
+    # loggers emit at DEBUG independently of this level.
+    console_handler.setLevel(log_cfg.log_level)
     handlers: list[logging.Handler] = [console_handler]
     if log_cfg.log_file is not None:
         # Create the parent dir when it doesn't exist yet, so a log_file in a

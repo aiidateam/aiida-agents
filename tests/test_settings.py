@@ -22,6 +22,7 @@ import pytest
 from pydantic import ValidationError
 
 from aiida_agents._settings import (
+    _SETTINGS_GROUPS,
     AgentSettings,
     LoggingSettings,
     ModelSettings,
@@ -29,6 +30,11 @@ from aiida_agents._settings import (
     RagSettings,
     ServerSettings,
     _Base,
+    _EmbedBackend,
+    _LogLevel,
+    _Provider,
+    _choices,
+    _format_validation_error,
     warn_on_unrecognized_settings,
 )
 
@@ -94,7 +100,7 @@ _GROUP_DEFAULTS = [
             "AIIDA_AGENTS_LOG_FILE",
         ),
         {
-            "log_level": "INFO",
+            "log_level": "WARNING",
             "log_file": None,
         },
         id="logging",
@@ -390,6 +396,84 @@ def test_warns_on_unrecognized_prefixed_key(
     assert "typo" in caplog.text.lower()
 
 
+@pytest.mark.parametrize(
+    "typo, suggestion",
+    [
+        pytest.param(
+            "AIIDA_AGENS_PROVIDER", "AIIDA_AGENTS_PROVIDER", id="prefix-drop-t"
+        ),
+        pytest.param("AIDA_AGENTS_MODEL", "AIIDA_AGENTS_MODEL", id="prefix-drop-i"),
+        pytest.param("OLLAMA_BAES_URL", "OLLAMA_BASE_URL", id="alias-transposed"),
+    ],
+)
+def test_warns_on_mistyped_prefix_with_suggestion(
+    typo: str,
+    suggestion: str,
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A key that misses the namespace but closely resembles a real setting
+    (a mistyped prefix) is flagged with a 'did you mean' suggestion, not dropped.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv(typo, "x")
+    with caplog.at_level(logging.WARNING, logger="aiida_agents._settings"):
+        warn_on_unrecognized_settings()
+    assert typo in caplog.text
+    assert suggestion in caplog.text
+
+
+@pytest.mark.parametrize("settings_cls", _SETTINGS_GROUPS, ids=lambda c: c.__name__)
+def test_every_field_is_documented(settings_cls: type[_Base]) -> None:
+    """Every field carries a description (its attribute docstring), so IDE hover
+    and the ``config init`` template stay complete as fields are added.
+    """
+    undocumented = [
+        name
+        for name, field in settings_cls.model_fields.items()
+        if not field.description
+    ]
+    assert not undocumented, f"{settings_cls.__name__}: {undocumented}"
+
+
+@pytest.mark.parametrize(
+    ("settings_cls", "field", "alias"),
+    [
+        pytest.param(ModelSettings, "provider", _Provider, id="provider"),
+        pytest.param(RagSettings, "embed_backend", _EmbedBackend, id="embed-backend"),
+        pytest.param(LoggingSettings, "log_level", _LogLevel, id="log-level"),
+    ],
+)
+def test_choice_field_docstring_lists_every_literal_value(
+    settings_cls: type[_Base], field: str, alias: object
+) -> None:
+    """A choice field's docstring enumerates every value its ``Literal`` accepts,
+    so the ``config init`` comment and IDE hover can't silently drift from the
+    accepted set (the ``--provider`` flag derives its choices from the same
+    ``Literal``, so it never drifts by construction).
+    """
+    description = settings_cls.model_fields[field].description or ""
+    missing = [value for value in _choices(alias) if value not in description]
+    assert not missing, f"{settings_cls.__name__}.{field} docstring omits {missing}"
+
+
+def test_does_not_warn_on_plausible_neighbour_of_a_setting(
+    tmp_path: pathlib.Path,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A legitimate, similarly-named var (``OPENAI_API_BASE``, next to the
+    recognised ``OPENAI_API_KEY``) stays below the typo threshold, so a real
+    provider variable is never mistaken for a typo.
+    """
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_BASE", "http://localhost:1234/v1")
+    with caplog.at_level(logging.WARNING, logger="aiida_agents._settings"):
+        warn_on_unrecognized_settings()
+    assert "OPENAI_API_BASE" not in caplog.text
+
+
 def test_does_not_warn_on_recognized_keys(
     tmp_path: pathlib.Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -453,3 +537,44 @@ def test_context_length_on_non_ollama_provider_warns(
     assert settings.context_length == 4096  # kept, just unused
     assert "context_length" in caplog.text.lower()
     assert "ollama" in caplog.text.lower()
+
+
+def test_format_validation_error_is_concise(
+    tmp_path: pathlib.Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The formatter yields ``field: reason`` lines, drops pydantic's docs URL,
+    and strips the ``Value error,`` prefix from a whole-model validator message.
+    """
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(ValidationError) as field_error:
+        ModelSettings(provider="bogus")  # type: ignore[arg-type]
+    field_msg = _format_validation_error(field_error.value)
+    assert field_msg.startswith("provider: ")
+    assert "https://errors.pydantic.dev" not in field_msg
+
+    with pytest.raises(ValidationError) as model_error:
+        ModelSettings(provider="ollama", max_tokens=9000, context_length=4096)
+    model_msg = _format_validation_error(model_error.value)
+    assert not model_msg.startswith("Value error,")
+    assert "must be smaller than context_length" in model_msg
+
+
+def test_dotenv_keys_parses_assignments(tmp_path: pathlib.Path) -> None:
+    """Keys are upper-cased; comments, blanks, non-assignments, and `export ` handled."""
+    from aiida_agents._settings import _dotenv_keys
+
+    env = tmp_path / ".env"
+    env.write_text(
+        "# comment\n\nAIIDA_AGENTS_MODEL=foo\n"
+        "export OLLAMA_BASE_URL=http://x\nnot_an_assignment\nlower=bar\n",
+        encoding="utf-8",
+    )
+    assert _dotenv_keys(env) == {"AIIDA_AGENTS_MODEL", "OLLAMA_BASE_URL", "LOWER"}
+
+
+def test_dotenv_keys_missing_file_is_empty(tmp_path: pathlib.Path) -> None:
+    """A missing .env yields no keys rather than raising."""
+    from aiida_agents._settings import _dotenv_keys
+
+    assert _dotenv_keys(tmp_path / "absent.env") == set()

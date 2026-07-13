@@ -1,8 +1,9 @@
 """Build the RAG corpus and index it into ChromaDB.
 
-Runs the one-time :func:`index_docs` pipeline: sparse-clone the pinned aiida-core
-docs, render them to fenced text (``rag._textbuild``), chunk, embed, and persist.
-Heavy and network-bound, so it is a deliberate one-shot, not part of querying.
+Runs the one-time pipeline behind ``aiida-agents rag build``: sparse-clone the
+pinned aiida-core docs, render them to fenced text (``rag._textbuild``), chunk,
+embed, and persist. Heavy and network-bound, so it is a deliberate one-shot, not
+part of querying.
 """
 
 from __future__ import annotations
@@ -14,6 +15,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from collections.abc import Callable
+from enum import Enum
 from pathlib import Path
 
 from aiida_agents._settings import RagSettings
@@ -31,6 +34,19 @@ logger = logging.getLogger(__name__)
 
 _DOCS_REPO = "https://github.com/aiidateam/aiida-core.git"
 _DOCS_SUBDIR = "docs"  # need full docs/ for sphinx-build, not just source/
+
+
+class IndexOutcome(Enum):
+    """What :func:`index_docs` did, so a caller can report it precisely.
+
+    Only ``BUILT`` (re)created the collection; ``ALREADY_PRESENT`` reused a
+    populated one and ``EMPTY_CORPUS`` produced no chunks, both leaving any
+    existing index exactly as it was.
+    """
+
+    BUILT = "built"
+    ALREADY_PRESENT = "already_present"
+    EMPTY_CORPUS = "empty_corpus"
 
 
 def _clone_and_build_text(target_dir: str) -> None:
@@ -56,7 +72,7 @@ def _clone_and_build_text(target_dir: str) -> None:
         repo_dir = tmp_path / "aiida-core"
 
         # Step 1: sparse-clone only docs/ at the v2.8 tag
-        logger.info("cloning aiida-core %s (sparse, docs/ only)…", _DOCS_TAG)
+        logger.info("cloning aiida-core %s (sparse, docs/ only)...", _DOCS_TAG)
         subprocess.run(
             [
                 "git",
@@ -93,7 +109,7 @@ def _clone_and_build_text(target_dir: str) -> None:
         # ```lang fences around code blocks; see rag._textbuild) under THIS
         # interpreter (sys.executable), so it uses the environment that has
         # aiida installed, not a stray system sphinx-build on PATH.
-        logger.info("running sphinx text build…")
+        logger.info("running sphinx text build...")
         result = subprocess.run(
             [
                 sys.executable,
@@ -143,7 +159,10 @@ def _clone_and_build_text(target_dir: str) -> None:
     logger.info("text corpus ready at %s", target_dir)
 
 
-def index_docs(force: bool = False) -> None:
+def index_docs(
+    force: bool = False,
+    progress: Callable[[int, int], None] | None = None,
+) -> IndexOutcome:
     """Build or rebuild the ChromaDB collection from aiida-core docs.
 
     The collection is keyed by docs version and embedding model (see
@@ -165,6 +184,14 @@ def index_docs(force: bool = False) -> None:
         force: If True, re-render the corpus and rebuild the collection even if a
             populated one already exists. A rebuild that yields no chunks leaves
             the existing index untouched.
+        progress: Optional ``(done, total)`` callback invoked after each embed
+            batch, so a caller (e.g. the CLI) can render a progress bar.
+
+    Returns:
+        An :class:`IndexOutcome`: ``BUILT`` when the collection was (re)created,
+        ``ALREADY_PRESENT`` when a populated collection was reused, or
+        ``EMPTY_CORPUS`` when the corpus yielded no chunks and any existing index
+        was left untouched.
     """
     cfg = RagSettings()
     client = _get_client(cfg)
@@ -173,7 +200,7 @@ def index_docs(force: bool = False) -> None:
 
     if not force and _collection_populated(client, name):
         logger.info("collection '%s' already exists — skipping index", name)
-        return
+        return IndexOutcome.ALREADY_PRESENT
 
     # Render and chunk the corpus BEFORE touching the collection, so a failed
     # clone/build or an empty corpus never leaves an empty collection behind. The
@@ -191,7 +218,7 @@ def index_docs(force: bool = False) -> None:
 
     if not chunks:
         logger.warning("no chunks loaded; leaving any existing index untouched")
-        return
+        return IndexOutcome.EMPTY_CORPUS
 
     # Only now that there are chunks to add do we replace any prior (possibly
     # empty or stale) collection.
@@ -211,20 +238,21 @@ def index_docs(force: bool = False) -> None:
     texts = [c["text"] for c in chunks]
     metadatas = [{"source": c["source"], "section": c["section"]} for c in chunks]
 
+    total = len(texts)
+    if progress is not None:
+        progress(0, total)  # signal embed start (with the total) so a UI can init
     batch = 50
     completed = False
     try:
-        for i in range(0, len(texts), batch):
+        for i in range(0, total, batch):
             collection.add(
                 ids=ids[i : i + batch],
                 documents=texts[i : i + batch],
                 metadatas=metadatas[i : i + batch],
             )
-            logger.debug(
-                "indexed batch %d/%d",
-                i // batch + 1,
-                -(-len(texts) // batch),
-            )
+            if progress is not None:
+                progress(min(i + batch, total), total)
+            logger.debug("indexed batch %d/%d", i // batch + 1, -(-total // batch))
         completed = True
     finally:
         # Ctrl-C or an embed error mid-loop would otherwise leave a partial
@@ -236,3 +264,4 @@ def index_docs(force: bool = False) -> None:
             client.delete_collection(name)
 
     logger.info("indexed %d chunks into '%s'", len(texts), name)
+    return IndexOutcome.BUILT

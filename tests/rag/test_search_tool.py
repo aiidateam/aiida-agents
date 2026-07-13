@@ -39,7 +39,7 @@ class TestSearchAiidaDocs:
     def test_formats_source_and_section(self) -> None:
         fake = [
             {
-                "source": "topics/data_types.txt",
+                "source": "topics/data_types",
                 "section": "KpointsData",
                 "text": "KpointsData represents a grid of k-points.",
             }
@@ -47,14 +47,14 @@ class TestSearchAiidaDocs:
         with patch("aiida_agents.rag.query_docs", return_value=fake):
             result = search_aiida_docs("What is KpointsData?")
 
-        assert "topics/data_types.txt" in result
+        assert "topics/data_types" in result
         assert "KpointsData" in result
         assert "grid of k-points" in result
 
     def test_multiple_results_separated_by_rule(self) -> None:
         fake = [
-            {"source": "a.txt", "section": "A", "text": "Text A."},
-            {"source": "b.txt", "section": "B", "text": "Text B."},
+            {"source": "topics/a", "section": "A", "text": "Text A."},
+            {"source": "topics/b", "section": "B", "text": "Text B."},
         ]
         with patch("aiida_agents.rag.query_docs", return_value=fake):
             result = search_aiida_docs("query")
@@ -70,10 +70,10 @@ class TestSearchAiidaDocs:
         mock_qd.assert_called_once_with("test query", limit=3)
 
     def test_result_without_section_omits_section_header(self) -> None:
-        fake = [{"source": "misc.txt", "section": "", "text": "Some content."}]
+        fake = [{"source": "misc", "section": "", "text": "Some content."}]
         with patch("aiida_agents.rag.query_docs", return_value=fake):
             result = search_aiida_docs("query")
 
         # Should use the source-only header format
-        assert "[misc.txt]" in result
+        assert "[misc]" in result
         assert "§" not in result

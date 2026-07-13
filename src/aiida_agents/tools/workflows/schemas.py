@@ -328,15 +328,18 @@ PARAMETER_COMPAT_RULES: list[dict[str, t.Any]] = [
         "rule": "ecutrho ≈ 8 × ecutwfc (±10% tolerance)",
         "tolerance": 0.1,
         "params": ["ecutwfc", "ecutrho"],
-        "check": lambda vals: 0.9 * vals.get("ecutwfc", 65) * 8
-        <= vals.get("ecutrho", 520)
-        <= 1.1 * vals.get("ecutwfc", 65) * 8,
+        "check": lambda vals: (
+            0.9 * vals.get("ecutwfc", 65) * 8
+            <= vals.get("ecutrho", 520)
+            <= 1.1 * vals.get("ecutwfc", 65) * 8
+        ),
     },
     {
         "rule": "If smearing is used, degauss must be set",
         "params": ["smearing", "degauss"],
-        "check": lambda vals: not vals.get("smearing")
-        or vals.get("degauss") is not None,
+        "check": lambda vals: (
+            not vals.get("smearing") or vals.get("degauss") is not None
+        ),
     },
     {
         "rule": "For metallic structures, smearing should be gaussian or fermi-dirac",
@@ -349,8 +352,9 @@ PARAMETER_COMPAT_RULES: list[dict[str, t.Any]] = [
         "rule": "k_points_distance for metallic structures should be < 0.3 Å^-1 (finer than standard 0.2)",
         "structure_type": "metallic",
         "params": ["kpoints_distance"],
-        "check": lambda vals: vals.get("kpoints_distance") is None
-        or vals.get("kpoints_distance") <= 0.3,
+        "check": lambda vals: (
+            vals.get("kpoints_distance") is None or vals.get("kpoints_distance") <= 0.3
+        ),
     },
     {
         "rule": "High accuracy (conv_thr < 1e-8) should use scf_maxiter >= 150",

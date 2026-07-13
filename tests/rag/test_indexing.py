@@ -17,7 +17,11 @@ from unittest.mock import MagicMock
 import chromadb
 import pytest
 
-from aiida_agents.rag.indexing import _clone_and_build_text, index_docs
+from aiida_agents.rag.indexing import (
+    IndexOutcome,
+    _clone_and_build_text,
+    index_docs,
+)
 from aiida_agents.rag.store import (
     _CORPUS_FORMAT,
     _collection_name,
@@ -121,7 +125,7 @@ def test_index_docs_skips_when_already_populated(
         embed=embed,
         chunks=[{"text": "new", "source": "a.txt", "section": "A"}],
     )
-    index_docs(force=False)
+    assert index_docs(force=False) is IndexOutcome.ALREADY_PRESENT
     clone.assert_not_called()
     assert client.get_collection(name).count() == 1  # untouched
 
@@ -141,7 +145,7 @@ def test_index_docs_rebuilds_empty_stub(
         embed=embed,
         chunks=[{"text": "c", "source": "a.txt", "section": "A"}],
     )
-    index_docs(force=False)
+    assert index_docs(force=False) is IndexOutcome.BUILT
     clone.assert_called_once()
     assert _collection_populated(client, name) is True
 
@@ -157,7 +161,7 @@ def test_index_docs_empty_corpus_leaves_existing_index(
         ids=["seed"], documents=["seed"], metadatas=[{"source": "s", "section": "S"}]
     )
     _wire_index_docs(monkeypatch, tmp_path, client=client, embed=embed, chunks=[])
-    index_docs(force=True)
+    assert index_docs(force=True) is IndexOutcome.EMPTY_CORPUS
     assert client.get_collection(name).count() == 1  # untouched
 
 
@@ -190,6 +194,44 @@ def test_index_docs_force_reclones_and_rebuilds(
             {"text": f"new {i}", "source": "a.txt", "section": "A"} for i in range(3)
         ],
     )
-    index_docs(force=True)
+    assert index_docs(force=True) is IndexOutcome.BUILT
     clone.assert_called_once()  # force re-clones despite the cached corpus
     assert client.get_collection(name).count() == 3  # rebuilt with the new chunks
+
+
+def test_index_status_empty_store(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A store that was never created reports not-built, with no collections."""
+    from aiida_agents.rag.store import index_status
+
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(tmp_path / "absent"))
+    status = index_status()
+    assert status.built is False
+    assert status.collections == ()
+    assert status.store_exists is False
+
+
+def test_index_status_reports_built_collection(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A populated collection surfaces with its chunk count and build metadata."""
+    from aiida_agents._settings import RagSettings
+    from aiida_agents.rag.store import _get_client, index_status
+
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(tmp_path / "vdb"))
+    embed = _FakeEmbed()
+    client = _get_client(RagSettings())
+    client.create_collection(
+        "aiida_docs__v2.8.0__fenced1__ollama_mxbai-embed-large",
+        embedding_function=embed,
+        metadata={"docs_version": "v2.8.0", "embedding": "ollama/mxbai-embed-large"},
+    ).add(ids=["a"], documents=["x"], metadatas=[{"source": "s", "section": "S"}])
+
+    status = index_status()
+    assert status.built is True
+    assert len(status.collections) == 1
+    info = status.collections[0]
+    assert info.chunks == 1
+    assert info.docs_version == "v2.8.0"
+    assert info.embedding == "ollama/mxbai-embed-large"
