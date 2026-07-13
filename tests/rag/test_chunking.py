@@ -111,28 +111,28 @@ class TestSplitFenceAware:
 class TestChunkText:
     def test_returns_list_of_dicts(self) -> None:
         text = "WorkChain\n=========\nA work chain is a process.\n"
-        chunks = _chunk_text(text, source="topics/workflows.txt")
+        chunks = _chunk_text(text, source="topics/workflows")
         assert all(isinstance(c, dict) for c in chunks)
         assert all({"text", "source", "section"} <= c.keys() for c in chunks)
 
     def test_source_preserved(self) -> None:
         text = "Title\n=====\nSome content here that is long enough.\n"
-        chunks = _chunk_text(text, source="topics/data_types.txt")
-        assert all(c["source"] == "topics/data_types.txt" for c in chunks)
+        chunks = _chunk_text(text, source="topics/data_types")
+        assert all(c["source"] == "topics/data_types" for c in chunks)
 
     def test_section_title_in_chunk_text(self) -> None:
         text = "KpointsData\n===========\n" + "x" * 200 + "\n"
-        chunks = _chunk_text(text, source="topics/data_types.txt")
+        chunks = _chunk_text(text, source="topics/data_types")
         assert any("KpointsData" in c["text"] for c in chunks)
 
     def test_short_sections_discarded(self) -> None:
         text = "Title\n=====\nToo short.\n"
-        chunks = _chunk_text(text, source="any.txt")
+        chunks = _chunk_text(text, source="topics/short")
         assert len(chunks) == 0
 
     def test_fallback_for_headingless_file(self) -> None:
         text = "x" * 500  # long enough, no headings
-        chunks = _chunk_text(text, source="misc.txt")
+        chunks = _chunk_text(text, source="reference/misc")
         assert len(chunks) == 1
         # No headings → parsed as preamble, falls back to single chunk
         assert chunks[0]["section"] in ("(full file)", "(preamble)")
@@ -152,5 +152,6 @@ class TestLoadDocs:
 
         sources = {c["source"] for c in _load_docs(str(tmp_path))}
 
-        assert "topics/concepts.txt" in sources
-        assert "reference/_changelog.txt" not in sources
+        # sources are the extensionless doc id; the .txt build artifact is dropped
+        assert "topics/concepts" in sources
+        assert "reference/_changelog" not in sources

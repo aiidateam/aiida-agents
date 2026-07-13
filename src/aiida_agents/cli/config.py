@@ -10,6 +10,7 @@ never drifts from the settings themselves.
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal, NamedTuple, TypeAlias
 
@@ -124,13 +125,13 @@ class _ConfigRow(NamedTuple):
     source: _ValueSource
 
 
-def _config_rows(provider: str | None, model: str | None) -> list[_ConfigRow]:
-    """A :class:`_ConfigRow` for every recognised setting.
+def _source_classifier(
+    provider: str | None, model: str | None
+) -> Callable[[str], _ValueSource]:
+    """Build the ``env_var -> source`` classifier for one ``config show`` run.
 
-    Iterates :data:`_SETTINGS_GROUPS` so it stays in step with ``config init`` and
-    the typo-detector, and no setting is silently omitted. ``source`` is where the
-    effective value came from: a CLI ``flag``, the process ``env``, the ``.env``
-    file, or the field ``default``.
+    Captures the process environment, the ``.env`` keys, and which fields a CLI
+    flag overrode, so the returned function reports where each value came from.
     """
     env_keys = {key.upper() for key in os.environ}
     dotenv_keys = _dotenv_keys(Path(".env"))
@@ -139,7 +140,7 @@ def _config_rows(provider: str | None, model: str | None) -> list[_ConfigRow]:
         _env_var_for(ModelSettings, "model"): model is not None,
     }
 
-    def source(env_var: str) -> _ValueSource:
+    def classify(env_var: str) -> _ValueSource:
         if flagged.get(env_var):
             return "flag"
         if env_var.upper() in env_keys:
@@ -148,33 +149,57 @@ def _config_rows(provider: str | None, model: str | None) -> list[_ConfigRow]:
             return ".env"
         return "default"
 
+    return classify
+
+
+def _resolve_group(
+    cls: type[BaseSettings], provider: str | None, model: str | None
+) -> tuple[BaseSettings | None, dict[str, str]]:
+    """A group's live settings, or ``(None, field -> reason)`` if a value is invalid.
+
+    Only ``ModelSettings`` honours the ``--provider`` / ``--model`` overrides; the
+    other groups read env / ``.env`` / defaults. ``config show`` is the debugging
+    tool, so a bad value in one group must not blank the whole table: on failure
+    the caller renders that group's fields as invalid and carries on with the rest.
+    """
+    try:
+        obj = (
+            _resolve_model_settings(provider, model) if cls is ModelSettings else cls()
+        )
+        return obj, {}
+    except ValidationError as exc:
+        return None, _invalid_fields(exc)
+
+
+def _field_value(obj: BaseSettings | None, invalid: dict[str, str], field: str) -> str:
+    """The Value cell for one field: its effective value, or why it is invalid."""
+    if obj is None:
+        reason = invalid.get(field)
+        return f"(invalid: {reason})" if reason else "(invalid)"
+    return _display_value(obj, field)
+
+
+def _config_rows(provider: str | None, model: str | None) -> list[_ConfigRow]:
+    """A :class:`_ConfigRow` for every recognised setting.
+
+    Iterates :data:`_SETTINGS_GROUPS` so it stays in step with ``config init`` and
+    the typo-detector, and no setting is silently omitted. ``source`` is where the
+    effective value came from: a CLI ``flag``, the process ``env``, the ``.env``
+    file, or the field ``default``.
+    """
+    classify_source = _source_classifier(provider, model)
     rows: list[_ConfigRow] = []
     for cls in _SETTINGS_GROUPS:
-        # ModelSettings honours the --provider/--model overrides; the other
-        # groups read only env / .env / defaults. config show is the debugging
-        # tool, so a bad value in one group must not blank the whole table: catch
-        # its ValidationError, render that group's fields as invalid (the reason
-        # on the offending field), and carry on with the other groups.
-        try:
-            obj: BaseSettings | None = (
-                _resolve_model_settings(provider, model)
-                if cls is ModelSettings
-                else cls()
-            )
-            invalid: dict[str, str] = {}
-        except ValidationError as exc:
-            obj = None
-            invalid = _invalid_fields(exc)
+        obj, invalid = _resolve_group(cls, provider, model)
         for field_name in cls.model_fields:
             env_var = _env_var_for(cls, field_name)
-            if obj is None:
-                reason = invalid.get(field_name)
-                value = f"(invalid: {reason})" if reason else "(invalid)"
-            else:
-                value = _display_value(obj, field_name)
             rows.append(
                 _ConfigRow(
-                    _group_label(cls), field_name, value, env_var, source(env_var)
+                    group=_group_label(cls),
+                    setting=field_name,
+                    value=_field_value(obj, invalid, field_name),
+                    env_var=env_var,
+                    source=classify_source(env_var),
                 )
             )
     return rows

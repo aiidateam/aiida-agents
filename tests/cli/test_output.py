@@ -107,3 +107,46 @@ def test_print_agent_renders_labelled_reply(
     assert "hello" in out
     assert "world" in out
     assert "**" not in out  # markdown was rendered, not echoed verbatim
+
+
+def test_print_reply_raw_when_piped(capsys: pytest.CaptureFixture[str]) -> None:
+    """Piped/redirected output is the raw Markdown source, so `ask ... > out.md`
+    and pipelines stay clean and re-renderable, not box-drawing rich output.
+    """
+    from aiida_agents.cli.output import _print_reply
+
+    _print_reply("# Title\n\n**bold**")
+
+    out = capsys.readouterr().out
+    assert "# Title" in out  # raw markdown preserved
+    assert "**bold**" in out
+
+
+def test_print_reply_renders_markdown_on_a_terminal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """On an interactive terminal the reply is rendered, so the `#`/`**` markup is
+    consumed rather than printed literally.
+    """
+    from aiida_agents.cli import output
+
+    monkeypatch.setattr(output, "console", Console(force_terminal=True, width=80))
+    output._print_reply("# Title")
+
+    out = capsys.readouterr().out
+    assert "Title" in out
+    assert "# Title" not in out
+
+
+def test_print_reply_raw_flag_forces_source_on_a_terminal(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """`--raw` prints the Markdown source even on a terminal (copy-paste / piping
+    override), bypassing the interactive rendering.
+    """
+    from aiida_agents.cli import output
+
+    monkeypatch.setattr(output, "console", Console(force_terminal=True, width=80))
+    output._print_reply("# Title", raw=True)
+
+    assert "# Title" in capsys.readouterr().out

@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 
+import rich_click as click
 from pydantic_ai.messages import ModelMessage, ToolCallPart
 from rich.console import Console
 from rich.markdown import Markdown
@@ -30,6 +31,22 @@ def _print_agent(text: str) -> None:
     console.print("Agent:", style="bold green")
     console.print(Markdown(text))
     console.print()
+    trace_response(text)
+
+
+def _print_reply(text: str, *, raw: bool = False) -> None:
+    """Render a one-shot ``ask`` reply and record it to the trace log.
+
+    Pretty Markdown on an interactive terminal; the raw Markdown source when the
+    output is piped or redirected, so ``aiida-agents ask ... > answer.md`` and
+    shell pipelines get clean, re-renderable text rather than box-drawing tables
+    reflowed to the terminal width. ``raw=True`` forces the raw source even on a
+    terminal (``--raw``), for copy-paste or when the auto-detection guesses wrong.
+    """
+    if raw or not console.is_terminal:
+        click.echo(text)
+    else:
+        console.print(Markdown(text))
     trace_response(text)
 
 

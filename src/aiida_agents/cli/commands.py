@@ -22,7 +22,12 @@ from aiida_agents.cli._guards import _needs_recognized_settings
 from aiida_agents.cli.config import config
 from aiida_agents.cli.doctor import doctor
 from aiida_agents.cli.mcp import mcp
-from aiida_agents.cli.output import _format_duration, _render_tool_calls, console
+from aiida_agents.cli.output import (
+    _format_duration,
+    _print_reply,
+    _render_tool_calls,
+    console,
+)
 from aiida_agents.cli.rag import rag
 from aiida_agents.cli.repl import _run_repl
 from aiida_agents.cli.agent import (
@@ -87,9 +92,14 @@ def chat(ctx: click.Context) -> None:  # pragma: no cover
 
 @cli.command("ask")
 @click.argument("question")
+@click.option(
+    "--raw",
+    is_flag=True,
+    help="Print the raw Markdown reply instead of rendering it (for piping/copy).",
+)
 @click.pass_context
 @_needs_recognized_settings
-def ask_cmd(ctx: click.Context, question: str) -> None:
+def ask_cmd(ctx: click.Context, question: str, raw: bool) -> None:
     """Answer a single question and exit (one-shot)."""
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     agent = _build_agent(settings, ctx.obj["profile"])
@@ -102,7 +112,7 @@ def ask_cmd(ctx: click.Context, question: str) -> None:
             err=True,
         )
         raise SystemExit(2)
-    click.echo(result.output)
+    _print_reply(result.output, raw=raw)
 
 
 @cli.command()

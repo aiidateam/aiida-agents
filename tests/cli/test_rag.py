@@ -108,7 +108,7 @@ def test_rag_search_errors_cleanly_without_an_index(
     "results, needle",
     [
         pytest.param(
-            [{"source": "howto.md", "section": "Run", "text": "use verdi run"}],
+            [{"source": "howto/run", "section": "Run", "text": "use verdi run"}],
             "verdi run",
             id="renders-a-match",
         ),

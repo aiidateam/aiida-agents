@@ -24,7 +24,8 @@ _MIN_CHUNK_CHARS = 150  # discard stubs shorter than this
 # chunks repeatedly out-ranked concept pages for questions like "what is a
 # CalcJobNode" — noise a researcher never wants back. The corpus directory
 # still mirrors the full docs; this only curates what gets embedded.
-_EXCLUDED_SOURCES: frozenset[str] = frozenset({"reference/_changelog.txt"})
+# Extensionless doc ids (see ``_load_docs``), so this matches the stored source.
+_EXCLUDED_SOURCES: frozenset[str] = frozenset({"reference/_changelog"})
 
 # A code-fence line: ``` optionally indented. Matches both the opening
 # ```lang line and the bare closing ``` (the corpus format from rag._textbuild).
@@ -214,8 +215,9 @@ def _chunk_text(text: str, source: str) -> list[dict[str, str]]:
     sections = _extract_text_sections(text)
     chunks: list[dict[str, str]] = []
 
-    # Build a readable topic label from the file path
-    parts = Path(source).with_suffix("").parts  # drop .txt
+    # Build a readable topic label from the doc id (already extensionless); the
+    # filename part is dropped below, so no suffix handling is needed here.
+    parts = Path(source).parts
     topic_label = (
         " > ".join(
             p.replace("_", " ").replace("-", " ").title()
@@ -264,13 +266,16 @@ def _load_docs(text_dir: str) -> list[dict[str, str]]:
     """
     chunks: list[dict[str, str]] = []
     for path in Path(text_dir).rglob("*.txt"):
-        rel = path.relative_to(text_dir).as_posix()
-        if rel in _EXCLUDED_SOURCES:
-            logger.debug("excluding %s from the index", rel)
+        # Store the extensionless doc id (howto/query, not howto/query.txt): the
+        # .txt is a sphinx-text-build artifact, but users see the doc as HTML in
+        # the browser or .rst in source, never .txt, so a .txt citation is noise.
+        source = path.relative_to(text_dir).with_suffix("").as_posix()
+        if source in _EXCLUDED_SOURCES:
+            logger.debug("excluding %s from the index", source)
             continue
         try:
             text = path.read_text(encoding="utf-8", errors="ignore")
-            chunks.extend(_chunk_text(text, source=rel))
+            chunks.extend(_chunk_text(text, source=source))
         except Exception as exc:
             logger.warning("skipping %s: %s", path, exc)
 

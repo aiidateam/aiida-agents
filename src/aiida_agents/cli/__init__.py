@@ -7,17 +7,17 @@ cli
 
 The command surface is split by concern:
 
-* ``commands``: the root group and the core commands (chat/ask/check/warm)
-* ``doctor``: the ``doctor`` command and its health checks (profile/model/RAG/docs)
-* ``config``: the ``config`` group and the effective-settings data behind it
-* ``rag``: the ``rag`` group and the docs-toolchain provisioning helpers
-* ``mcp``: the ``mcp`` group (run the MCP server from the CLI)
-* ``_guards``: the fail-fast guard for a mistyped settings key
-* ``repl``: the interactive REPL loop and prompt_toolkit session
-* ``hitl``: the human-in-the-loop write-approval flow
 * ``agent``: build, run, and probe the agent for a command
+* ``commands``: the root group and the core commands (chat/ask/check/warm)
+* ``config``: the ``config`` group and the effective-settings data behind it
+* ``doctor``: the ``doctor`` command and its health checks (profile/model/RAG/docs)
+* ``_guards``: the fail-fast guard for a mistyped settings key
+* ``hitl``: the human-in-the-loop write-approval flow
+* ``mcp``: the ``mcp`` group (run the MCP server from the CLI)
 * ``ollama``: local Ollama model provisioning (presence checks, pull prompts)
 * ``output``: the shared console and reply rendering
+* ``rag``: the ``rag`` group and the docs-toolchain provisioning helpers
+* ``repl``: the interactive REPL loop and prompt_toolkit session
 """
 
 from __future__ import annotations
