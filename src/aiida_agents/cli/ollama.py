@@ -53,9 +53,20 @@ def _should_skip_ollama_pull(model: str) -> bool:
 
 
 def _ollama_pull(model: str) -> None:  # pragma: no cover
-    """Download a model into the local Ollama server."""
+    """Download a model into the local Ollama server, warning on failure.
+
+    Best-effort (``check=False``) so a failed pull never tears down the session,
+    but the non-zero exit is surfaced rather than swallowed: otherwise the failure
+    stays silent until the model 404s on first use.
+    """
     click.echo(f"Running: ollama pull {model}")
-    subprocess.run(["ollama", "pull", model], check=False)  # noqa: S607
+    result = subprocess.run(["ollama", "pull", model], check=False)  # noqa: S607
+    if result.returncode != 0:
+        click.echo(
+            f"⚠️  'ollama pull {model}' failed (exit {result.returncode}); "
+            "the model may be unavailable on first use.",
+            err=True,
+        )
 
 
 def _prompt_pull_ollama_model(model: str) -> None:

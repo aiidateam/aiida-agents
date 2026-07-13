@@ -14,6 +14,7 @@ import rich_click as click
 from pydantic_ai.messages import ModelMessage, ToolCallPart
 from rich.console import Console
 from rich.markdown import Markdown
+from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
@@ -66,7 +67,11 @@ def _render_part(part: ToolPart, console: Console) -> None:
             f"[bold cyan]→ TOOL CALLED:[/bold cyan] [yellow]{part.tool_name}[/yellow]"
         )
         console.print(f"  [dim]ID:[/dim] {part.tool_call_id}")
-        console.print(f"  [dim]Args:[/dim] {part.args}")
+        # escape(): part.args is a dict repr that can contain bracketed values or
+        # stray [/tag]-shaped text; without escaping, rich would swallow it as
+        # markup or raise MarkupError (the tool-return Panel below uses Text() for
+        # the same reason).
+        console.print(f"  [dim]Args:[/dim] {escape(str(part.args))}")
     else:
         console.print(
             f"[bold green]← TOOL RETURNED:[/bold green] [yellow]{part.tool_name}[/yellow]"

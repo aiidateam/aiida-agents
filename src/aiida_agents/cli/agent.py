@@ -39,7 +39,9 @@ async def ask(
     message_history: list[ModelMessage] | None = None,
 ) -> Any:  # pragma: no cover
     """Run a single query through the agent, returning the result."""
-    logger.info("agent query: %s", question)
+    # DEBUG, not INFO: the raw prompt can carry secrets or private project detail,
+    # so it only reaches an (opt-in) log sink when the user asks for debug output.
+    logger.debug("agent query: %s", question)
     result = await agent.run(question, message_history=message_history)
     # Record the tool-call trace to the log file now (always); the console
     # render is the caller's job, done after any live spinner has stopped.

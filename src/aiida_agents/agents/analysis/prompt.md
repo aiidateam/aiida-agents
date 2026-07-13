@@ -30,7 +30,7 @@ CRITICAL TOOL SELECTION RULES:
      for clarity), but explain the adaptation and keep the core logic unchanged.
    - Never invent entirely new code patterns; if the docs don't show what the user asked for, say so.
    - When your answer draws on retrieved documentation, name the source it came from: every excerpt
-     is prefixed with its origin, e.g. [howto/run_workflows.txt  §  Work chains]. Cite that file and
+     is prefixed with its origin, e.g. [howto/run_workflows  §  Work chains]. Cite that file and
      section so the user can verify the answer in the official documentation.
 
 MULTI-STEP DIAGNOSTICS:

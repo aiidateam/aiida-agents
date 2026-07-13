@@ -109,13 +109,18 @@ def test_print_agent_renders_labelled_reply(
     assert "**" not in out  # markdown was rendered, not echoed verbatim
 
 
-def test_print_reply_raw_when_piped(capsys: pytest.CaptureFixture[str]) -> None:
+def test_print_reply_raw_when_piped(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
     """Piped/redirected output is the raw Markdown source, so `ask ... > out.md`
     and pipelines stay clean and re-renderable, not box-drawing rich output.
     """
-    from aiida_agents.cli.output import _print_reply
+    from aiida_agents.cli import output
 
-    _print_reply("# Title\n\n**bold**")
+    # Force non-terminal so the raw branch is exercised deterministically,
+    # independent of how pytest captures stdout (e.g. under `pytest -s`).
+    monkeypatch.setattr(output, "console", Console(force_terminal=False))
+    output._print_reply("# Title\n\n**bold**")
 
     out = capsys.readouterr().out
     assert "# Title" in out  # raw markdown preserved

@@ -16,6 +16,7 @@ from typing import Literal, NamedTuple, TypeAlias
 
 import rich_click as click
 from pydantic import ValidationError
+from pydantic.fields import FieldInfo
 from pydantic_settings import BaseSettings
 from rich.table import Table
 
@@ -65,6 +66,27 @@ def _display_value(obj: BaseSettings, field_name: str) -> str:
     return str(value)
 
 
+def _env_field_lines(
+    cls: type[BaseSettings], field_name: str, field: FieldInfo
+) -> list[str]:
+    """The commented ``.env`` lines for one field: its description (if any) on its
+    own comment line(s) above the key, then ``KEY=<default>`` (or a bare ``KEY=``
+    for a secret or required field, which gets no default).
+    """
+    lines: list[str] = []
+    # A field's description goes on its own comment line(s) above the key, so
+    # uncommenting the key never drags an inline comment into the value.
+    if field.description:
+        lines.extend(f"#   {line}" for line in field.description.splitlines())
+    env_var = _env_var_for(cls, field_name)
+    if field_name.endswith("_key") or field.is_required():
+        lines.append(f"# {env_var}=")
+    else:
+        default = field.default
+        lines.append(f"# {env_var}={'' if default is None else default}")
+    return lines
+
+
 def _env_template() -> str:
     """A commented ``.env`` scaffold listing every recognised setting.
 
@@ -82,17 +104,7 @@ def _env_template() -> str:
     for cls in _SETTINGS_GROUPS:
         lines.append(f"# --- {_group_label(cls)} ---")
         for field_name, field in cls.model_fields.items():
-            env_var = _env_var_for(cls, field_name)
-            # A field's description goes on its own comment line(s) above the key,
-            # so uncommenting the key never drags an inline comment into the value.
-            if field.description:
-                lines.extend(f"#   {line}" for line in field.description.splitlines())
-            if field_name.endswith("_key") or field.is_required():
-                # Secrets get no default; a required field has none to show.
-                lines.append(f"# {env_var}=")
-            else:
-                default = field.default
-                lines.append(f"# {env_var}={'' if default is None else default}")
+            lines.extend(_env_field_lines(cls, field_name, field))
         lines.append("")
     return "\n".join(lines)
 

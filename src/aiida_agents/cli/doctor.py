@@ -42,76 +42,86 @@ def _short_reason(exc: Exception) -> str:
     return lines[0][:100] if lines else ""
 
 
-def _run_diagnostics(
-    settings: ModelSettings, profile: str | None
-) -> list[_DiagnosticRow]:
-    """Run each health check, returning a :class:`_DiagnosticRow` per check.
-
-    Every check is isolated in its own ``try`` so one failure (an unreachable
-    model, an unloadable profile) never aborts the rest of the report. The model
-    check uses the no-generation reachability probe, so ``doctor`` never warms
-    the model.
-    """
-    from aiida_agents.cli.agent import _model_availability, _probe_reachable
-
-    rows: list[_DiagnosticRow] = []
-
+def _check_profile(profile: str | None) -> _DiagnosticRow:
+    """Whether the AiiDA profile loads."""
+    label = "AiiDA profile loads"
     try:
         from aiida import load_profile
 
         loaded = load_profile(profile)
-        rows.append(_DiagnosticRow("AiiDA profile loads", True, loaded.name))
+        return _DiagnosticRow(label, True, loaded.name)
     except Exception as exc:
-        rows.append(_DiagnosticRow("AiiDA profile loads", False, _short_reason(exc)))
+        return _DiagnosticRow(label, False, _short_reason(exc))
 
-    model_label = f"Model reachable ({settings.provider}:{settings.model})"
+
+def _check_model(settings: ModelSettings) -> _DiagnosticRow:
+    """Whether the configured model is reachable and advertised (no generation).
+
+    Uses the no-generation reachability probe, so ``doctor`` never warms the
+    model. An unadvertised model is fatal for Ollama (its listing is
+    authoritative) but only a note for a cloud endpoint (its listing may be
+    partial).
+    """
+    from aiida_agents.cli.agent import _model_availability, _probe_reachable
+
+    label = f"Model reachable ({settings.provider}:{settings.model})"
     try:
         reach = _probe_reachable(settings)
         availability = _model_availability(reach, settings.provider)
         if availability == "available":
-            rows.append(_DiagnosticRow(model_label, True, reach.endpoint))
-        elif availability == "not_pulled":
-            rows.append(
-                _DiagnosticRow(
-                    model_label,
-                    False,
-                    f"model not pulled (ollama pull {settings.model})",
-                )
+            return _DiagnosticRow(label, True, reach.endpoint)
+        if availability == "not_pulled":
+            return _DiagnosticRow(
+                label, False, f"model not pulled (ollama pull {settings.model})"
             )
-        elif availability == "unlisted":
-            rows.append(
-                _DiagnosticRow(
-                    model_label, True, "reachable; model not listed (may still work)"
-                )
+        if availability == "unlisted":
+            return _DiagnosticRow(
+                label, True, "reachable; model not listed (may still work)"
             )
-        else:
-            assert_never(availability)  # pragma: no cover
+        assert_never(availability)  # pragma: no cover
     except Exception as exc:
-        rows.append(_DiagnosticRow(model_label, False, _short_reason(exc)))
+        return _DiagnosticRow(label, False, _short_reason(exc))
 
+
+def _check_rag_index() -> _DiagnosticRow:
+    """Whether the RAG documentation index is built."""
+    label = "RAG index built"
     try:
         from aiida_agents.rag.store import index_status
 
         built = index_status().built
-        rows.append(
-            _DiagnosticRow(
-                "RAG index built",
-                built,
-                "" if built else "run `aiida-agents rag build`",
-            )
+        return _DiagnosticRow(
+            label, built, "" if built else "run `aiida-agents rag build`"
         )
     except Exception as exc:
-        rows.append(_DiagnosticRow("RAG index built", False, _short_reason(exc)))
+        return _DiagnosticRow(label, False, _short_reason(exc))
 
+
+def _check_docs_toolchain() -> _DiagnosticRow:
+    """Whether the sphinx docs toolchain (needed only for ``rag build``) is present."""
     has_sphinx = not _module_missing("sphinx")
-    rows.append(
-        _DiagnosticRow(
-            "Docs toolchain (sphinx)",
-            has_sphinx,
-            "" if has_sphinx else "needed only for `rag build`",
-        )
+    return _DiagnosticRow(
+        "Docs toolchain (sphinx)",
+        has_sphinx,
+        "" if has_sphinx else "needed only for `rag build`",
     )
-    return rows
+
+
+def _run_diagnostics(
+    settings: ModelSettings, profile: str | None
+) -> list[_DiagnosticRow]:
+    """Run each health check, one :class:`_DiagnosticRow` per check.
+
+    Each check catches its own failure and reports it as a failed row, so one
+    broken check (an unreachable model, an unloadable profile) never aborts the
+    rest of the report.
+    """
+    return [
+        _check_profile(profile),
+        _check_model(settings),
+        _check_rag_index(),
+        _check_docs_toolchain(),
+    ]
 
 
 @click.command()
@@ -121,11 +131,10 @@ def doctor(ctx: click.Context) -> None:
     """Diagnose the setup: profile, model, RAG index, and docs toolchain."""
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     click.echo("Running diagnostics ...\n")
-    all_ok = True
-    for label, ok, detail in _run_diagnostics(settings, ctx.obj["profile"]):
-        mark = "[green]✓[/]" if ok else "[red]✗[/]"
-        suffix = f" [dim]({detail})[/]" if detail else ""
-        console.print(f"{mark} {label}{suffix}")
-        all_ok = all_ok and ok
-    if not all_ok:
+    rows = _run_diagnostics(settings, ctx.obj["profile"])
+    for row in rows:
+        mark = "[green]✓[/]" if row.ok else "[red]✗[/]"
+        suffix = f" [dim]({row.detail})[/]" if row.detail else ""
+        console.print(f"{mark} {row.label}{suffix}")
+    if not all(row.ok for row in rows):
         raise SystemExit(1)
