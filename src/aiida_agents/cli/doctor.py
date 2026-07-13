@@ -12,6 +12,7 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import rich_click as click
+from rich.markup import escape
 from typing_extensions import assert_never
 
 from aiida_agents._settings import ModelSettings
@@ -133,8 +134,11 @@ def doctor(ctx: click.Context) -> None:
     click.echo("Running diagnostics ...\n")
     rows = _run_diagnostics(settings, ctx.obj["profile"])
     for row in rows:
+        # escape() the dynamic label/detail (a model name, or an error message
+        # from _short_reason) so a stray bracket can't be swallowed as Rich
+        # markup or raise MarkupError; the ✓/✗ and [dim] tags stay intentional.
         mark = "[green]✓[/]" if row.ok else "[red]✗[/]"
-        suffix = f" [dim]({row.detail})[/]" if row.detail else ""
-        console.print(f"{mark} {row.label}{suffix}")
+        suffix = f" [dim]({escape(row.detail)})[/]" if row.detail else ""
+        console.print(f"{mark} {escape(row.label)}{suffix}")
     if not all(row.ok for row in rows):
         raise SystemExit(1)

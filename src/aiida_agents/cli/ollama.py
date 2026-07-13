@@ -60,7 +60,7 @@ def _ollama_pull(model: str) -> None:  # pragma: no cover
     stays silent until the model 404s on first use.
     """
     click.echo(f"Running: ollama pull {model}")
-    result = subprocess.run(["ollama", "pull", model], check=False)  # noqa: S607
+    result = subprocess.run(["ollama", "pull", model], check=False)  # noqa: S603, S607
     if result.returncode != 0:
         click.echo(
             f"⚠️  'ollama pull {model}' failed (exit {result.returncode}); "
