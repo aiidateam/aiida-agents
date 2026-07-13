@@ -7,7 +7,7 @@ alternative to adding more hardcoded, single-purpose tools like
 Design goals, informed by testing `query_nodes_by_extras` against
 Natasha's archive:
 
-1. Native AND/OR/NOT support. `query_nodes_by_extras` has no OR — when
+1. Native AND/OR support. `query_nodes_by_extras` has no OR — when
    asked an OR question, the agent worked around it with three separate
    tool calls (count A, count B, count A-and-B) and then reported one
    sub-count as if it were the combined answer (off by ~4,500 in
@@ -34,32 +34,32 @@ Natasha's archive:
    old hardcoded-per-pattern tools and letting the model write and
    execute arbitrary QueryBuilder code itself.
 
-NOTE: this is a prototype on an experiment branch, not a replacement for
-`query_nodes_by_extras` yet. It has not been reviewed. Validate with
-`dev/query_builder/verify_query_nodes_direct.py` (direct function calls,
-no LLM involved) before wiring it into the agent's tool list.
+Validate standalone behavior with `dev/query_builder/verify_query_nodes.py` (direct function calls, no LLM involved).
 """
 
 from __future__ import annotations
 
+import datetime
 import logging
 import typing as t
 
 from pydantic import BaseModel, Field
 
 from aiida import orm
+from aiida.common.exceptions import NotExistent
 
 logger = logging.getLogger(__name__)
 
 MAX_LIMIT = 50
 DEFAULT_LIMIT = 5
-DEFAULT_PROJECT = ["id", "uuid", "node_type", "ctime", "extras"]
+DEFAULT_PROJECT = ["pk", "uuid", "node_type", "ctime", "extras"]
 
 # Fields that live on the node itself, not inside `extras`. Anything not
 # in this set is assumed to be an extras key and gets the "extras."
 # prefix added automatically, so the model doesn't need to know AiiDA's
 # internal QueryBuilder field-naming convention.
 NATIVE_NODE_FIELDS = {
+    "pk",
     "id",
     "uuid",
     "node_type",
@@ -70,17 +70,20 @@ NATIVE_NODE_FIELDS = {
 }
 
 
+FilterOpLiteral = t.Literal["==", "!==", ">", ">=", "<", "<=", "in", "like"]
+
+
 class FilterOperator(str):
     """Comparison operators, matching AiiDA QueryBuilder's own filter syntax."""
 
-    EQ = "=="
-    NEQ = "!="
-    GT = ">"
-    GTE = ">="
-    LT = "<"
-    LTE = "<="
-    IN = "in"
-    LIKE = "like"
+    EQ: t.Literal["=="] = "=="
+    NEQ: t.Literal["!=="] = "!=="
+    GT: t.Literal[">"] = ">"
+    GTE: t.Literal[">="] = ">="
+    LT: t.Literal["<"] = "<"
+    LTE: t.Literal["<="] = "<="
+    IN: t.Literal["in"] = "in"
+    LIKE: t.Literal["like"] = "like"
 
 
 class FieldFilter(BaseModel):
@@ -90,13 +93,13 @@ class FieldFilter(BaseModel):
         description=(
             "Field name to filter on. Extras fields (e.g. 'spacegroup_number', "
             "'insulator') are given as-is; the 'extras.' prefix is added "
-            "automatically. Native node fields (id, uuid, node_type, ctime, "
+            "automatically. Native node fields (pk, id, uuid, node_type, ctime, "
             "mtime, label, description) are used as-is."
         )
     )
-    operator: str = Field(
+    operator: FilterOpLiteral = Field(
         default=FilterOperator.EQ,
-        description="One of: ==, !=, >, >=, <, <=, in, like",
+        description="One of: ==, !==, >, >=, <, <=, in, like",
     )
     value: t.Any = Field(description="Value to compare against.")
 
@@ -152,12 +155,13 @@ class QueryNodesSpec(BaseModel):
     )
     project: list[str] = Field(
         default_factory=lambda: list(DEFAULT_PROJECT),
-        description="Fields to return per record. Ignored when count_only is True.",
+        description="Fields to return per record (defaults to pk, uuid, node_type, ctime, extras). Ignored when count_only is True.",
     )
     limit: int = Field(
         default=DEFAULT_LIMIT,
+        ge=1,
         le=MAX_LIMIT,
-        description=f"Max records to return. Hard-capped at {MAX_LIMIT} to avoid token overflow. Ignored when count_only is True.",
+        description=f"Max records to return (must be between 1 and {MAX_LIMIT} to avoid token overflow). Ignored when count_only is True.",
     )
     count_only: bool = Field(
         default=False,
@@ -167,7 +171,11 @@ class QueryNodesSpec(BaseModel):
 
 def _qualify_field(field: str) -> str:
     """Add the 'extras.' prefix unless the field is a native node field."""
-    if field in NATIVE_NODE_FIELDS or field.startswith("extras."):
+    if (
+        field in NATIVE_NODE_FIELDS
+        or field.startswith("extras.")
+        or field.startswith("attributes.")
+    ):
         return field
     return f"extras.{field}"
 
@@ -179,6 +187,14 @@ def _translate_filter(node: FieldFilter | FilterGroup) -> dict[str, t.Any]:
         {"and": [{"extras.insulator": True}, {"or": [...]}]}
     """
     if isinstance(node, FieldFilter):
+        if node.operator == FilterOperator.IN and not isinstance(
+            node.value, (list, tuple, set)
+        ):
+            raise ValueError(
+                f"Operator 'in' requires a list of values for field '{node.field}', "
+                f"got {type(node.value).__name__}: {node.value!r}. "
+                "Please provide a list, e.g. [value1, value2]."
+            )
         field = _qualify_field(node.field)
         if node.operator == FilterOperator.EQ:
             return {field: node.value}
@@ -189,7 +205,22 @@ def _translate_filter(node: FieldFilter | FilterGroup) -> dict[str, t.Any]:
     return {key: [_translate_filter(c) for c in node.conditions]}
 
 
-def query_nodes(spec: QueryNodesSpec) -> list[dict[str, t.Any]] | int:
+def _serialize_value(val: t.Any) -> t.Any:
+    """Serialize values like raw datetimes and filter internal _aiida_* keys."""
+    if isinstance(val, (datetime.datetime, datetime.date)):
+        return str(val)
+    if isinstance(val, dict):
+        return {
+            k: _serialize_value(v)
+            for k, v in val.items()
+            if not str(k).startswith("_aiida_")
+        }
+    if isinstance(val, list):
+        return [_serialize_value(v) for v in val]
+    return val
+
+
+def query_nodes(spec: QueryNodesSpec) -> dict[str, t.Any]:
     """Query AiiDA nodes using a structured filter spec, with native
     AND/OR logic, sorting, and group scoping.
 
@@ -203,9 +234,9 @@ def query_nodes(spec: QueryNodesSpec) -> list[dict[str, t.Any]] | int:
         spec: The structured query spec (see QueryNodesSpec).
 
     Returns:
-        A list of records (each a dict with the requested `project`
-        fields) if count_only is False, otherwise the integer count of
-        matching nodes.
+        A dictionary `{"total": int, "records": list[dict]}` containing the
+        total matching count and up to `limit` records (`records` is empty when
+        count_only is True).
     """
     logger.debug("query_nodes(spec=%r)", spec)
 
@@ -213,6 +244,13 @@ def query_nodes(spec: QueryNodesSpec) -> list[dict[str, t.Any]] | int:
 
     node_kwargs: dict[str, t.Any] = {}
     if spec.group_label is not None:
+        try:
+            orm.Group.collection.get(label=spec.group_label)
+        except NotExistent as exc:
+            raise ValueError(
+                f"Group with label '{spec.group_label}' does not exist. "
+                "Use query_nodes or search tools to check available groups."
+            ) from exc
         qb.append(orm.Group, filters={"label": spec.group_label}, tag="group")
         node_kwargs["with_group"] = "group"
 
@@ -221,12 +259,14 @@ def query_nodes(spec: QueryNodesSpec) -> list[dict[str, t.Any]] | int:
     if spec.count_only:
         qb.append(orm.Node, tag="node", filters=filters, **node_kwargs)
         count = qb.count()
-        logger.debug("query_nodes: returned count %d", count)
-        return count
+        logger.debug("query_nodes: returned count %d (count_only=True)", count)
+        return {"total": count, "records": []}
 
+    project_fields = [_qualify_field(p) for p in spec.project]
     qb.append(
-        orm.Node, tag="node", filters=filters, project=spec.project, **node_kwargs
+        orm.Node, tag="node", filters=filters, project=project_fields, **node_kwargs
     )
+    total = qb.count()
 
     for sort_spec in spec.sort:
         field = _qualify_field(sort_spec.field)
@@ -240,9 +280,11 @@ def query_nodes(spec: QueryNodesSpec) -> list[dict[str, t.Any]] | int:
             order_value = {"order": sort_spec.direction, "cast": sort_spec.cast}
         qb.order_by({"node": {field: order_value}})
 
-    limit = min(spec.limit, MAX_LIMIT)
-    qb.limit(limit)
+    qb.limit(spec.limit)
 
-    records = [dict(zip(spec.project, row, strict=True)) for row in qb.iterall()]
-    logger.debug("query_nodes: returned %d records", len(records))
-    return records
+    records = [
+        {k: _serialize_value(v) for k, v in zip(spec.project, row, strict=True)}
+        for row in qb.iterall()
+    ]
+    logger.debug("query_nodes: returned %d records (total %d)", len(records), total)
+    return {"total": total, "records": records}

@@ -36,7 +36,7 @@ from pydantic_ai.messages import ToolReturnPart
 from aiida_agents.agents import get_agent
 
 DEFAULT_GROUP = "workchain/PBEsol/wannier/lumi/final/bxsf"
-TOOL_NAME = "query_nodes_by_extras"
+TOOL_NAME = "query_nodes"
 
 
 @dataclass
@@ -60,13 +60,23 @@ class CaseResult:
     def tool_matches_expected(self) -> bool | None:
         if self.expected is None or not self.tool_called:
             return None
-        return self.tool_result == self.expected
+        res_val = (
+            self.tool_result["total"]
+            if isinstance(self.tool_result, dict) and "total" in self.tool_result
+            else self.tool_result
+        )
+        return res_val == self.expected
 
     @property
     def agent_matches_tool(self) -> bool | None:
         if not self.tool_called or self.agent_text_answer is None:
             return None
-        return self.agent_text_answer == self.tool_result
+        res_val = (
+            self.tool_result["total"]
+            if isinstance(self.tool_result, dict) and "total" in self.tool_result
+            else self.tool_result
+        )
+        return self.agent_text_answer == res_val
 
 
 TEST_CASES: list[TestCase] = [
@@ -197,10 +207,15 @@ def print_summary(results: list[CaseResult]) -> None:
     print(header)
     print("=" * len(header))
     for r in results:
+        tool_res_display = (
+            r.tool_result["total"]
+            if isinstance(r.tool_result, dict) and "total" in r.tool_result
+            else r.tool_result
+        )
         print(
-            f"{r.id:<32} {_fmt(r.expected):>9} {_fmt(r.tool_result):>12} "
+            f"{r.id:<32} {_fmt(r.expected):>9} {_fmt(tool_res_display):>12} "
             f"{_fmt(r.agent_text_answer):>11} {_fmt_bool(r.tool_matches_expected):>8} "
-            f"{_fmt_bool(r.agent_matches_tool):>9} {str(r.tool_called):>7}"
+            f"{_fmt_bool(r.agent_matches_tool):>9} {r.tool_called!s:>7}"
         )
     print("=" * len(header))
 

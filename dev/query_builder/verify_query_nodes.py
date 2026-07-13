@@ -12,7 +12,7 @@ correct answer is 13829). Here it's expressed as a single native OR
 filter, no multi-call workaround needed.
 
 Usage:
-    uv run python dev/query_builder/verify_query_nodes_direct.py
+    uv run python dev/query_builder/verify_query_nodes.py
 """
 
 from __future__ import annotations
@@ -128,12 +128,12 @@ def case_range_query() -> tuple[str, int | None, int | list]:
     return "range_query", None, query_nodes(spec)
 
 
-def case_ranking() -> tuple[str, None, list]:
+def case_ranking() -> tuple[str, None, dict]:
     spec = QueryNodesSpec(
         group_label=GROUP,
         filters=None,
         sort=[SortSpec(field="pw_bandgap", direction="desc", cast="f")],
-        project=["id", "extras"],
+        project=["pk", "extras"],
         limit=5,
         count_only=False,
     )
@@ -169,26 +169,38 @@ def main() -> None:
 
     for case_fn in CASES:
         case_id, expected, actual = case_fn()
+        actual_total = (
+            actual["total"]
+            if isinstance(actual, dict) and "total" in actual
+            else actual
+        )
+        actual_records = (
+            actual["records"]
+            if isinstance(actual, dict) and "records" in actual
+            else []
+        )
         if expected is None:
             status = "n/a"
             actual_display = (
-                actual if not isinstance(actual, list) else f"[{len(actual)} rows]"
+                actual_total if not actual_records else f"[{len(actual_records)} rows]"
             )
-        elif isinstance(actual, list):
+        elif actual_records:
             status = "n/a"
-            actual_display = f"[{len(actual)} rows]"
+            actual_display = f"[{len(actual_records)} rows]"
         else:
-            status = "PASS" if actual == expected else "FAIL"
-            actual_display = actual
+            status = "PASS" if actual_total == expected else "FAIL"
+            actual_display = actual_total
         print(
             f"{case_id:<32} {str(expected):>10} {str(actual_display):>10} {status:>8}"
         )
 
-        if case_id == "ranking_query" and isinstance(actual, list):
+        if case_id == "ranking_query" and actual_records:
             print("  top 5 by pw_bandgap:")
-            for row in actual:
+            for row in actual_records:
                 extras = row.get("extras", {})
-                print(f"    pk={row.get('id')} pw_bandgap={extras.get('pw_bandgap')}")
+                print(
+                    f"    pk={row.get('pk', row.get('id'))} pw_bandgap={extras.get('pw_bandgap')}"
+                )
 
     print("=" * len(header))
     print(

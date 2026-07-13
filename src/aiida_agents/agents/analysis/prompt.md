@@ -18,9 +18,10 @@ CRITICAL TOOL SELECTION RULES:
        - cast: "f" (float), "i" (integer), "t" (text), "b" (boolean), "d" (date)
      * count_only: true to return just a count (never fetches full records)
      * group_label: restrict search to a specific group
-     * limit: max records to return (capped at 50)
-   - Prefer 'query_nodes' over 'query_nodes_by_extras' for any query involving OR logic, sorting,
-     or multiple combined conditions — it handles these natively without silent approximations.
+     * limit: max records to return (must be between 1 and 50)
+   - 'query_nodes' returns a dictionary `{"total": int, "records": list[dict]}` containing the total matching count across the group/database and up to `limit` records (`records` is empty when `count_only: true`).
+   - Use 'query_nodes' for queries involving complex filtering (AND/OR logic), sorting by fields,
+     or combining multiple conditions — it evaluates logic in the database natively without approximations.
    - Examples:
      * Single filter: {"filters": {"field": "insulator", "operator": "==", "value": false}, "count_only": true}
      * OR logic: {"filters": {"logic": "OR", "conditions": [{"field": "insulator", "operator": "==", "value": true}, {"field": "spacegroup_number", "operator": "<", "value": 195}]}, "count_only": true}

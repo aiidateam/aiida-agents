@@ -57,11 +57,11 @@ def _node_type_for(name: str) -> str | None:
     return _node_type_index().get(name.lower())
 
 
-def query_nodes(
+def list_nodes_by_type(
     node_type: str = "process",
     limit: int = 10,
 ) -> list[NodeRecord]:
-    """Query AiiDA nodes by type.
+    """List AiiDA nodes by type.
 
     ``node_type`` accepts an abstract hierarchy level (``node``, ``data``,
     ``process``, ``calculation``, ``workflow``, or their ``...Node`` class
@@ -70,7 +70,7 @@ def query_nodes(
     ``node_type`` via AiiDA's entry points, or, as a last resort, an arbitrary
     substring of the ``node_type``.
     """
-    logger.debug("query_nodes(node_type=%r, limit=%d)", node_type, limit)
+    logger.debug("list_nodes_by_type(node_type=%r, limit=%d)", node_type, limit)
 
     normalized = node_type.lower()
     filters: dict[str, t.Any]
@@ -94,7 +94,7 @@ def query_nodes(
         }
         for item in res.data
     ]
-    logger.debug("query_nodes: returned %d nodes", len(records))
+    logger.debug("list_nodes_by_type: returned %d nodes", len(records))
     return records
 
 

@@ -57,7 +57,7 @@ class ProcessRecord(TypedDict):
 
 
 class NodeRecord(TypedDict):
-    """A row returned by ``query_nodes``."""
+    """A row returned by ``list_nodes_by_type``."""
 
     pk: int
     uuid: str
