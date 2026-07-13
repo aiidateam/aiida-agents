@@ -101,26 +101,73 @@ def _prompt_continuation(width: int, _line_number: int, _wrap_count: int) -> str
     return "." * (width - 1) + " "
 
 
-def _run_repl(agent: Agent, settings: ModelSettings) -> None:  # pragma: no cover
-    """Drive the interactive REPL over an already-built agent."""
-    repl_cfg = ReplSettings()
+def _make_session(repl_cfg: ReplSettings) -> PromptSession[str]:  # pragma: no cover
+    """Build the prompt session: persistent history plus the REPL key bindings."""
     history_file = _history_file()
     history_file.parent.mkdir(parents=True, exist_ok=True)
-    session: PromptSession[str] = PromptSession(
+    return PromptSession(
         history=FileHistory(str(history_file)),
         key_bindings=_key_bindings(),
         multiline=True,
         vi_mode=repl_cfg.vi_mode,
     )
 
+
+def _run_turn(
+    agent: Agent,
+    question: str,
+    history: list[ModelMessage],
+    repl_cfg: ReplSettings,
+) -> list[ModelMessage]:  # pragma: no cover
+    """Run one query, render its reply, and return the updated history.
+
+    Returns ``history`` unchanged if the run is interrupted (Ctrl-C) or errors,
+    so a failed turn never corrupts the conversation.
+    """
+    start = time.monotonic()
+    try:
+        with console.status("[dim]thinking...[/]", spinner="dots"):
+            result = asyncio.run(
+                ask(
+                    agent,
+                    question,
+                    _cap_history(history, repl_cfg.history_max_turns) or None,
+                )
+            )
+    except KeyboardInterrupt:
+        click.echo("(interrupted)")
+        return history
+    except Exception as exc:
+        click.echo(f"❌ Error: {exc}")
+        return history
+    elapsed = time.monotonic() - start
+
+    # Render the run's tool-call trace now that the spinner has stopped: the
+    # traces are a post-run dump, so printing them into the still-live spinner
+    # region above would fight its redraws. Debug-gated inside.
+    _render_tool_calls(result.new_messages(), console)
+
+    if isinstance(result.output, DeferredToolRequests):
+        history = _handle_deferred(agent, result, history)
+    else:
+        _print_agent(result.output)
+        history = result.all_messages()
+    console.print(f"[dim]⏱ {_format_duration(elapsed)}[/]")
+    return history
+
+
+def _run_repl(agent: Agent, settings: ModelSettings) -> None:  # pragma: no cover
+    """Drive the interactive REPL: read a line, dispatch commands, run the turn."""
+    repl_cfg = ReplSettings()
+    session = _make_session(repl_cfg)
+
     click.echo(
         f"AiiDA Agent [{settings.provider}:{settings.model}] - "
         "type 'quit' to exit, '/clear' to start a new conversation, "
-        "Esc then Enter (Alt+Enter) for a new line\n"
+        "Ctrl+Enter (or Esc then Enter) for a new line\n"
     )
 
     history: list[ModelMessage] = []
-
     while True:
         # Ctrl-C aborts the current line (like a shell); Ctrl-D at an empty
         # prompt exits. prompt_toolkit raises KeyboardInterrupt / EOFError.
@@ -137,41 +184,11 @@ def _run_repl(agent: Agent, settings: ModelSettings) -> None:  # pragma: no cove
         # Empty input re-prompts (shell-like); only an explicit word or Ctrl-D exits.
         if not question:
             continue
-
         if question.lower() in ("quit", "exit", "q"):
             break
-
         if question.lower() == "/clear":
             history = []
             click.echo("Conversation cleared.\n")
             continue
 
-        start = time.monotonic()
-        try:
-            with console.status("[dim]thinking...[/]", spinner="dots"):
-                result = asyncio.run(
-                    ask(
-                        agent,
-                        question,
-                        _cap_history(history, repl_cfg.history_max_turns) or None,
-                    )
-                )
-        except KeyboardInterrupt:
-            click.echo("(interrupted)")
-            continue
-        except Exception as exc:
-            click.echo(f"❌ Error: {exc}")
-            continue
-        elapsed = time.monotonic() - start
-
-        # Render the run's tool-call trace now that the spinner has stopped: the
-        # traces are a post-run dump, so printing them into the still-live
-        # spinner region above would fight its redraws. Debug-gated inside.
-        _render_tool_calls(result.new_messages(), console)
-
-        if isinstance(result.output, DeferredToolRequests):
-            history = _handle_deferred(agent, result, history)
-        else:
-            _print_agent(result.output)
-            history = result.all_messages()
-        console.print(f"[dim]⏱ {_format_duration(elapsed)}[/]")
+        history = _run_turn(agent, question, history, repl_cfg)
