@@ -20,7 +20,7 @@ It is exploratory — we're finding out what works first — but the goal is to 
 Where we stand at the beginning of July 2026:
 
 <p align="center">
-  <video src="https://github.com/user-attachments/assets/393907f2-2079-4ab7-a5eb-c45c2dcccdd8" width="100%" controls></video>
+  <video src="https://github.com/user-attachments/assets/6d2a108c-bf6d-43fc-a4fd-21252939c7c2" width="100%" controls></video>
 </p>
 
 ## Status
