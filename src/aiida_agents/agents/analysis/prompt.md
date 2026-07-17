@@ -9,23 +9,38 @@ CRITICAL TOOL SELECTION RULES:
    - To find the outputs (outgoing links) of any node, use 'get_node_outputs(pk=...)'.
 3. CRYSTAL STRUCTURE SEARCHING:
    - To find crystal structures by elements or formula, use 'search_structures(formula=...)'.
-4. GENERIC NODE SEARCH WITH FILTERING AND SORTING:
-   - Use 'query_nodes' for any search combining filters (AND/OR logic), sorting, or counting nodes.
-   - 'query_nodes' accepts a structured JSON spec with:
-     * filters: single FieldFilter (e.g., {"field": "insulator", "operator": "==", "value": false})
-       or nested FilterGroup with "AND"/"OR" logic for complex conditions
-     * sort: list of fields to order by, with optional 'cast' for extras fields:
-       - cast: "f" (float), "i" (integer), "t" (text), "b" (boolean), "d" (date)
-     * count_only: true to return just a count (never fetches full records)
-     * group_label: restrict search to a specific group
-     * limit: max records to return (must be between 1 and 50)
-   - 'query_nodes' returns a dictionary `{"total": int, "records": list[dict]}` containing the total matching count across the group/database and up to `limit` records (`records` is empty when `count_only: true`).
-   - Use 'query_nodes' for queries involving complex filtering (AND/OR logic), sorting by fields,
-     or combining multiple conditions — it evaluates logic in the database natively without approximations.
-   - Examples:
-     * Single filter: {"filters": {"field": "insulator", "operator": "==", "value": false}, "count_only": true}
-     * OR logic: {"filters": {"logic": "OR", "conditions": [{"field": "insulator", "operator": "==", "value": true}, {"field": "spacegroup_number", "operator": "<", "value": 195}]}, "count_only": true}
-     * Sorted ranking: {"filters": null, "sort": [{"field": "pw_bandgap", "direction": "desc", "cast": "f"}], "limit": 5}
+4. GENERIC SEARCH — FILTERING, SORTING, COUNTING, PROVENANCE:
+   - Use 'query_nodes' for any question about what is in the database: how many nodes match,
+     which rank highest, and how nodes relate to each other. It evaluates AND/OR logic and joins
+     in the database, so never approximate by combining several counts yourself.
+   - Always set 'entity_type' to what the user is asking about ('StructureData', 'process',
+     'CalcJobNode', 'data', ...). Omitting it searches ALL node types, which over-counts when
+     the user asked about one kind of node. Abstract levels match their whole subtree.
+   - Set 'count_only': true for "how many" questions — it returns the total without fetching records.
+   - Fields: extras keys are given bare ('spacegroup_number'); node columns (pk, uuid, node_type,
+     ctime, label) and 'attributes.x' paths are used as given. Not-equal is '!==', never '!='.
+   - Sorting an extras field requires 'cast': "f" float, "i" int, "t" text, "b" bool, "d" date.
+   - Returns {"total": int, "records": list[dict]} — the total number of matches, and up to
+     'limit' records (empty when count_only). Quote 'total' exactly; never recompute it.
+   - For a single kind of node, use the flat form:
+     * Count in a group: {"entity_type": "StructureData", "group_label": "my/group",
+       "filters": {"field": "insulator", "operator": "==", "value": false}, "count_only": true}
+     * OR logic: {"entity_type": "StructureData", "filters": {"logic": "OR", "conditions":
+       [{"field": "insulator", "operator": "==", "value": true},
+        {"field": "spacegroup_number", "operator": "<", "value": 195}]}, "count_only": true}
+     * Ranking: {"entity_type": "StructureData",
+       "sort": [{"field": "pw_bandgap", "direction": "desc", "cast": "f"}], "limit": 5}
+   - For questions relating nodes to each other, give a 'path': each entry names an entity with a
+     'tag', and every entry after the first says how it joins to an earlier tag. Use
+     'with_outgoing' (is an input to), 'with_incoming' (has inputs from), 'with_ancestors' /
+     'with_descendants' (anywhere up/down the provenance graph). Filters and projections are then
+     keyed by tag.
+     * Structures that are inputs to a failed workchain:
+       {"path": [{"entity_type": "WorkChainNode", "tag": "wc"},
+                 {"entity_type": "StructureData", "tag": "st",
+                  "joining_keyword": "with_outgoing", "joining_value": "wc"}],
+        "filters": {"wc": {"field": "attributes.exit_status", "operator": "!==", "value": 0}},
+        "project": {"st": ["pk", "formula_hill"]}}
 5. AIIDA DOCUMENTATION:
    - For any conceptual questions, code example requests, how-to guidance, or queries about imports and syntax, you MUST call 'search_aiida_docs(query=...)' first instead of answering from memory.
 6. WORKFLOW/CALCULATION SUBMISSION:

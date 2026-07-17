@@ -1,101 +1,15 @@
-"""Surface-agnostic tools for generic AiiDA node queries."""
+"""Surface-agnostic tools for walking a node's provenance links."""
 
 from __future__ import annotations
 
 import logging
 import typing as t
-from functools import lru_cache
-
-from aiida import orm
-from aiida.plugins.entry_point import get_entry_point_names, load_entry_point
-from aiida_restapi.services.node import NodeService
-from aiida_restapi.common.query import QueryBuilderParams
 
 from ._orm import load_node
-from ._types import Identifier, NodeLink, NodeRecord
+from ._types import Identifier, NodeLink
 
 
 logger = logging.getLogger(__name__)
-
-# Abstract hierarchy levels are node_type prefixes, not entry points, so they
-# can't be derived from the registry. "like <prefix>%" selects the whole subtree.
-_SUBTREE_PREFIXES: dict[str, str] = {
-    "node": "%",
-    "data": "data.%",
-    "process": "process.%",
-    "processnode": "process.%",
-    "calculation": "process.calculation.%",
-    "calculationnode": "process.calculation.%",
-    "workflow": "process.workflow.%",
-    "workflownode": "process.workflow.%",
-}
-
-# Built once at module level; all three tools share the same service instance.
-_node_service: NodeService[orm.Node, t.Any] = NodeService(orm.Node)
-
-
-@lru_cache(maxsize=1)
-def _node_type_index() -> dict[str, str]:
-    """Lowercased class name and entry-point name -> node_type, from the entry points."""
-    index: dict[str, str] = {}
-    for group in ("aiida.data", "aiida.node"):
-        for name in get_entry_point_names(group):
-            try:
-                cls = load_entry_point(group, name)
-            except Exception:
-                continue
-            if node_type := getattr(cls, "class_node_type", None):
-                index[name.lower()] = node_type
-                index[cls.__name__.lower()] = node_type
-    return index
-
-
-def _node_type_for(name: str) -> str | None:
-    """Resolve a class or entry-point name to a node_type string."""
-    if name.endswith("."):  # already a fully-qualified node_type
-        return name
-    return _node_type_index().get(name.lower())
-
-
-def list_nodes_by_type(
-    node_type: str = "process",
-    limit: int = 10,
-) -> list[NodeRecord]:
-    """List AiiDA nodes by type.
-
-    ``node_type`` accepts an abstract hierarchy level (``node``, ``data``,
-    ``process``, ``calculation``, ``workflow``, or their ``...Node`` class
-    names) which matches the whole subtree, a concrete class or entry-point name
-    (``StructureData``, ``Int``, ``CalcJobNode``, ...) resolved to an exact
-    ``node_type`` via AiiDA's entry points, or, as a last resort, an arbitrary
-    substring of the ``node_type``.
-    """
-    logger.debug("list_nodes_by_type(node_type=%r, limit=%d)", node_type, limit)
-
-    normalized = node_type.lower()
-    filters: dict[str, t.Any]
-    if normalized in _SUBTREE_PREFIXES:
-        filters = {"node_type": {"like": _SUBTREE_PREFIXES[normalized]}}
-    elif (node_type_string := _node_type_for(node_type)) is not None:
-        filters = {"node_type": node_type_string}
-    else:
-        filters = {"node_type": {"like": f"%{node_type}%"}}
-
-    params = QueryBuilderParams(
-        page_size=limit, filters=filters, order_by={"ctime": "desc"}
-    )
-    res = _node_service.get_many(params)
-    records: list[NodeRecord] = [
-        {
-            "pk": item["pk"],
-            "uuid": item["uuid"],
-            "node_type": item["node_type"],
-            "ctime": str(item.get("ctime")),
-        }
-        for item in res.data
-    ]
-    logger.debug("list_nodes_by_type: returned %d nodes", len(records))
-    return records
 
 
 def _node_links(

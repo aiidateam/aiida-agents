@@ -18,9 +18,9 @@ from typing_extensions import TypedDict
 __all__ = [
     "Identifier",
     "NodeLink",
-    "NodeRecord",
     "ProcessRecord",
     "ProcessStatus",
+    "QueryResult",
     "StructureRecord",
     "SubmitResult",
 ]
@@ -56,15 +56,6 @@ class ProcessRecord(TypedDict):
     exit_status: int | None
 
 
-class NodeRecord(TypedDict):
-    """A row returned by ``list_nodes_by_type``."""
-
-    pk: int
-    uuid: str
-    node_type: str
-    ctime: str
-
-
 class NodeLink(TypedDict):
     """A link returned by ``get_node_inputs`` / ``get_node_outputs``."""
 
@@ -73,6 +64,19 @@ class NodeLink(TypedDict):
     node_type: str
     link_label: str
     link_type: str
+
+
+class QueryResult(TypedDict):
+    """What ``query_nodes`` returns.
+
+    ``total`` counts every match, while ``records`` holds at most ``limit`` of
+    them (and is empty for a count-only query), so a caller can report how many
+    there are without fetching them. The record keys are whatever the query
+    projected, hence the open value type.
+    """
+
+    total: int
+    records: list[dict[str, t.Any]]
 
 
 class StructureRecord(TypedDict):
