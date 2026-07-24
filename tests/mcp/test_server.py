@@ -53,10 +53,7 @@ def test_server_registers_read_tools_only() -> None:
     assert hasattr(submit, "submit_workflow")
     assert "submit_workflow" in discovered  # a surface-agnostic tool, so discovered
     assert "submit_workflow" not in registered  # but never exposed on the server
-    assert registered == discovered - {
-        "submit_workflow",
-        "query_nodes",
-    }  # exactly the read tools
+    assert registered == discovered - {"submit_workflow"}  # exactly the read tools
 
 
 def test_register_tool_surfaces_tool_error() -> None:

@@ -9,28 +9,43 @@ CRITICAL TOOL SELECTION RULES:
    - To find the outputs (outgoing links) of any node, use 'get_node_outputs(pk=...)'.
 3. CRYSTAL STRUCTURE SEARCHING:
    - To find crystal structures by elements or formula, use 'search_structures(formula=...)'.
-4. ARBITRARY NODE QUERIES WITH QUERYBUILDER:
-   - Use 'query' for any arbitrary database search: filtering, joining across entities, sorting, projections, paging.
-   - 'query' accepts a QueryBuilderDict with:
-     * path: list of entity types or path items
-       - **For NODE entities only** (data.core.*, process.*): include entity_type
-         Example: {"entity_type": "data.core.structure.StructureData.", "orm_base": "node", "tag": "structs"}
-       - **For NON-NODE entities** (group, computer, user, comment, log): OMIT entity_type, use orm_base only
-         Example: {"orm_base": "group", "tag": "my_group"}
-       - **CRITICAL**: Never put an entity_type on a group/computer/user/comment/log path item. Only orm_base.
-     * filters: field conditions per tag (optional)
-       - Example: {"structs": {"attributes.value": {">": 42}}, "my_group": {"label": "important"}}
-     * project: fields to return per tag (optional)
-       - Example: {"structs": ["uuid", "attributes.value"], "my_group": ["label"]}
-     * order_by: sort order (optional)
-       - Example: {"structs": {"attributes.value": "desc"}}
-     * limit, offset: pagination (optional, default limit=10)
-   - Valid orm_bases: "node" (for data.core.*, process.* types), "group", "computer", "user", "comment", "log"
-   - Valid join keywords: with_incoming, with_outgoing, with_descendants, with_ancestors, with_group, with_node, with_user, with_computer, with_comment, with_log, with_authinfo
-   - If validation fails with "entity type unknown", you likely tried to specify an entity_type for a non-node entity (group/computer/etc). Remove the entity_type and use orm_base only.
-   - Example queries:
-     * Structures in a group: path=[{"entity_type": "data.core.structure.StructureData.", "orm_base": "node", "tag": "structs", "joining_keyword": "with_group"}, {"orm_base": "group", "tag": "g"}], filters={"g": {"label": "workchain/PBEsol/wannier/lumi/final/bxsf"}}, limit=10
-     * Find integers > 42: path=["data.core.int.Int."], filters={"node": {"attributes.value": {">": 42}}}, limit=10
+4. GENERIC SEARCH — FILTERING, SORTING, COUNTING, PROVENANCE:
+   - Use 'query_nodes' for any question about what is in the database: how many nodes match,
+     which rank highest, and how nodes relate to each other. It evaluates AND/OR logic and joins
+     in the database, so never approximate by combining several counts yourself.
+   - Always set 'entity_type' to what the user is asking about ('StructureData', 'process',
+     'CalcJobNode', 'data', an installed plugin like 'PwBandsWorkChain', ...). Omitting it
+     searches ALL node types, which over-counts when the user asked about one kind of node.
+     Abstract levels match their whole subtree; a plugin name matches only that plugin.
+   - Set 'count_only': true for "how many" questions — it returns the total without fetching records.
+   - Fields: extras keys are given bare ('spacegroup_number'); node columns (pk, uuid, node_type,
+     ctime, label) and 'attributes.x' paths are used as given. Not-equal is '!==', never '!='.
+   - Sorting an extras field requires 'cast': "f" float, "i" int, "t" text, "b" bool, "d" date.
+   - Returns {"total": int, "records": list[dict]} — the total number of matches, and up to
+     'limit' records (empty when count_only). Quote 'total' exactly; never recompute it.
+   - For a single kind of node, use the flat form:
+     * Count in a group: {"entity_type": "StructureData", "group_label": "my/group",
+       "filters": {"field": "insulator", "operator": "==", "value": false}, "count_only": true}
+     * OR logic: {"entity_type": "StructureData", "filters": {"logic": "OR", "conditions":
+       [{"field": "insulator", "operator": "==", "value": true},
+        {"field": "spacegroup_number", "operator": "<", "value": 195}]}, "count_only": true}
+     * Ranking: {"entity_type": "StructureData",
+       "sort": [{"field": "pw_bandgap", "direction": "desc", "cast": "f"}], "limit": 5}
+   - For questions relating nodes to each other, give a 'path': each entry names an entity with a
+     'tag', and every entry after the first says how it joins to an earlier tag. Use
+     'with_outgoing' (is an input to), 'with_incoming' (has inputs from), 'with_ancestors' /
+     'with_descendants' (anywhere up/down the provenance graph). Filters and projections are then
+     keyed by tag.
+     * Structures that are inputs to a failed workchain:
+       {"path": [{"entity_type": "WorkChainNode", "tag": "wc"},
+                 {"entity_type": "StructureData", "tag": "st",
+                  "joining_keyword": "with_outgoing", "joining_value": "wc"}],
+        "filters": {"wc": {"field": "attributes.exit_status", "operator": "!==", "value": 0}},
+        "project": {"st": ["pk", "formula_hill"]}}
+   - To narrow a join to a *specific* link, not just any link of that kind, add 'edge_filters' to
+     that path entry: {"field": "label", "operator": "==", "value": "output_structure"} filters by
+     link_label, {"field": "type", ...} by link_type (e.g. 'create', 'return', 'call_calc'). Only
+     valid with 'with_incoming'/'with_outgoing' — not with 'with_ancestors'/'with_descendants'.
 5. AIIDA DOCUMENTATION:
    - For any conceptual questions, code example requests, how-to guidance, or queries about imports and syntax, you MUST call 'search_aiida_docs(query=...)' first instead of answering from memory.
 6. WORKFLOW/CALCULATION SUBMISSION:
