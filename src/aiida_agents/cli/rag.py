@@ -156,12 +156,38 @@ def _report_build_outcome(outcome: IndexOutcome) -> None:
         click.echo("✓ RAG index ready.")
 
 
+def _report_plugin_corpus_outcomes(outcomes: dict[str, IndexOutcome]) -> None:
+    """Print one line per installed plugin's corpus, so its build result is
+    visible alongside the core docs' rather than silently folded into it.
+    """
+    from aiida_agents.rag import IndexOutcome
+
+    for key, outcome in outcomes.items():
+        if outcome is IndexOutcome.BUILT:
+            click.echo(f"✓ Plugin corpus '{key}' indexed.")
+        elif outcome is IndexOutcome.ALREADY_PRESENT:
+            click.echo(
+                f"✓ Plugin corpus '{key}' already indexed (pass --force to rebuild)."
+            )
+        elif outcome is IndexOutcome.EMPTY_CORPUS:
+            click.echo(f"⚠ Plugin corpus '{key}' produced no chunks; left unchanged.")
+        else:
+            click.echo(f"✗ Plugin corpus '{key}' failed to index; see logs.")
+
+
 @rag.command("build")
 @click.option("--force", is_flag=True, help="Rebuild even if an index already exists.")
 @_needs_recognized_settings
 def rag_build(force: bool) -> None:  # pragma: no cover
-    """Build (or rebuild) the AiiDA docs RAG index."""
+    """Build (or rebuild) the AiiDA docs RAG index.
+
+    Also builds any installed plugin's contributed documentation corpus (see
+    ``aiida_agents.plugins``), each into its own collection alongside the core
+    docs. One plugin's corpus failing to build (a bad repo, a broken sphinx
+    build) is reported and skipped, not fatal to the rest of the command.
+    """
     from aiida_agents._settings import RagSettings
+    from aiida_agents.rag import index_plugin_corpora
 
     # Provision what the build needs before starting: the docs toolchain and,
     # for the default local embedder, the Ollama embedding model.
@@ -171,6 +197,7 @@ def rag_build(force: bool) -> None:  # pragma: no cover
         _prompt_pull_ollama_model(rag_cfg.embed_model)
 
     _report_build_outcome(_build_with_progress(force))
+    _report_plugin_corpus_outcomes(index_plugin_corpora(force=force))
 
 
 @rag.command("status")
@@ -198,12 +225,15 @@ def rag_status() -> None:
         return
 
     table = Table(title="\nCollections in the store")
+    table.add_column("Corpus")
     table.add_column("Chunks", justify="right")
     table.add_column("Docs version")
-    table.add_column("Embedding")
+    table.add_column("Embedding", overflow="fold")
     table.add_column("Collection", style="dim", overflow="fold")
     for info in status.collections:
-        table.add_row(str(info.chunks), info.docs_version, info.embedding, info.name)
+        table.add_row(
+            info.corpus, str(info.chunks), info.docs_version, info.embedding, info.name
+        )
     console.print(table)
 
 
