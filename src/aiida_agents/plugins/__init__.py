@@ -7,6 +7,14 @@ are already found through AiiDA's own ``aiida.workflows`` / ``aiida.calculations
 registry. This channel carries what that registry cannot: domain tools,
 documentation corpora, and prompt guidance.
 
+``tools`` and ``prompt_fragment`` are fully wired: ``get_agent()`` registers a
+contributed tool and appends a contributed fragment to the system prompt.
+``rag_corpora`` is discovered and validated here, but not yet consumed further
+-- indexing a contributed corpus into its own searchable collection, and
+having ``search_aiida_docs`` reach it, is not implemented yet. A
+:class:`LoadedPlugin`'s ``corpora`` is therefore inert today; treat it as the
+declared contract for that follow-up, not a working feature.
+
 Public API
 ----------
 AgentPlugin, AgentTool, RagCorpus, PLUGIN_ENTRY_POINT_GROUP
