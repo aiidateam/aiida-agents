@@ -8,6 +8,7 @@ for querying processes, nodes, and crystal structures, and a write tool
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from importlib.resources import files
 from typing import Any
 
@@ -18,6 +19,7 @@ from pydantic_ai.toolsets import FunctionToolset
 from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
+from aiida_agents.plugins import LoadedPlugin, discover_plugins
 from aiida_agents.tools import (
     get_node_inputs,
     get_node_outputs,
@@ -50,6 +52,30 @@ _SYSTEM_PROMPT = (
 )
 
 
+def _system_prompt(plugins: Sequence[LoadedPlugin]) -> str:
+    """The base prompt plus each plugin's domain guidance, in plugin-name order.
+
+    A fragment is appended under its plugin's name, after the core prompt and
+    clearly attributed, so the core instructions come first and the model can
+    tell whose convention it is reading. Fragments are ordered and budgeted at
+    discovery, so this never depends on entry-point iteration order.
+    """
+    fragments = [(p.name, p.prompt_fragment) for p in plugins if p.prompt_fragment]
+    if not fragments:
+        return _SYSTEM_PROMPT
+    sections = "\n\n".join(
+        f"### {name}\n\n{fragment}" for name, fragment in sorted(fragments)
+    )
+    return (
+        f"{_SYSTEM_PROMPT}\n\n"
+        "## Plugin-specific guidance\n\n"
+        "The following notes come from installed plugins and apply only to their "
+        "own workflows. Where they conflict with the instructions above, the "
+        "instructions above win.\n\n"
+        f"{sections}"
+    )
+
+
 def get_agent(
     model_settings: ModelSettings | None = None,
     ollama_settings: OllamaSettings | None = None,
@@ -78,7 +104,14 @@ def get_agent(
         budget). Read from env / ``.env`` if not given.
     """
     cfg = agent_settings if agent_settings is not None else AgentSettings()
-    toolset = RetryOnToolError(FunctionToolset(_READ_TOOLS))
+
+    # Installed plugins may contribute tools and domain guidance (see
+    # aiida_agents.plugins). Read tools join the retry-wrapped toolset like the
+    # built-ins; write tools are registered behind the approval gate below.
+    plugins = discover_plugins()
+    plugin_reads = [tool.fn for p in plugins for tool in p.tools if not tool.writes]
+    plugin_writes = [tool.fn for p in plugins for tool in p.tools if tool.writes]
+    toolset = RetryOnToolError(FunctionToolset(_READ_TOOLS + plugin_reads))
 
     # ``output_type=(str, DeferredToolRequests)`` makes the real type
     # ``Agent[None, str | DeferredToolRequests]``, but agents are annotated as the
@@ -90,10 +123,14 @@ def get_agent(
         get_model(model_settings=model_settings, ollama_settings=ollama_settings),
         toolsets=[toolset],
         retries=cfg.tool_retries,
-        system_prompt=_SYSTEM_PROMPT,
+        system_prompt=_system_prompt(plugins),
         output_type=(str, DeferredToolRequests),
     )
 
-    # Register the write tool with approval required
+    # Register the write tools with approval required. A plugin write tool is
+    # gated exactly like submit_workflow: the CLI previews it and runs it on the
+    # main thread only after the user approves (ADR-08).
     agent.tool_plain(requires_approval=True)(submit_workflow)
+    for fn in plugin_writes:
+        agent.tool_plain(requires_approval=True)(fn)
     return agent

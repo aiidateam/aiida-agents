@@ -7,11 +7,16 @@ the database-writing tool is not grabbed as casually as a read (HITL-gated, ADR-
 Public API
 ----------
 query_nodes, get_node_inputs, get_node_outputs, list_processes,
-get_process_status, search_structures, list_workflows,
-describe_workflow, query_analysis_agent
-    Read-only AiiDA query and workflow-introspection tools, safe to register on an agent
-    or expose over MCP. The write tool ``submit_workflow`` is intentionally not
-    re-exported here; import it from ``tools.submit`` (HITL-gated, ADR-08).
+get_process_status, search_structures
+    Read-only AiiDA query tools, safe to register on an agent or expose over
+    MCP. The write tool ``submit_workflow`` is intentionally not re-exported
+    here; import it from ``tools.submit`` (HITL-gated, ADR-08).
+list_workflows, describe_workflow
+    Read-only introspection of the installed process plugins, read straight
+    from AiiDA's entry-point registry and ``Process.spec()``.
+query_analysis_agent
+    Query the analysis agent for historical context (past successful
+    workflows, optimal parameters, structure classifications).
 """
 
 from __future__ import annotations
@@ -20,17 +25,17 @@ from aiida_agents.tools.nodes import get_node_inputs, get_node_outputs
 from aiida_agents.tools.processes import get_process_status, list_processes
 from aiida_agents.tools.structures import search_structures
 from aiida_agents.tools.query_builder import query_nodes
-from aiida_agents.tools.workflows.introspection import describe_workflow, list_workflows
+from aiida_agents.tools.workflows import describe_workflow, list_workflows
 from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
 
 __all__ = [
+    "describe_workflow",
     "get_node_inputs",
     "get_node_outputs",
     "get_process_status",
     "list_processes",
-    "query_nodes",
-    "search_structures",
-    "describe_workflow",
     "list_workflows",
     "query_analysis_agent",
+    "query_nodes",
+    "search_structures",
 ]
