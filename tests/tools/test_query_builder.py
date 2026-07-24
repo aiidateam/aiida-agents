@@ -193,6 +193,11 @@ def test_lower_provenance_path() -> None:
             "requires a 'cast'",
             id="extras-sort-needs-cast",
         ),
+        pytest.param(
+            {"entity_type": "node", "group_label": "no-such-group-123"},
+            "Group with label 'no-such-group-123' does not exist",
+            id="nonexistent-group",
+        ),
     ],
 )
 def test_invalid_specs_say_what_is_wrong(
@@ -202,6 +207,35 @@ def test_invalid_specs_say_what_is_wrong(
     spec = QuerySpec.model_validate(spec_dict)
     with pytest.raises(QueryValidationError, match=match):
         query_nodes(spec)
+
+
+def test_nonexistent_group_is_not_confused_with_an_empty_one(
+    query_archive: QueryArchive,
+) -> None:
+    """A typo'd group_label must fail loudly, not silently return a total of 0.
+
+    Pins the regression where `group_label` lowering into a plain join/filter
+    dropped the group-existence check: an existing-but-empty group and a group
+    that was never created would otherwise both report 0 matches.
+    """
+    with pytest.raises(QueryValidationError, match="does not exist"):
+        query_nodes(
+            QuerySpec.model_validate(
+                {"entity_type": "node", "group_label": "definitely-not-a-real-group"}
+            )
+        )
+    # the real group, by contrast, is valid and just happens to exclude "node"
+    # (its members are CalcJobNodes), so it must return 0 without raising.
+    result = query_nodes(
+        QuerySpec.model_validate(
+            {
+                "entity_type": "StructureData",
+                "group_label": query_archive.group_label,
+                "count_only": True,
+            }
+        )
+    )
+    assert result["total"] == 0
 
 
 def test_unknown_entity_suggests_a_close_match() -> None:

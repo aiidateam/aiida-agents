@@ -7,8 +7,10 @@ projection -- rather than raw QueryBuilder code. It runs as a small pipeline::
 
 ``lower`` is a pure function producing the dict that ``QueryBuilder.from_dict``
 already accepts (the same shape as aiida-restapi's ``QueryBuilderDict``), so the
-whole translation is testable without a database, and only ``_execute`` touches
-AiiDA.
+whole translation is testable without a database. ``validate`` also touches the
+database, but only to confirm a group named by label actually exists -- a typo'd
+`group_label` would otherwise be indistinguishable from an existing, empty group,
+both silently returning a total of 0.
 
 Design notes:
 
@@ -39,6 +41,7 @@ import typing as t
 from functools import lru_cache
 
 from aiida import orm
+from aiida.common.exceptions import MultipleObjectsError, NotExistent
 from aiida.orm.implementation.querybuilder import EntityRelationships
 from aiida.plugins.entry_point import get_entry_point_names, load_entry_point
 from pydantic import BaseModel, Field, model_validator
@@ -408,6 +411,32 @@ def _validate_spec(spec: QuerySpec) -> None:
     for tag in sorted(referenced - declared):
         msg = f"Unknown tag {tag!r}." + _suggest(tag, declared)
         raise QueryValidationError(msg)
+
+    _validate_group_labels(spec, index)
+
+
+def _validate_group_labels(spec: QuerySpec, index: dict[str, str]) -> None:
+    """A ``group`` entity filtered by an exact ``label`` must name a real group.
+
+    Without this, a typo'd `group_label` is indistinguishable from an existing
+    but empty group -- both would otherwise silently return a total of 0.
+    """
+    for item in spec.path:
+        canonical = index.get(item.entity_type.lower(), item.entity_type)
+        if _orm_base(canonical) != "group":
+            continue
+        tree = spec.filters.get(item.tag)
+        if (
+            not isinstance(tree, FieldFilter)
+            or tree.field != "label"
+            or tree.operator != "=="
+        ):
+            continue
+        try:
+            orm.Group.collection.get(label=tree.value)
+        except (NotExistent, MultipleObjectsError) as exc:
+            msg = f"Group with label {tree.value!r} does not exist."
+            raise QueryValidationError(msg) from exc
 
 
 def _qualify_field(field: str) -> str:
