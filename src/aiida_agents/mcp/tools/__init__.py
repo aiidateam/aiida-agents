@@ -16,6 +16,7 @@ from aiida_agents.tools import (
     describe_workflow,
     get_node_inputs,
     get_node_outputs,
+    get_process_report,
     get_process_status,
     list_codes,
     list_processes,
@@ -45,6 +46,7 @@ def register_all(mcp: FastMCP) -> None:
     """Register the read-only tools on the MCP server."""
     # Analysis tools
     register_tool(mcp, get_process_status)
+    register_tool(mcp, get_process_report)
     register_tool(mcp, list_processes)
     register_tool(mcp, get_node_inputs)
     register_tool(mcp, get_node_outputs)

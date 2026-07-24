@@ -12,10 +12,10 @@ casually as a read (HITL-gated, ADR-08).
 
 Public API
 ----------
-get_process_status, list_processes
+get_process_status, get_process_report, list_processes
     Process inspection, shared by both agents (``tools/processes.py``): the
-    Analysis agent reports on runs, the Execution agent follows up on what it
-    just submitted.
+    Analysis agent reports on runs and explains failures, the Execution agent
+    follows up on what it just submitted.
 query_nodes, get_node_inputs, get_node_outputs, search_structures
     Analysis agent's read-only AiiDA query tools (``tools/analysis/``), safe to
     register on an agent or expose over MCP.
@@ -36,7 +36,11 @@ from aiida_agents.tools.analysis import (
     query_nodes,
     search_structures,
 )
-from aiida_agents.tools.processes import get_process_status, list_processes
+from aiida_agents.tools.processes import (
+    get_process_report,
+    get_process_status,
+    list_processes,
+)
 from aiida_agents.tools.execution import (
     build_workflow_inputs,
     describe_workflow,
@@ -50,6 +54,7 @@ __all__ = [
     "describe_workflow",
     "get_node_inputs",
     "get_node_outputs",
+    "get_process_report",
     "get_process_status",
     "list_codes",
     "list_processes",

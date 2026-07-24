@@ -29,6 +29,7 @@ class TestSystemPrompt:
         lower = SYSTEM_PROMPT.lower()
         for tool in (
             "get_process_status",
+            "get_process_report",
             "list_processes",
             "query_nodes",
             "get_node_inputs",

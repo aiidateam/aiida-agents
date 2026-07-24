@@ -20,6 +20,7 @@ __all__ = [
     "Identifier",
     "NodeLink",
     "ProcessRecord",
+    "ProcessReport",
     "ProcessStatus",
     "QueryResult",
     "StructureImportResult",
@@ -87,6 +88,18 @@ class ProcessRecord(TypedDict):
     process_type: str
     state: str | None
     exit_status: int | None
+
+
+class ProcessReport(TypedDict):
+    """Return shape of ``get_process_report``."""
+
+    pk: int
+    process_label: str
+    node_type: str
+    state: str | None
+    exit_status: int | None
+    exit_message: str | None
+    report: str
 
 
 class NodeLink(TypedDict):

@@ -28,6 +28,7 @@ from aiida_agents.plugins import LoadedPlugin, discover_plugins
 from aiida_agents.tools import (
     get_node_inputs,
     get_node_outputs,
+    get_process_report,
     get_process_status,
     list_processes,
     query_nodes,
@@ -43,6 +44,7 @@ from aiida_agents.rag import search_aiida_docs
 # docs/adr/08-human-in-the-loop-before-writes.md) and is not part of this toolset.
 _READ_TOOLS: list[Any] = [
     get_process_status,
+    get_process_report,
     list_processes,
     query_nodes,
     get_node_inputs,

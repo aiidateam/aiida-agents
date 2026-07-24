@@ -28,6 +28,7 @@ models.ALLOW_MODEL_REQUESTS = False
 # so no write tool appears here (a plugin may still contribute one, gated).
 EXPECTED_TOOLS = {
     "get_process_status",
+    "get_process_report",
     "list_processes",
     "query_nodes",
     "get_node_inputs",
