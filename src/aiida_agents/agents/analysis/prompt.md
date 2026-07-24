@@ -14,8 +14,9 @@ CRITICAL TOOL SELECTION RULES:
      which rank highest, and how nodes relate to each other. It evaluates AND/OR logic and joins
      in the database, so never approximate by combining several counts yourself.
    - Always set 'entity_type' to what the user is asking about ('StructureData', 'process',
-     'CalcJobNode', 'data', ...). Omitting it searches ALL node types, which over-counts when
-     the user asked about one kind of node. Abstract levels match their whole subtree.
+     'CalcJobNode', 'data', an installed plugin like 'PwBandsWorkChain', ...). Omitting it
+     searches ALL node types, which over-counts when the user asked about one kind of node.
+     Abstract levels match their whole subtree; a plugin name matches only that plugin.
    - Set 'count_only': true for "how many" questions — it returns the total without fetching records.
    - Fields: extras keys are given bare ('spacegroup_number'); node columns (pk, uuid, node_type,
      ctime, label) and 'attributes.x' paths are used as given. Not-equal is '!==', never '!='.

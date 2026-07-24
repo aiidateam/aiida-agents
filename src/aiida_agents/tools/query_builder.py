@@ -25,6 +25,10 @@ Design notes:
 4. Counts never fetch records: ``count_only`` returns the total alone.
 5. Bounded, not arbitrary: a structured spec, a hard-capped ``limit``, and
    validation with repair hints before the query runs.
+6. Installed plugins are queryable by name. A specific ``CalcJob``/``WorkChain``
+   plugin (e.g. ``PwBandsWorkChain``) shares its ``node_type`` with every other
+   plugin of the same kind, so entity resolution also carries an implicit
+   ``process_type`` filter for these -- see :class:`EntityAlias`.
 
 The closed sets (join keywords, entity types, fields) are derived from
 aiida-core rather than hand-maintained; only the operator list is hand-written,
@@ -100,14 +104,31 @@ class QueryValidationError(ValueError):
     """A spec that cannot be lowered, reported before the query runs."""
 
 
-@lru_cache(maxsize=1)
-def _entity_index() -> dict[str, str]:
-    """Map entity aliases to canonical ``node_type`` strings.
+class EntityAlias(t.NamedTuple):
+    """What an entity alias resolves to.
 
-    ``class_node_type`` already encodes subtree matching (``data.Data.`` matches
-    every ``Data`` subclass), so abstract levels need no ``like`` patterns.
+    Plain ``Data``/``Node`` subclasses are fully identified by ``node_type``
+    (``class_node_type`` already encodes subtree matching, e.g. ``data.Data.``
+    matches every ``Data`` subclass). Process plugins (a specific ``CalcJob`` or
+    ``WorkChain``, e.g. installed from ``aiida-quantumespresso``) are not: they
+    have no ``class_node_type`` of their own and share one generic node class
+    with every other plugin of the same kind, so ``CalcJobNode`` alone cannot
+    tell a ``PwCalculation`` from an ``ArithmeticAddCalculation``. Their
+    concrete identity lives in ``process_type`` instead, which must be filtered
+    on in addition to the (shared) ``node_type``.
     """
-    index: dict[str, str] = {"node": "", "group": "group.core"}
+
+    node_type: str
+    process_type: str | None = None
+
+
+@lru_cache(maxsize=1)
+def _entity_index() -> dict[str, EntityAlias]:
+    """Map entity aliases to what they resolve to, derived from aiida-core."""
+    index: dict[str, EntityAlias] = {
+        "node": EntityAlias(""),
+        "group": EntityAlias("group.core"),
+    }
     for entry_point_group in ("aiida.data", "aiida.node"):
         for name in get_entry_point_names(entry_point_group):
             try:
@@ -117,15 +138,37 @@ def _entity_index() -> dict[str, str]:
                 continue
             node_type = getattr(cls, "class_node_type", None)
             if node_type is not None:
-                index[name.lower()] = node_type
-                index[cls.__name__.lower()] = node_type
+                index[name.lower()] = EntityAlias(node_type)
+                index[cls.__name__.lower()] = EntityAlias(node_type)
+    # Process plugins (installed CalcJobs/WorkChains): identified by
+    # `process_type`, not `node_type`, which only distinguishes their kind
+    # (calcjob vs workchain etc.), not the specific plugin.
+    for entry_point_group in ("aiida.calculations", "aiida.workflows"):
+        for name in get_entry_point_names(entry_point_group):
+            try:
+                cls = load_entry_point(entry_point_group, name)
+            except Exception:  # noqa: BLE001 - a broken plugin must not break queries
+                logger.debug("entity_index: cannot load %s:%s", entry_point_group, name)
+                continue
+            node_class = getattr(cls, "_node_class", None)
+            node_type = getattr(node_class, "class_node_type", None)
+            if node_type is None:
+                continue
+            alias = EntityAlias(node_type, cls.build_process_type())
+            index[name.lower()] = alias
+            index[cls.__name__.lower()] = alias
     for cls in (orm.Data, orm.ProcessNode, orm.CalculationNode, orm.WorkflowNode):
-        index[cls.__name__.lower()] = cls.class_node_type
-    index["data"] = orm.Data.class_node_type
-    index["process"] = orm.ProcessNode.class_node_type
-    index["calculation"] = orm.CalculationNode.class_node_type
-    index["workflow"] = orm.WorkflowNode.class_node_type
+        index[cls.__name__.lower()] = EntityAlias(cls.class_node_type)
+    index["data"] = EntityAlias(orm.Data.class_node_type)
+    index["process"] = EntityAlias(orm.ProcessNode.class_node_type)
+    index["calculation"] = EntityAlias(orm.CalculationNode.class_node_type)
+    index["workflow"] = EntityAlias(orm.WorkflowNode.class_node_type)
     return index
+
+
+def _resolve_entity(entity_type: str, index: dict[str, EntityAlias]) -> EntityAlias:
+    """Resolve an alias, or pass through a raw ``node_type`` string as-is."""
+    return index.get(entity_type.lower(), EntityAlias(entity_type))
 
 
 def _suggest(name: str, valid: t.Iterable[str]) -> str:
@@ -179,8 +222,10 @@ class PathItem(BaseModel):
         default="node",
         description=(
             "Entity to query: an alias ('StructureData', 'process', 'data', "
-            "'group'), or a full node type ('data.core.structure.StructureData.'). "
-            "Abstract levels match their whole subtree."
+            "'group'), an installed plugin's class or entry-point name "
+            "('PwBandsWorkChain', 'quantumespresso.pw.bands'), or a full node "
+            "type ('data.core.structure.StructureData.'). Abstract levels match "
+            "their whole subtree; a plugin name matches only that plugin."
         ),
     )
     tag: str = Field(
@@ -385,8 +430,7 @@ def _validate_spec(spec: QuerySpec) -> None:
             raise QueryValidationError(msg)
 
         if item.joining_keyword is not None:
-            canonical = index.get(item.entity_type.lower(), item.entity_type)
-            orm_base = _orm_base(canonical)
+            orm_base = _orm_base(_resolve_entity(item.entity_type, index).node_type)
             legal = EntityRelationships[orm_base]
             if item.joining_keyword not in legal:
                 msg = (
@@ -415,15 +459,14 @@ def _validate_spec(spec: QuerySpec) -> None:
     _validate_group_labels(spec, index)
 
 
-def _validate_group_labels(spec: QuerySpec, index: dict[str, str]) -> None:
+def _validate_group_labels(spec: QuerySpec, index: dict[str, EntityAlias]) -> None:
     """A ``group`` entity filtered by an exact ``label`` must name a real group.
 
     Without this, a typo'd `group_label` is indistinguishable from an existing
     but empty group -- both would otherwise silently return a total of 0.
     """
     for item in spec.path:
-        canonical = index.get(item.entity_type.lower(), item.entity_type)
-        if _orm_base(canonical) != "group":
+        if _orm_base(_resolve_entity(item.entity_type, index).node_type) != "group":
             continue
         tree = spec.filters.get(item.tag)
         if (
@@ -475,11 +518,12 @@ def _lower(spec: QuerySpec) -> dict[str, t.Any]:
     """
     index = _entity_index()
     path: list[dict[str, t.Any]] = []
+    process_type_filters: dict[str, dict[str, t.Any]] = {}
     for item in spec.path:
-        canonical = index.get(item.entity_type.lower(), item.entity_type)
+        alias = _resolve_entity(item.entity_type, index)
         entry: dict[str, t.Any] = {
-            "entity_type": canonical,
-            "orm_base": _orm_base(canonical),
+            "entity_type": alias.node_type,
+            "orm_base": _orm_base(alias.node_type),
             "tag": item.tag,
             "outerjoin": item.outerjoin,
         }
@@ -487,13 +531,25 @@ def _lower(spec: QuerySpec) -> dict[str, t.Any]:
             entry["joining_keyword"] = item.joining_keyword
             entry["joining_value"] = item.joining_value
         path.append(entry)
+        # A process plugin (e.g. a specific WorkChain) shares its node_type with
+        # every other plugin of the same kind; process_type is what actually
+        # narrows the query to that plugin.
+        if alias.process_type is not None:
+            process_type_filters[item.tag] = {"process_type": alias.process_type}
 
     lowered: dict[str, t.Any] = {"path": path}
 
-    if spec.filters:
-        lowered["filters"] = {
-            tag: _lower_filter(tree) for tag, tree in spec.filters.items()
-        }
+    filters: dict[str, t.Any] = {
+        tag: _lower_filter(tree) for tag, tree in spec.filters.items()
+    }
+    for tag, process_type_filter in process_type_filters.items():
+        filters[tag] = (
+            {"and": [process_type_filter, filters[tag]]}
+            if tag in filters
+            else process_type_filter
+        )
+    if filters:
+        lowered["filters"] = filters
 
     if not spec.count_only:
         project = spec.project or {spec.path[-1].tag: list(DEFAULT_PROJECT)}

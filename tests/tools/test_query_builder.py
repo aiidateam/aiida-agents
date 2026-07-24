@@ -15,6 +15,9 @@ from __future__ import annotations
 import typing as t
 
 import pytest
+from aiida import orm
+from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
+from aiida.workflows.arithmetic.multiply_add import MultiplyAddWorkChain
 from pydantic import ValidationError
 
 from aiida_agents.tools.query_builder import (
@@ -139,6 +142,52 @@ def test_lower_provenance_path() -> None:
         "outerjoin": False,
         "joining_keyword": "with_descendants",
         "joining_value": "calc",
+    }
+
+
+def test_lower_process_plugin_adds_a_process_type_filter() -> None:
+    """A process plugin shares its node_type with every plugin of the same
+    kind (all CalcJobs are one `CalcJobNode`), so its entity alias must also
+    lower to a `process_type` filter -- that's the only thing narrowing the
+    query to this specific plugin rather than any CalcJob."""
+    spec = QuerySpec.model_validate(
+        {"entity_type": "ArithmeticAddCalculation", "count_only": True}
+    )
+    lowered = _lower(spec)
+    assert lowered["path"][0]["entity_type"] == orm.CalcJobNode.class_node_type
+    assert lowered["filters"]["node"] == {
+        "process_type": ArithmeticAddCalculation.build_process_type()
+    }
+
+
+def test_lower_process_plugin_filter_combines_with_a_user_filter() -> None:
+    """The implicit process_type filter is ANDed with, not replaced by, a
+    user-supplied filter on the same tag."""
+    spec = QuerySpec.model_validate(
+        {
+            "entity_type": "core.arithmetic.add",  # entry-point name, not class name
+            "filters": {"field": "pk", "operator": ">", "value": 0},
+            "count_only": True,
+        }
+    )
+    assert _lower(spec)["filters"]["node"] == {
+        "and": [
+            {"process_type": ArithmeticAddCalculation.build_process_type()},
+            {"pk": {">": 0}},
+        ]
+    }
+
+
+def test_lower_workchain_plugin_adds_a_process_type_filter() -> None:
+    """The same process_type resolution applies to WorkChain plugins, not just
+    CalcJob plugins."""
+    spec = QuerySpec.model_validate(
+        {"entity_type": "MultiplyAddWorkChain", "count_only": True}
+    )
+    lowered = _lower(spec)
+    assert lowered["path"][0]["entity_type"] == orm.WorkChainNode.class_node_type
+    assert lowered["filters"]["node"] == {
+        "process_type": MultiplyAddWorkChain.build_process_type()
     }
 
 
@@ -635,3 +684,57 @@ def test_every_operator_executes(
         }
     )
     assert isinstance(query_nodes(spec)["total"], int)
+
+
+def test_process_plugin_entity_type_excludes_other_calcjobs(
+    add_calc: orm.CalcJobNode, query_archive: QueryArchive
+) -> None:
+    """`ArithmeticAddCalculation` must not also match the archive's plain,
+    process-less `CalcJobNode`s -- both share `node_type`, and only the
+    process_type filter tells them apart."""
+    plugin_total = query_nodes(
+        QuerySpec.model_validate(
+            {"entity_type": "ArithmeticAddCalculation", "count_only": True}
+        )
+    )["total"]
+    calcjob_total = query_nodes(
+        QuerySpec.model_validate({"entity_type": CALC, "count_only": True})
+    )["total"]
+    assert 0 < plugin_total < calcjob_total
+
+
+def test_process_plugin_entity_type_by_entry_point_name(
+    add_calc: orm.CalcJobNode,
+) -> None:
+    """The registered entry-point name works as `entity_type` too, not just
+    the class name."""
+    result = query_nodes(
+        QuerySpec.model_validate(
+            {
+                "entity_type": "core.arithmetic.add",
+                "filters": {"field": "pk", "operator": "==", "value": add_calc.pk},
+                "count_only": True,
+            }
+        )
+    )
+    assert result["total"] == 1
+
+
+def test_workchain_plugin_entity_type(
+    multiply_add_workchain: orm.WorkChainNode,
+) -> None:
+    """A WorkChain plugin resolves the same way a CalcJob plugin does."""
+    result = query_nodes(
+        QuerySpec.model_validate(
+            {
+                "entity_type": "MultiplyAddWorkChain",
+                "filters": {
+                    "field": "pk",
+                    "operator": "==",
+                    "value": multiply_add_workchain.pk,
+                },
+                "count_only": True,
+            }
+        )
+    )
+    assert result["total"] == 1
