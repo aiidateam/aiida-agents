@@ -14,6 +14,7 @@ from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
 
 from aiida_agents.tools.workflows.introspection import describe_workflow, list_workflows
+from aiida_agents.tools.workflows.protocol import build_workflow_inputs
 from aiida_agents.tools.workflows.spec_execution import execute_workflow_spec
 from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
 
@@ -22,6 +23,7 @@ _READ_TOOLS: list[Any] = [
     query_analysis_agent,  # Query the AiiDA database for context (read-only)
     list_workflows,  # Discover registered workflow and calculation entry points (read-only)
     describe_workflow,  # Inspect process schema, ports, defaults, and exit codes (read-only)
+    build_workflow_inputs,  # Pre-populate inputs from a protocol builder (read-only)
 ]
 
 # Load system prompt
@@ -41,7 +43,8 @@ def get_agent(
     1. Queries the AiiDA database for context on past runs (query_analysis_agent)
     2. Discovers installed workflow and calculation entry points (list_workflows)
     3. Introspects process schemas, required/optional ports, and exit codes (describe_workflow)
-    4. Submits workflow specs (execute_workflow_spec, requires HITL approval)
+    4. Pre-populates inputs from a protocol builder when one exists (build_workflow_inputs)
+    5. Submits workflow specs (execute_workflow_spec, requires HITL approval)
 
     All read tools are wrapped by RetryOnToolError so tool failures
     (e.g., hallucinated parameters) become recoverable retries instead of crashes.

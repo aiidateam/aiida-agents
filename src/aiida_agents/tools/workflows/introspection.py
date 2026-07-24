@@ -7,6 +7,7 @@ without vendoring static tables or plugin code into this repository.
 
 from __future__ import annotations
 
+import inspect
 import logging
 import typing as t
 
@@ -187,17 +188,49 @@ def describe_workflow(
         {"status": ec.status, "message": ec.message} for ec in spec.exit_codes.values()
     ]
 
-    has_protocol = hasattr(process_class, "get_builder_from_protocol")
+    builder_from_protocol = getattr(process_class, "get_builder_from_protocol", None)
 
     return {
         "query_type": "describe_workflow",
         "entry_point": entry_point,
         "group": resolved_group,
         "process_class": f"{process_class.__module__}:{process_class.__name__}",
-        "has_protocol_builder": has_protocol,
+        "has_protocol_builder": builder_from_protocol is not None,
+        "protocol_parameters": _describe_protocol_parameters(builder_from_protocol),
         "required_inputs": sorted(required_inputs),
         "optional_inputs": sorted(optional_inputs),
         "inputs_schema": inputs_schema,
         "outputs": sorted(outputs_list),
         "exit_codes": sorted(exit_codes_list, key=lambda x: x["status"]),
     }
+
+
+def _describe_protocol_parameters(
+    builder_from_protocol: t.Callable[..., t.Any] | None,
+) -> list[dict[str, t.Any]] | None:
+    """The exact keyword arguments ``get_builder_from_protocol`` takes, if any.
+
+    Signatures vary by workflow -- some need only ``structure``, others also
+    ``code`` or a ``codes`` mapping for a multi-code workflow -- so this is read
+    from the callable itself rather than assumed, telling
+    ``build_workflow_inputs``'s caller exactly what to put in its
+    ``protocol_kwargs``.
+    """
+    if builder_from_protocol is None:
+        return None
+    parameters = []
+    for name, param in inspect.signature(builder_from_protocol).parameters.items():
+        if name in ("cls", "self") or param.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+        has_default = param.default is not inspect.Parameter.empty
+        parameters.append(
+            {
+                "name": name,
+                "required": not has_default,
+                "default": repr(param.default) if has_default else None,
+            }
+        )
+    return parameters

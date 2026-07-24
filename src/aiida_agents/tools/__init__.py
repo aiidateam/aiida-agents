@@ -11,9 +11,11 @@ get_process_status, search_structures
     Read-only AiiDA query tools, safe to register on an agent or expose over
     MCP. The write tool ``submit_workflow`` is intentionally not re-exported
     here; import it from ``tools.submit`` (HITL-gated, ADR-08).
-list_workflows, describe_workflow
+list_workflows, describe_workflow, build_workflow_inputs
     Read-only introspection of the installed process plugins, read straight
-    from AiiDA's entry-point registry and ``Process.spec()``.
+    from AiiDA's entry-point registry and ``Process.spec()``; ``build_workflow_inputs``
+    additionally pre-populates a workflow's inputs from its own protocol
+    builder (``get_builder_from_protocol``), when it has one.
 query_analysis_agent
     Query the analysis agent for historical context (past successful
     workflows, optimal parameters, structure classifications).
@@ -25,10 +27,15 @@ from aiida_agents.tools.nodes import get_node_inputs, get_node_outputs
 from aiida_agents.tools.processes import get_process_status, list_processes
 from aiida_agents.tools.structures import search_structures
 from aiida_agents.tools.query_builder import query_nodes
-from aiida_agents.tools.workflows import describe_workflow, list_workflows
+from aiida_agents.tools.workflows import (
+    build_workflow_inputs,
+    describe_workflow,
+    list_workflows,
+)
 from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
 
 __all__ = [
+    "build_workflow_inputs",
     "describe_workflow",
     "get_node_inputs",
     "get_node_outputs",
