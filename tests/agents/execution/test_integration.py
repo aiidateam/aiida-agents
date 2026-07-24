@@ -10,9 +10,9 @@ from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents.agents.execution import get_agent
 from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
-from aiida_agents.tools.workflows.introspection import describe_workflow, list_workflows
-from aiida_agents.tools.workflows.schemas import WorkflowSpec
-from aiida_agents.tools.workflows.spec_execution import execute_workflow_spec
+from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
+from aiida_agents.tools.execution.schemas import WorkflowSpec
+from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
 
 
 class TestFullWorkflowIntegration:
@@ -56,13 +56,17 @@ class TestFullWorkflowIntegration:
 
     def test_verify_submit_workflow_invoked(self) -> None:
         """Verify that calling submit_workflow actually invokes the submission tool/function."""
-        from aiida_agents.tools.submit import submit_workflow
+        from aiida_agents.tools.execution.submit import submit_workflow
 
-        with patch("aiida_agents.tools.submit._prepare_submission") as mock_prep:
+        with patch(
+            "aiida_agents.tools.execution.submit._prepare_submission"
+        ) as mock_prep:
             mock_process = MagicMock()
             mock_prep.return_value = (mock_process, {"x": 2, "y": 3})
 
-            with patch("aiida_agents.tools.submit._run_submission") as mock_run:
+            with patch(
+                "aiida_agents.tools.execution.submit._run_submission"
+            ) as mock_run:
                 mock_run.return_value = {
                     "pk": 999,
                     "uuid": "1234-5678-90ab",

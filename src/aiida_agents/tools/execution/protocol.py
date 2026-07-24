@@ -37,7 +37,7 @@ from aiida.orm.nodes.data.base import BaseType
 from aiida.plugins.entry_point import load_entry_point
 from pydantic import Field
 
-from aiida_agents.tools.workflows.schemas import WorkflowSpec
+from aiida_agents.tools.execution.schemas import WorkflowSpec
 
 logger = logging.getLogger(__name__)
 

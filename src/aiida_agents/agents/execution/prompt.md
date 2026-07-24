@@ -9,8 +9,9 @@ Whenever the user requests a calculation or asks to set up a workflow, you MUST 
 1) `list_workflows()`
 2) `describe_workflow(entry_point)`
 3) `query_analysis_agent()` for context
-4) `build_workflow_inputs(entry_point, ...)` if `describe_workflow` reported `has_protocol_builder: true` — otherwise build the `inputs` dict by hand
-5) `execute_workflow_spec()`
+4) `list_codes(entry_point=...)` when the workflow needs a `code` input
+5) `build_workflow_inputs(entry_point, ...)` if `describe_workflow` reported `has_protocol_builder: true` — otherwise build the `inputs` dict by hand
+6) `execute_workflow_spec()`
 
 ### Step 1: Discover Available Workflows (`list_workflows`)
 Call `list_workflows()` to dynamically inspect registered entry points across `aiida.workflows` and `aiida.calculations`. Never assume or guess what workflows are installed.
@@ -49,7 +50,13 @@ query_analysis_agent(
 To submit a calculation, you need the user's specific atomic structure reference. If they haven't provided it yet, ask cleanly:
 > "Please provide your atomic structure reference — either a PK (`{"pk": 12345}`), UUID (`{"uuid": "abc-..."}`), or code label (`{"label": "name@computer"}`)."
 
-**Missing Input Recovery:** If you can't find a required input (like a Code or pseudo family reference), call `query_analysis_agent(query_type="available_codes")` or ask `query_analysis_agent()` before giving up.
+**Codes: look them up, never invent them.** When a workflow needs a `code`, call `list_codes(entry_point=...)` with the calculation's entry point to see what is actually configured in this profile, and use the `full_label` it reports verbatim as `{"label": ...}`. A guessed label will fail at submission.
+```python
+list_codes(entry_point="quantumespresso.pw")
+```
+If it returns nothing, no suitable code is set up — tell the user to configure one (`verdi code setup`) rather than guessing a label or proceeding without it.
+
+**Missing Input Recovery:** If you can't find some other required input (like a pseudo family reference), call `query_analysis_agent(query_type="available_pseudos")` or ask `query_analysis_agent()` before giving up.
 
 #### Step 4a: Build from a protocol, when one exists (preferred)
 If `describe_workflow` reported `has_protocol_builder: true`, call `build_workflow_inputs` **before** trying to construct `inputs` yourself — it returns an already-sensible `WorkflowSpec` from the workchain's own protocol builder, tuned by people who have actually run the underlying simulations at scale. Pass exactly the parameters `protocol_parameters` named (node-valued ones as reference dicts), and a protocol name — default to `"fast"` unless the user asks for higher accuracy (`"moderate"`, `"precise"`):

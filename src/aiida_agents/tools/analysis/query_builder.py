@@ -57,7 +57,7 @@ from aiida.orm.implementation.querybuilder import EntityRelationships
 from aiida.plugins.entry_point import get_entry_point_names, load_entry_point
 from pydantic import BaseModel, Field, model_validator
 
-from ._types import QueryResult
+from .._types import QueryResult
 
 logger = logging.getLogger(__name__)
 

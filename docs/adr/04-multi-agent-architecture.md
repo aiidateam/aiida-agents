@@ -1,7 +1,8 @@
 # ADR-04: Package-by-feature agents subpackage; single Analysis Agent first
 
 > Status: accepted — Analysis Agent implemented as of Weeks 3–4 (June 2026).
-> Orchestrator and specialist agents deferred to Weeks 7–8.
+> Execution Agent added and the tool layer re-grouped per agent (see the
+> Revision section). Orchestrator deferred to Weeks 7–8.
 
 ## Context
 
@@ -57,6 +58,10 @@ Key design decisions:
 
 The Analysis Agent exposes seven tools:
 
+> Paths below are as of this ADR's original writing; see the Revision section
+> for the current per-agent layout (`tools/analysis/…`), and note that
+> `submit_workflow` has since moved off this agent entirely.
+
 | Tool                 | Source                | Type                             |
 | -------------------- | --------------------- | -------------------------------- |
 | `get_process_status` | `tools/processes.py`  | Read                             |
@@ -68,7 +73,7 @@ The Analysis Agent exposes seven tools:
 | `search_aiida_docs`  | `rag/__init__.py`     | Read (RAG)                       |
 | `submit_workflow`    | `tools/submit.py`     | Write — `requires_approval=True` |
 
-`submit_workflow` is registered with Pydantic AI's native `requires_approval=True`,
+A write tool is registered with Pydantic AI's native `requires_approval=True`,
 which pauses the agent run and returns a `DeferredToolRequests` object for the
 CLI to handle (ADR-08).
 
@@ -113,3 +118,41 @@ Orchestrator will be a `pydantic_ai.Agent` whose only tools are the specialist
 - **LangGraph or dedicated orchestration framework.**
   Rejected: heavy dependency, framework-specific abstractions; Pydantic AI's
   native agent composition is sufficient and keeps the stack minimal.
+
+## Revision (2026-07): tools grouped per agent
+
+The Execution Agent landed as the second sibling under `agents/`, as this ADR
+planned (it is the "Workflow Agent" of the table above). With two agents, the
+flat `tools/` directory no longer said who owned what: `tools/workflows/` and
+`tools/execution/` were both Execution's, while `nodes.py`, `processes.py`,
+`query_builder.py`, and `structures.py` were all Analysis's, with nothing in
+the layout saying so.
+
+`tools/` now mirrors `agents/` — each agent's tools live in `tools/<agent>/`,
+and only genuinely shared infrastructure stays at the top level:
+
+```
+src/aiida_agents/tools/
+    _errors.py, _orm.py, _types.py    # shared by every agent
+    analysis/
+        nodes.py, processes.py, query_builder.py, structures.py
+    execution/
+        analysis_queries.py, codes.py, introspection.py,
+        protocol.py, schemas.py, spec_execution.py, submit.py
+```
+
+A new agent adds a sibling package under both `agents/` and `tools/` rather
+than more flat modules. `tests/tools/` mirrors the same split.
+
+Two consequences worth stating:
+
+- **One write path.** `submit_workflow` was registered on the Analysis Agent
+  back when it was the only agent. It is not any more: Execution reaches the
+  database through its own HITL-gated `execute_workflow_spec` (which delegates
+  to `submit_workflow` after building and validating a spec), and Analysis is
+  read-only. A plugin-contributed write tool is still gated the same way on
+  whichever agent registers it (ADR-08).
+- **The MCP server's read-only guarantee is unchanged**, but now excludes two
+  names rather than one (`submit_workflow` and `execute_workflow_spec`); the
+  server's discovery test walks the subpackages recursively, so a new tool in a
+  new agent package is still caught automatically.

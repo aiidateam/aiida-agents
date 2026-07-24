@@ -19,9 +19,9 @@ from aiida import orm
 from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
 from aiida.engine import run_get_node
 
-from aiida_agents.tools.submit import _resolve_inputs
-from aiida_agents.tools.workflows.introspection import describe_workflow
-from aiida_agents.tools.workflows.protocol import build_workflow_inputs
+from aiida_agents.tools.execution.submit import _resolve_inputs
+from aiida_agents.tools.execution.introspection import describe_workflow
+from aiida_agents.tools.execution.protocol import build_workflow_inputs
 
 ADD_EP = "core.arithmetic.add"
 

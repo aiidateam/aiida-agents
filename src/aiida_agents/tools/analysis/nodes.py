@@ -5,8 +5,8 @@ from __future__ import annotations
 import logging
 import typing as t
 
-from ._orm import load_node
-from ._types import Identifier, NodeLink
+from .._orm import load_node
+from .._types import Identifier, NodeLink
 
 
 logger = logging.getLogger(__name__)

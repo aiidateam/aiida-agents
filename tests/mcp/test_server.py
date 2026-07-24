@@ -17,17 +17,25 @@ from aiida_agents.mcp.server import mcp
 from aiida_agents.mcp.tools import register_tool
 
 
+# The tools that reach the database. Kept off the MCP server (see the test
+# below); ``execute_workflow_spec`` delegates to ``submit_workflow``, so both
+# are writes even though only the latter calls the engine directly.
+_WRITE_TOOLS = {"submit_workflow", "execute_workflow_spec"}
+
+
 def _tool_functions() -> set[str]:
     """Public tool functions defined across every ``aiida_agents.tools`` module.
 
-    Discovers both the tool modules and their functions, so neither a new tool
-    nor a whole new tool module needs to be listed by hand.
+    Walks the per-agent subpackages (``tools/analysis/``, ``tools/execution/``,
+    ...) recursively, so neither a new tool, a new tool module, nor a whole new
+    agent's tool package needs to be listed by hand.
     """
     names: set[str] = set()
-    for _, mod_name, _ in pkgutil.iter_modules(tools.__path__):
-        if mod_name.startswith("_"):
+    for mod_info in pkgutil.walk_packages(tools.__path__, prefix=f"{tools.__name__}."):
+        # Skip private modules and anything inside a private subpackage.
+        if any(part.startswith("_") for part in mod_info.name.split(".")):
             continue
-        module = importlib.import_module(f"{tools.__name__}.{mod_name}")
+        module = importlib.import_module(mod_info.name)
         for name, func in inspect.getmembers(module, inspect.isfunction):
             if (
                 func.__module__ == module.__name__  # defined here, not imported
@@ -38,22 +46,24 @@ def _tool_functions() -> set[str]:
 
 
 def test_server_registers_read_tools_only() -> None:
-    """The server exposes exactly the read tools, and never ``submit_workflow``.
+    """The server exposes exactly the read tools, and never a write tool.
 
-    ``submit_workflow`` is a surface-agnostic tool like the others (it lives in
-    ``aiida_agents.tools.submit``, so it *is* discovered), but it writes to the
-    database, so it must be reached only through the HITL-gated agent (ADR-08),
+    The write tools are surface-agnostic like the others (they live under
+    ``aiida_agents.tools.execution``, so they *are* discovered), but they reach
+    the database, so they must go only through the HITL-gated agents (ADR-08),
     never the unauthenticated MCP server. The server therefore registers every
-    discovered tool *except* the write one.
+    discovered tool *except* the writes.
     """
-    from aiida_agents.tools import submit  # the write tool exists, kept separate
+    from aiida_agents.tools.execution import submit  # kept separate, not re-exported
 
     registered = {tool.name for tool in asyncio.run(mcp.list_tools())}
     discovered = _tool_functions()
     assert hasattr(submit, "submit_workflow")
-    assert "submit_workflow" in discovered  # a surface-agnostic tool, so discovered
-    assert "submit_workflow" not in registered  # but never exposed on the server
-    assert registered == discovered - {"submit_workflow"}  # exactly the read tools
+    # Surface-agnostic tools, so discovered...
+    assert _WRITE_TOOLS <= discovered
+    # ...but never exposed on the server.
+    assert not (_WRITE_TOOLS & registered)
+    assert registered == discovered - _WRITE_TOOLS  # exactly the read tools
 
 
 def test_register_tool_surfaces_tool_error() -> None:

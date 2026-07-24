@@ -38,21 +38,29 @@ READ_TOOL_NAMES = frozenset(tool.__name__ for tool in _READ_TOOLS)
 
 
 class TestSubmitWorkflowRequiresApproval:
-    def test_submit_workflow_is_the_only_approval_tool(self) -> None:
-        """submit_workflow is registered approval-gated, and nothing else is.
+    def test_execute_workflow_spec_is_the_only_approval_tool(self) -> None:
+        """The Execution agent's write tool is approval-gated, and nothing else is.
 
         Approval-capable tools live in the agent's function toolset (populated
         by ``tool_plain``); read tools sit in a separate plain toolset with no
         approval mechanism. Asserting the whole set, not just membership, means
         a second write tool added without ``requires_approval`` fails here too.
         """
-        function_toolset = get_agent()._function_toolset
-        assert set(function_toolset.tools) == {"submit_workflow"}
-        assert function_toolset.tools["submit_workflow"].requires_approval is True
+        function_toolset = get_agent("execution")._function_toolset
+        assert set(function_toolset.tools) == {"execute_workflow_spec"}
+        assert function_toolset.tools["execute_workflow_spec"].requires_approval is True
+
+    def test_analysis_agent_holds_no_write_tool(self) -> None:
+        """The Analysis agent is read-only: submission is the Execution agent's.
+
+        Nothing is registered via ``tool_plain`` at all, so no write tool can
+        reach the database from this agent, gated or otherwise.
+        """
+        assert set(get_agent("analysis")._function_toolset.tools) == set()
 
     def test_read_tools_match_the_registered_set(self) -> None:
-        """The read toolset is exactly ``_READ_TOOLS``, and the write tool never
-        leaks into it, an ungated submit_workflow here would bypass approval.
+        """The read toolset is exactly ``_READ_TOOLS``, and no write tool leaks
+        into it, an ungated write tool here would bypass approval.
         """
         agent = get_agent()
         retry = next(ts for ts in agent.toolsets if isinstance(ts, RetryOnToolError))
@@ -60,6 +68,7 @@ class TestSubmitWorkflowRequiresApproval:
         assert isinstance(read_toolset, FunctionToolset)
         assert set(read_toolset.tools) == READ_TOOL_NAMES
         assert "submit_workflow" not in read_toolset.tools
+        assert "execute_workflow_spec" not in read_toolset.tools
 
 
 MULTIPLY_ADD = "core.arithmetic.multiply_add"
@@ -242,7 +251,7 @@ def test_run_submissions_records_one_outcome_per_call(
         return {"workflow": entry_point, "pk": 7, "state": "created"}
 
     monkeypatch.setattr(
-        "aiida_agents.tools.submit._run_submission", _fake_run_submission
+        "aiida_agents.tools.execution.submit._run_submission", _fake_run_submission
     )
 
     ok = ToolCallPart(
@@ -368,7 +377,8 @@ def test_print_previews_shows_resolved_submission_and_raw_fallback(
     from aiida_agents.cli.hitl import _Preview
 
     monkeypatch.setattr(
-        "aiida_agents.tools.submit._format_resolved_inputs", lambda resolved: "INPUTS"
+        "aiida_agents.tools.execution.submit._format_resolved_inputs",
+        lambda resolved: "INPUTS",
     )
 
     submit = ToolCallPart(

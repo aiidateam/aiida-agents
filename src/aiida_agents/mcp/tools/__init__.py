@@ -12,16 +12,24 @@ from fastmcp import FastMCP
 
 from aiida_agents.mcp._errors import to_mcp_tool_error
 from aiida_agents.tools import (
+    build_workflow_inputs,
+    describe_workflow,
     get_node_inputs,
     get_node_outputs,
     get_process_status,
+    list_codes,
     list_processes,
+    list_workflows,
+    query_analysis_agent,
     query_nodes,
     search_structures,
 )
 
-# submit is intentionally NOT registered: it writes, so it goes only through the
-# HITL-gated agent (ADR-08). The agent imports it from aiida_agents.tools.submit.
+# The write tools are intentionally NOT registered: they reach the database, so
+# they go only through the HITL-gated agents (ADR-08). ``submit_workflow`` lives
+# in ``aiida_agents.tools.execution.submit`` and ``execute_workflow_spec`` (which
+# delegates to it) in ``...execution.spec_execution``; the Execution agent
+# imports the latter directly.
 
 
 def register_tool(mcp: FastMCP, func: Callable[..., object]) -> None:
@@ -35,9 +43,16 @@ def register_tool(mcp: FastMCP, func: Callable[..., object]) -> None:
 
 def register_all(mcp: FastMCP) -> None:
     """Register the read-only tools on the MCP server."""
+    # Analysis tools
     register_tool(mcp, get_process_status)
     register_tool(mcp, list_processes)
     register_tool(mcp, get_node_inputs)
     register_tool(mcp, get_node_outputs)
     register_tool(mcp, query_nodes)
     register_tool(mcp, search_structures)
+    # Execution tools (read-only half: discovery and input building)
+    register_tool(mcp, list_workflows)
+    register_tool(mcp, describe_workflow)
+    register_tool(mcp, build_workflow_inputs)
+    register_tool(mcp, list_codes)
+    register_tool(mcp, query_analysis_agent)

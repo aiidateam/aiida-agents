@@ -24,6 +24,8 @@ from aiida_agents.agents import get_agent
 # Fail loudly if a test would hit a real endpoint (TestModel/FunctionModel are exempt).
 models.ALLOW_MODEL_REQUESTS = False
 
+# The Analysis agent is read-only: submission belongs to the Execution agent,
+# so no write tool appears here (a plugin may still contribute one, gated).
 EXPECTED_TOOLS = {
     "get_process_status",
     "list_processes",
@@ -32,7 +34,6 @@ EXPECTED_TOOLS = {
     "get_node_outputs",
     "search_structures",
     "search_aiida_docs",
-    "submit_workflow",
 }
 
 

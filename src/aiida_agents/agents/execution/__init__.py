@@ -13,10 +13,11 @@ from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
 
-from aiida_agents.tools.workflows.introspection import describe_workflow, list_workflows
-from aiida_agents.tools.workflows.protocol import build_workflow_inputs
-from aiida_agents.tools.workflows.spec_execution import execute_workflow_spec
 from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
+from aiida_agents.tools.execution.codes import list_codes
+from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
+from aiida_agents.tools.execution.protocol import build_workflow_inputs
+from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
 
 # Read-only tools: wrapped by RetryOnToolError so tool failures become ModelRetry
 _READ_TOOLS: list[Any] = [
@@ -24,6 +25,7 @@ _READ_TOOLS: list[Any] = [
     list_workflows,  # Discover registered workflow and calculation entry points (read-only)
     describe_workflow,  # Inspect process schema, ports, defaults, and exit codes (read-only)
     build_workflow_inputs,  # Pre-populate inputs from a protocol builder (read-only)
+    list_codes,  # Discover the configured codes to submit against (read-only)
 ]
 
 # Load system prompt
@@ -44,7 +46,8 @@ def get_agent(
     2. Discovers installed workflow and calculation entry points (list_workflows)
     3. Introspects process schemas, required/optional ports, and exit codes (describe_workflow)
     4. Pre-populates inputs from a protocol builder when one exists (build_workflow_inputs)
-    5. Submits workflow specs (execute_workflow_spec, requires HITL approval)
+    5. Discovers the configured codes a calculation can run on (list_codes)
+    6. Submits workflow specs (execute_workflow_spec, requires HITL approval)
 
     All read tools are wrapped by RetryOnToolError so tool failures
     (e.g., hallucinated parameters) become recoverable retries instead of crashes.

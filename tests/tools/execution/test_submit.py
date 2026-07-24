@@ -23,7 +23,7 @@ from __future__ import annotations
 import pytest
 from aiida import orm
 
-from aiida_agents.tools.submit import (
+from aiida_agents.tools.execution.submit import (
     SubmissionError,
     SubmissionInputError,
     _format_resolved_inputs,
@@ -315,7 +315,7 @@ class TestSubmitWorkflow:
         """Validation runs before the engine, so a bad submission never calls
         ``submit`` (the ADR-08 write guarantee).
         """
-        from aiida_agents.tools import submit as submit_mod
+        from aiida_agents.tools.execution import submit as submit_mod
 
         called: list[str] = []
         monkeypatch.setattr(
@@ -334,7 +334,7 @@ class TestDeeplyNestedNamespaceResolution:
     def test_five_level_nested_namespace(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Ensure _resolve_inputs and _format_resolved_inputs handle deeply nested namespaces smoothly."""
         from aiida.engine.processes.ports import InputPort, PortNamespace
-        from aiida_agents.tools.submit import _resolve_namespace_inputs
+        from aiida_agents.tools.execution.submit import _resolve_namespace_inputs
 
         # Construct 5 levels of nested namespaces: l1 -> l2 -> l3 -> l4 -> l5 -> cutoff
         ns1 = PortNamespace("l1")

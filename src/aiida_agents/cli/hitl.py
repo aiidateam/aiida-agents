@@ -78,7 +78,10 @@ def _triage_submissions(
     """
     from pydantic_ai.tools import ToolDenied
 
-    from aiida_agents.tools.submit import SubmissionInputError, _prepare_submission
+    from aiida_agents.tools.execution.submit import (
+        SubmissionInputError,
+        _prepare_submission,
+    )
 
     auto: dict[str, Any] = {}
     previews: list[_Preview] = []
@@ -101,7 +104,7 @@ def _triage_submissions(
 
 def _print_previews(previews: list[_Preview]) -> None:
     """Print the resolved submissions awaiting the user's confirmation."""
-    from aiida_agents.tools.submit import _format_resolved_inputs
+    from aiida_agents.tools.execution.submit import _format_resolved_inputs
 
     click.echo("\n⚠️  The agent wants to perform the following submission(s):")
     for call, _, resolved in previews:
@@ -127,7 +130,7 @@ def _run_submissions(
     session) raises a cross-thread SQLAlchemy error (ADR-08). Auto-denied invalid
     submissions never ran, so they carry their denial message straight through.
     """
-    from aiida_agents.tools.submit import _run_submission
+    from aiida_agents.tools.execution.submit import _run_submission
 
     outcomes: dict[str, Any] = {
         call_id: {"rejected": denied.message} for call_id, denied in auto.items()

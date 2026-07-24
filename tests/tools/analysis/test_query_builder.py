@@ -1,4 +1,4 @@
-"""Tests for ``aiida_agents.tools.query_builder``.
+"""Tests for ``aiida_agents.tools.analysis.query_builder``.
 
 The pipeline splits, so the tests do too: ``_lower`` is pure and checked by dict
 equality with no database at all, while ``query_nodes`` runs against the
@@ -21,7 +21,7 @@ from aiida.orm.implementation.querybuilder import EntityRelationships
 from aiida.workflows.arithmetic.multiply_add import MultiplyAddWorkChain
 from pydantic import ValidationError
 
-from aiida_agents.tools.query_builder import (
+from aiida_agents.tools.analysis.query_builder import (
     MAX_LIMIT,
     FieldFilter,
     FilterGroup,

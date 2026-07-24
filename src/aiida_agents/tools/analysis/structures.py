@@ -9,7 +9,7 @@ import typing as t
 from aiida import orm
 from aiida.common.constants import elements
 
-from ._types import StructureRecord
+from .._types import StructureRecord
 
 logger = logging.getLogger(__name__)
 

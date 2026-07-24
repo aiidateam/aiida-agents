@@ -1,9 +1,14 @@
 """Analysis agent — read-only exploration of an AiiDA profile.
 
 This is the first concrete agent (ADR-04,
-docs/adr/04-multi-agent-architecture.md). It exposes read-only MCP tools
-for querying processes, nodes, and crystal structures, and a write tool
-(submit_workflow) that requires explicit human confirmation before execution.
+docs/adr/04-multi-agent-architecture.md). It exposes read-only tools for
+querying processes, nodes, and crystal structures, plus documentation search.
+
+It holds no write tool: submitting is the Execution agent's responsibility
+(``agents.execution``), which reaches the database through its own HITL-gated
+``execute_workflow_spec`` after discovering and validating a spec. An installed
+plugin may still contribute a write tool, which is registered here behind the
+same approval gate (ADR-08).
 """
 
 from __future__ import annotations
@@ -28,15 +33,14 @@ from aiida_agents.tools import (
     query_nodes,
     search_structures,
 )
-from aiida_agents.tools.submit import submit_workflow
 from aiida_agents.rag import search_aiida_docs
 
 # Every read tool is exposed through RetryOnToolError (see get_agent), so a
 # tool that raises -- e.g. on a hallucinated or wrong-type identifier -- comes
 # back to the model as a recoverable ModelRetry instead of crashing the agent
-# run. submit_workflow is registered separately with requires_approval=True
-# (ADR-08, docs/adr/08-human-in-the-loop-before-writes.md) and is not part
-# of this toolset.
+# run. This agent registers no write tool of its own; a plugin-contributed one
+# is gated with requires_approval=True (ADR-08,
+# docs/adr/08-human-in-the-loop-before-writes.md) and is not part of this toolset.
 _READ_TOOLS: list[Any] = [
     get_process_status,
     list_processes,
@@ -83,10 +87,12 @@ def get_agent(
 ) -> Agent:
     """Build and return the Analysis agent.
 
-    submit_workflow is registered with ``requires_approval=True`` so the
-    agent run pauses and returns a ``DeferredToolRequests`` object whenever
-    the model wants to submit — the CLI must obtain user confirmation before
-    re-running with ``DeferredToolResults``.
+    This agent is read-only: submission belongs to the Execution agent. A
+    plugin-contributed write tool is still registered with
+    ``requires_approval=True``, so the agent run pauses and returns a
+    ``DeferredToolRequests`` object whenever the model wants to call one — the
+    CLI must obtain user confirmation before re-running with
+    ``DeferredToolResults``.
 
     The read tools are wrapped once, at the toolset boundary, by
     ``RetryOnToolError``: a tool failure becomes a ``ModelRetry`` the model
@@ -127,10 +133,9 @@ def get_agent(
         output_type=(str, DeferredToolRequests),
     )
 
-    # Register the write tools with approval required. A plugin write tool is
-    # gated exactly like submit_workflow: the CLI previews it and runs it on the
-    # main thread only after the user approves (ADR-08).
-    agent.tool_plain(requires_approval=True)(submit_workflow)
+    # A plugin-contributed write tool is gated the same way the Execution
+    # agent's own write tool is: the CLI previews it and runs it on the main
+    # thread only after the user approves (ADR-08).
     for fn in plugin_writes:
         agent.tool_plain(requires_approval=True)(fn)
     return agent

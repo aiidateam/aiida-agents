@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from aiida_agents.tools.workflows.introspection import describe_workflow, list_workflows
+from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
 
 
 class TestIntrospectionTools:

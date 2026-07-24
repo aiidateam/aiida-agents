@@ -1,4 +1,4 @@
-"""Tests for ``aiida_agents.tools.nodes``.
+"""Tests for ``aiida_agents.tools.analysis.nodes``.
 
 These tools wrap the ORM thinly, so the tests target only what is *ours*: the
 output-dict contract and the ``link_type`` stringification. See
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from aiida import orm
 
-from aiida_agents.tools.nodes import get_node_inputs, get_node_outputs
+from aiida_agents.tools.analysis.nodes import get_node_inputs, get_node_outputs
 
 
 def test_get_node_inputs(add_calc: orm.CalcJobNode) -> None:

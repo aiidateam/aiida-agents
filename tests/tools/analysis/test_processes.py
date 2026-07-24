@@ -1,4 +1,4 @@
-"""Tests for ``aiida_agents.tools.processes``.
+"""Tests for ``aiida_agents.tools.analysis.processes``.
 
 These tools wrap the ORM / ``aiida-restapi`` thinly, so the tests target only
 what is *ours*: the output-dict contract, pk/uuid acceptance, the missing-node
@@ -15,7 +15,7 @@ from __future__ import annotations
 import pytest
 from aiida import orm
 
-from aiida_agents.tools.processes import get_process_status, list_processes
+from aiida_agents.tools.analysis.processes import get_process_status, list_processes
 
 
 @pytest.mark.parametrize("by", ["pk", "uuid"])

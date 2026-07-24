@@ -17,7 +17,7 @@ from aiida.manage import get_manager
 from aiida.plugins.entry_point import load_entry_point
 from plumpy.ports import PortNamespace
 
-from ._types import SubmitResult
+from .._types import SubmitResult
 
 logger = logging.getLogger(__name__)
 
