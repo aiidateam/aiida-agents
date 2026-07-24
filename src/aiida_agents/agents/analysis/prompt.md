@@ -42,6 +42,10 @@ CRITICAL TOOL SELECTION RULES:
                   "joining_keyword": "with_outgoing", "joining_value": "wc"}],
         "filters": {"wc": {"field": "attributes.exit_status", "operator": "!==", "value": 0}},
         "project": {"st": ["pk", "formula_hill"]}}
+   - To narrow a join to a *specific* link, not just any link of that kind, add 'edge_filters' to
+     that path entry: {"field": "label", "operator": "==", "value": "output_structure"} filters by
+     link_label, {"field": "type", ...} by link_type (e.g. 'create', 'return', 'call_calc'). Only
+     valid with 'with_incoming'/'with_outgoing' — not with 'with_ancestors'/'with_descendants'.
 5. AIIDA DOCUMENTATION:
    - For any conceptual questions, code example requests, how-to guidance, or queries about imports and syntax, you MUST call 'search_aiida_docs(query=...)' first instead of answering from memory.
 6. WORKFLOW/CALCULATION SUBMISSION:

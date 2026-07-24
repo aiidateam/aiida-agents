@@ -29,6 +29,13 @@ Design notes:
    plugin (e.g. ``PwBandsWorkChain``) shares its ``node_type`` with every other
    plugin of the same kind, so entity resolution also carries an implicit
    ``process_type`` filter for these -- see :class:`EntityAlias`.
+7. Joins can filter the edge, not just the entities either side. A ``path``
+   item's ``edge_filters`` narrows by ``link_label``/``link_type`` (e.g. "only
+   the *return* links"), which entity filters alone cannot express. Only valid
+   on ``with_incoming``/``with_outgoing``: transitive joins have no single
+   edge to filter, and aiida-core does not validate that itself -- it raises
+   an unrelated ``AttributeError`` instead, so :func:`_validate_spec` catches
+   it first.
 
 The closed sets (join keywords, entity types, fields) are derived from
 aiida-core rather than hand-maintained; only the operator list is hand-written,
@@ -69,7 +76,9 @@ FilterOp = t.Literal["==", "!==", ">", ">=", "<", "<=", "in", "like"]
 #: against ``EntityRelationships`` in :func:`_validate_spec`, this only bounds
 #: what the model may even attempt to write.
 _JOIN_KEYWORDS: tuple[str, ...] = tuple(
-    sorted({keyword for keywords in EntityRelationships.values() for keyword in keywords})
+    sorted(
+        {keyword for keywords in EntityRelationships.values() for keyword in keywords}
+    )
 )
 JoinKeyword = t.Literal[_JOIN_KEYWORDS]  # type: ignore[valid-type]
 
@@ -93,6 +102,16 @@ PASSTHROUGH_FIELDS = frozenset(
         "time",
     }
 )
+
+#: The only fields a link (edge) actually has -- unlike node fields, there is
+#: no extras/attributes prefixing to apply.
+EDGE_FIELDS = frozenset({"label", "type"})
+
+#: Joins whose edge_filters actually apply. Transitive joins (with_ancestors,
+#: with_descendants) walk a recursive path-table with no per-edge join, so
+#: aiida-core raises a raw, unhelpful AttributeError if edge_filters is given
+#: there instead of validating it (verified against the installed aiida-core).
+EDGE_FILTERABLE_JOINS = frozenset({"with_incoming", "with_outgoing"})
 
 
 class QueryValidationError(ValueError):
@@ -237,6 +256,17 @@ class PathItem(BaseModel):
     joining_value: str | None = Field(
         default=None, description="The tag of the earlier entity this one joins to."
     )
+    edge_filters: FilterTree | None = Field(
+        default=None,
+        description=(
+            "Filter the link itself, not the entities it connects -- e.g. only "
+            "'return' links, or a specific link_label. Fields: 'label' "
+            "(link_label), 'type' (link_type, e.g. 'create', 'return', "
+            "'input_calc', 'call_calc', 'call_work'). Only valid with "
+            "joining_keyword 'with_incoming' or 'with_outgoing'; aiida-core does "
+            "not support edge filtering on transitive joins."
+        ),
+    )
     outerjoin: bool = Field(default=False, description="Keep rows with no match.")
 
 
@@ -273,7 +303,9 @@ class QuerySpec(BaseModel):
 
         {"path": [{"entity_type": "WorkChainNode", "tag": "wc"},
                   {"entity_type": "StructureData", "tag": "st",
-                   "joining_keyword": "with_outgoing", "joining_value": "wc"}],
+                   "joining_keyword": "with_outgoing", "joining_value": "wc",
+                   "edge_filters": {"field": "label", "operator": "==",
+                                    "value": "output_structure"}}],
          "filters": {"wc": {"field": "attributes.exit_status", "operator": "!==", "value": 0}},
          "project": {"st": ["pk", "formula_hill"]}}
     """
@@ -423,6 +455,17 @@ def _validate_spec(spec: QuerySpec) -> None:
                 f"relates to an earlier entity ({', '.join(sorted(declared))})."
             )
             raise QueryValidationError(msg)
+        if (
+            item.edge_filters is not None
+            and item.joining_keyword not in EDGE_FILTERABLE_JOINS
+        ):
+            valid = " or ".join(f"{kw!r}" for kw in sorted(EDGE_FILTERABLE_JOINS))
+            msg = (
+                f"edge_filters on tag {item.tag!r} needs joining_keyword {valid}; "
+                f"aiida-core does not support filtering the edge for "
+                f"{item.joining_keyword!r}."
+            )
+            raise QueryValidationError(msg)
 
         if item.joining_keyword is not None:
             orm_base = _orm_base(_resolve_entity(item.entity_type, index).node_type)
@@ -484,8 +527,28 @@ def _qualify_field(field: str) -> str:
     return f"extras.{field}"
 
 
-def _lower_filter(node: FilterTree) -> dict[str, t.Any]:
-    """Translate a filter tree into QueryBuilder's nested filter dict."""
+def _qualify_edge_field(field: str) -> str:
+    """A link has only `label`/`type` -- no extras/attributes prefixing applies."""
+    if field not in EDGE_FIELDS:
+        msg = (
+            f"edge_filters may only use 'label' or 'type', got {field!r}. "
+            "'label' is the link_label, 'type' is the link_type "
+            "(e.g. 'create', 'return', 'input_calc')."
+        )
+        raise QueryValidationError(msg)
+    return field
+
+
+def _lower_filter(
+    node: FilterTree, qualify: t.Callable[[str], str] = _qualify_field
+) -> dict[str, t.Any]:
+    """Translate a filter tree into QueryBuilder's nested filter dict.
+
+    :param qualify: how to resolve a bare field name. Node filters (the
+        default) prefix bare extras keys with ``extras.``; edge filters pass
+        :func:`_qualify_edge_field` instead, since a link's only fields are
+        ``label``/``type`` with no extras/attributes concept.
+    """
     if isinstance(node, FieldFilter):
         if node.operator == "in" and not isinstance(node.value, (list, tuple, set)):
             msg = (
@@ -493,12 +556,12 @@ def _lower_filter(node: FilterTree) -> dict[str, t.Any]:
                 f"{type(node.value).__name__}: {node.value!r}. Example: [1, 2, 3]."
             )
             raise QueryValidationError(msg)
-        field = _qualify_field(node.field)
+        field = qualify(node.field)
         if node.operator == "==":
             return {field: node.value}
         return {field: {node.operator: node.value}}
     key = "and" if node.logic == "AND" else "or"
-    return {key: [_lower_filter(condition) for condition in node.conditions]}
+    return {key: [_lower_filter(condition, qualify) for condition in node.conditions]}
 
 
 def _lower(spec: QuerySpec) -> dict[str, t.Any]:
@@ -525,6 +588,10 @@ def _lower(spec: QuerySpec) -> dict[str, t.Any]:
         if item.joining_keyword is not None:
             entry["joining_keyword"] = item.joining_keyword
             entry["joining_value"] = item.joining_value
+        if item.edge_filters is not None:
+            entry["edge_filters"] = _lower_filter(
+                item.edge_filters, _qualify_edge_field
+            )
         path.append(entry)
         # A process plugin (e.g. a specific WorkChain) shares its node_type with
         # every other plugin of the same kind; process_type is what actually

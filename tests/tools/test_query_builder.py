@@ -194,6 +194,31 @@ def test_lower_workchain_plugin_adds_a_process_type_filter() -> None:
     }
 
 
+def test_lower_edge_filters_uses_the_edge_qualifier() -> None:
+    """edge_filters lowers 'label'/'type' as-is -- no extras/attributes prefixing,
+    unlike an entity's own filters."""
+    spec = QuerySpec.model_validate(
+        {
+            "path": [
+                {"entity_type": CALC, "tag": "calc"},
+                {
+                    "entity_type": "StructureData",
+                    "tag": "st",
+                    "joining_keyword": "with_outgoing",
+                    "joining_value": "calc",
+                    "edge_filters": {
+                        "field": "label",
+                        "operator": "==",
+                        "value": "output_structure",
+                    },
+                },
+            ],
+            "count_only": True,
+        }
+    )
+    assert _lower(spec)["path"][1]["edge_filters"] == {"label": "output_structure"}
+
+
 @pytest.mark.parametrize(
     "spec_dict,match",
     [
@@ -244,6 +269,42 @@ def test_lower_workchain_plugin_adds_a_process_type_filter() -> None:
             {"sort": [{"field": "pw_bandgap", "direction": "desc"}]},
             "requires a 'cast'",
             id="extras-sort-needs-cast",
+        ),
+        pytest.param(
+            {
+                "path": [
+                    {"entity_type": CALC, "tag": "calc"},
+                    {
+                        "entity_type": "StructureData",
+                        "tag": "st",
+                        "joining_keyword": "with_descendants",
+                        "joining_value": "calc",
+                        "edge_filters": {
+                            "field": "label",
+                            "operator": "==",
+                            "value": "x",
+                        },
+                    },
+                ]
+            },
+            "does not support filtering the edge",
+            id="edge-filters-on-transitive-join",
+        ),
+        pytest.param(
+            {
+                "path": [
+                    {"entity_type": CALC, "tag": "calc"},
+                    {
+                        "entity_type": "StructureData",
+                        "tag": "st",
+                        "joining_keyword": "with_outgoing",
+                        "joining_value": "calc",
+                        "edge_filters": {"field": "pk", "operator": "==", "value": 1},
+                    },
+                ]
+            },
+            "may only use 'label' or 'type'",
+            id="edge-filters-bad-field",
         ),
         pytest.param(
             {"entity_type": "node", "group_label": "no-such-group-123"},
@@ -640,6 +701,64 @@ def test_direct_join_does_not_reach_a_transitive_ancestor(
         )
     )
     assert result["total"] == 0
+
+
+def test_edge_filters_narrow_to_a_specific_link(query_archive: QueryArchive) -> None:
+    """edge_filters distinguishes a specific link from any link of that kind.
+
+    Every archive row's upstream calc creates exactly one RemoteData, labelled
+    'remote_folder' -- entity filters alone cannot express "only that link",
+    since both sides of the join are the same for any CalcJob->RemoteData edge.
+    `with_incoming=upstream` on the RemoteData means "upstream sends to this
+    entity" -- i.e. upstream creates the remote folder.
+
+    Scoped to the archive's own upstream pks (derived via the real incoming
+    links, not assumed) rather than the bare entity type: the shared session
+    profile may carry other CalcJob->RemoteData 'remote_folder' edges from
+    unrelated fixtures (e.g. a real ArithmeticAddCalculation run also creates
+    one), which a global count would wrongly fold in.
+    """
+    upstream_pks = [
+        calc.base.links.get_incoming()
+        .all()[0]
+        .node.base.links.get_incoming()
+        .all()[0]
+        .node.pk
+        for calc in query_archive.calculations.values()
+    ]
+
+    def total(edge_label: str) -> int:
+        return query_nodes(
+            QuerySpec.model_validate(
+                {
+                    "path": [
+                        {"entity_type": CALC, "tag": "upstream"},
+                        {
+                            "entity_type": "RemoteData",
+                            "tag": "remote",
+                            "joining_keyword": "with_incoming",
+                            "joining_value": "upstream",
+                            "edge_filters": {
+                                "field": "label",
+                                "operator": "==",
+                                "value": edge_label,
+                            },
+                        },
+                    ],
+                    "filters": {
+                        "upstream": {
+                            "field": "pk",
+                            "operator": "in",
+                            "value": upstream_pks,
+                        }
+                    },
+                    "count_only": True,
+                }
+            )
+        )["total"]
+
+    assert total("remote_folder") == len(upstream_pks)
+    assert total("no-such-label") == 0
 
 
 def test_multi_tag_projection_keeps_values_with_their_own_tag(
