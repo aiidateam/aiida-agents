@@ -17,6 +17,7 @@ import typing as t
 import pytest
 from aiida import orm
 from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
+from aiida.orm.implementation.querybuilder import EntityRelationships
 from aiida.workflows.arithmetic.multiply_add import MultiplyAddWorkChain
 from pydantic import ValidationError
 
@@ -24,6 +25,8 @@ from aiida_agents.tools.query_builder import (
     MAX_LIMIT,
     FieldFilter,
     FilterGroup,
+    JoinKeyword,
+    PathItem,
     QuerySpec,
     QueryValidationError,
     _lower,
@@ -305,6 +308,29 @@ def test_invalid_operator_is_rejected_by_the_schema() -> None:
     """'!=' is not AiiDA syntax; '!==' is."""
     with pytest.raises(ValidationError):
         FieldFilter(field="insulator", operator="!=", value=True)  # type: ignore[arg-type]
+
+
+def test_join_keywords_are_derived_from_entity_relationships() -> None:
+    """`JoinKeyword` is generated from `EntityRelationships`, not hand-typed.
+
+    Pins the derivation itself: every keyword AiiDA recognises for any entity
+    must be a valid `joining_keyword`, and nothing else is.
+    """
+    expected = {
+        keyword for keywords in EntityRelationships.values() for keyword in keywords
+    }
+    assert set(t.get_args(JoinKeyword)) == expected
+
+
+def test_bogus_join_keyword_is_rejected_by_the_schema() -> None:
+    """A join keyword AiiDA has never heard of is rejected before validation.
+
+    `JoinKeyword` is a runtime-derived Literal (mypy cannot see its members
+    statically, hence no `type: ignore` needed here), so this is the only
+    check that a bogus keyword is actually rejected.
+    """
+    with pytest.raises(ValidationError):
+        PathItem(tag="x", joining_keyword="with_nonsense")
 
 
 # ------------------------------------------- against the miniature archive

@@ -63,20 +63,15 @@ GROUP_TAG = "_group"
 #: Operators accepted in a filter. AiiDA's "not equal" is ``!==``, not ``!=``.
 FilterOp = t.Literal["==", "!==", ">", ">=", "<", "<=", "in", "like"]
 
-#: Join keywords, mirroring ``EntityRelationships``; validated per entity below.
-JoinKeyword = t.Literal[
-    "with_ancestors",
-    "with_authinfo",
-    "with_comment",
-    "with_computer",
-    "with_descendants",
-    "with_group",
-    "with_incoming",
-    "with_log",
-    "with_node",
-    "with_outgoing",
-    "with_user",
-]
+#: Every join keyword ``EntityRelationships`` recognises for any entity, so the
+#: schema itself cannot fall behind if aiida-core ever adds or renames one; the
+#: legality of a keyword *for a given entity* is still checked dynamically
+#: against ``EntityRelationships`` in :func:`_validate_spec`, this only bounds
+#: what the model may even attempt to write.
+_JOIN_KEYWORDS: tuple[str, ...] = tuple(
+    sorted({keyword for keywords in EntityRelationships.values() for keyword in keywords})
+)
+JoinKeyword = t.Literal[_JOIN_KEYWORDS]  # type: ignore[valid-type]
 
 # Containers and columns addressed as-is. Any other bare name is taken to be an
 # extras key and gets the ``extras.`` prefix, so the model does not need to know
