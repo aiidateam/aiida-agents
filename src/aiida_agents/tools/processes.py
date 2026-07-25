@@ -7,8 +7,8 @@ import typing as t
 
 from aiida import orm
 
-from .._orm import WrongNodeType, load_node
-from .._types import Identifier, ProcessRecord, ProcessStatus
+from ._orm import WrongNodeType, load_node
+from ._types import Identifier, ProcessRecord, ProcessStatus
 
 
 logger = logging.getLogger(__name__)
