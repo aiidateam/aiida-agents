@@ -1,10 +1,19 @@
-"""Human-in-the-loop approval flow for write (submit) tool calls.
+"""Human-in-the-loop approval flow for write tool calls.
 
-The agent registers its write tools (``submit_workflow`` and the execution
-agent's ``execute_workflow_spec``) with ``requires_approval=True`` (ADR-08), so a
-run that wants to write pauses and returns a ``DeferredToolRequests``. This module
-previews each proposed submission, gets the user's decision, runs approved ones on
+A write tool is registered with ``requires_approval=True`` (ADR-08), so a run
+that wants to write pauses and returns a ``DeferredToolRequests``. This module
+previews each proposed call, gets the user's decision, runs the approved ones on
 the main thread, and splices the outcomes back into the message history.
+
+Approved calls run *here* rather than by handing them back to pydantic-ai, which
+would execute them on a worker thread: AiiDA's storage is thread-bound, so a
+write from the worker thread raises a cross-thread error. Every approval-gated
+tool therefore needs a main-thread executor, not just the submissions
+(``submit_workflow`` / ``execute_workflow_spec``): ``_run_approvals`` calls the
+tool's own registered function, and submissions get an extra resolve-and-preview
+pass on top (see ``_triage_submissions``). Without that, a non-submission write
+tool -- ``import_structure``, or any write tool a plugin contributes -- is
+previewed, approved, and then silently dropped.
 """
 
 from __future__ import annotations
@@ -48,15 +57,29 @@ def _submission_args(call: Any) -> tuple[str, dict[str, Any]]:
 
 
 class _Preview(NamedTuple):
-    """A pending submission awaiting the user's decision.
+    """A pending tool call awaiting the user's decision.
 
-    ``process_class`` and ``resolved`` are None for any non-submit approval tool
-    (shown with raw args, not executable out of band).
+    ``process_class`` and ``resolved`` carry the submission-specific enrichment
+    (the loaded process class and its resolved inputs) so the preview can show
+    what will actually be created. They are None for any other approval-gated
+    tool, which is previewed with its raw args and executed by calling its own
+    registered function (see ``_run_approvals``).
     """
 
     call: Any
     process_class: Any
     resolved: dict[str, Any] | None
+
+
+def _tool_function(agent: Agent, name: str) -> Any:
+    """The function registered behind an approval-gated tool, or None.
+
+    Approved calls are executed here on the main thread, so we need the tool's
+    own callable. pydantic-ai keeps it on the agent's function toolset, which is
+    where ``tool_plain(requires_approval=True)`` puts it.
+    """
+    tool = agent._function_toolset.tools.get(name)
+    return getattr(tool, "function", None)
 
 
 def _triage_submissions(
@@ -103,10 +126,15 @@ def _triage_submissions(
 
 
 def _print_previews(previews: list[_Preview]) -> None:
-    """Print the resolved submissions awaiting the user's confirmation."""
+    """Print the calls awaiting the user's confirmation.
+
+    A submission shows its entry point and fully resolved inputs, so the user can
+    see what will be created before anything is written; any other approval-gated
+    tool shows the raw arguments the model supplied.
+    """
     from aiida_agents.tools.execution.submit import _format_resolved_inputs
 
-    click.echo("\n⚠️  The agent wants to perform the following submission(s):")
+    click.echo("\n⚠️  The agent wants to perform the following action(s):")
     for call, _, resolved in previews:
         click.echo(f"   Tool  : {call.tool_name}")
         if resolved is None:
@@ -117,18 +145,24 @@ def _print_previews(previews: list[_Preview]) -> None:
         click.echo(f"   Inputs (resolved):\n{_format_resolved_inputs(resolved)}")
 
 
-def _run_submissions(
+def _run_approvals(
+    agent: Agent,
     previews: list[_Preview],
     auto: dict[str, Any],
 ) -> dict[str, Any]:
-    """Execute each approved submission on the main thread, one outcome per
-    tool-call id.
+    """Execute each approved call on the main thread, one outcome per tool-call id.
 
     Runs *here*, not by re-running the agent: pydantic-ai runs sync tools on a
     worker thread and AiiDA's storage is thread-bound, so writing from the worker
     thread (reusing the default user / nodes the preview bound to the main-thread
     session) raises a cross-thread SQLAlchemy error (ADR-08). Auto-denied invalid
     submissions never ran, so they carry their denial message straight through.
+
+    A submission runs through ``_run_submission`` with the inputs already resolved
+    at triage; any other approval-gated tool is executed by calling its own
+    registered function with the arguments the model supplied. A tool the agent
+    has no function for cannot be run at all, so it is reported as skipped rather
+    than silently dropped.
     """
     from aiida_agents.tools.execution.submit import _run_submission
 
@@ -136,21 +170,33 @@ def _run_submissions(
         call_id: {"rejected": denied.message} for call_id, denied in auto.items()
     }
     for call, process_class, resolved in previews:
-        if process_class is None or resolved is None:
-            click.echo(f"   Skipping {call.tool_name}: not an executable submission.")
+        if process_class is not None and resolved is not None:
+            entry_point = call.args_as_dict().get("entry_point", "")
+            try:
+                res = _run_submission(entry_point, process_class, resolved)
+            except Exception as exc:
+                click.echo(f"\n❌ Submission failed: {exc}")
+                outcomes[call.tool_call_id] = {"error": str(exc)}
+                continue
+            click.echo(
+                f"\n✅ Submitted {res['workflow']}: pk={res['pk']}, state={res['state']}"
+            )
+            outcomes[call.tool_call_id] = res
+            continue
+
+        fn = _tool_function(agent, call.tool_name)
+        if fn is None:
+            click.echo(f"   Skipping {call.tool_name}: no registered function to run.")
             outcomes[call.tool_call_id] = {"skipped": call.tool_name}
             continue
-        entry_point, _ = _submission_args(call)
         try:
-            res = _run_submission(entry_point, process_class, resolved)
+            result = fn(**call.args_as_dict())
         except Exception as exc:
-            click.echo(f"\n❌ Submission failed: {exc}")
+            click.echo(f"\n❌ {call.tool_name} failed: {exc}")
             outcomes[call.tool_call_id] = {"error": str(exc)}
             continue
-        click.echo(
-            f"\n✅ Submitted {res['workflow']}: pk={res['pk']}, state={res['state']}"
-        )
-        outcomes[call.tool_call_id] = res
+        click.echo(f"\n✅ Ran {call.tool_name}.")
+        outcomes[call.tool_call_id] = result
     return outcomes
 
 
@@ -182,18 +228,19 @@ def _splice_outcomes(
     return updated
 
 
-def _confirm_and_submit(
+def _confirm_and_run(
+    agent: Agent,
     result: Any,
     pending: DeferredToolRequests,
     auto: dict[str, Any],
     previews: list[_Preview],
     history: list[ModelMessage],
 ) -> list[ModelMessage]:
-    """Preview the pending submissions, get the user's go/no-go, run the approved
-    ones, and splice their outcomes into history.
+    """Preview the pending calls, get the user's go/no-go, run the approved ones,
+    and splice their outcomes into history.
 
     Cancelling (an explicit no, or Ctrl-C / Ctrl-D, which raise ``click.Abort``)
-    returns the pre-turn ``history`` unchanged and submits nothing, staying in the
+    returns the pre-turn ``history`` unchanged and runs nothing, staying in the
     REPL rather than tearing down the session.
     """
     _print_previews(previews)
@@ -202,11 +249,11 @@ def _confirm_and_submit(
     except click.Abort:
         proceed = False
     if not proceed:
-        click.echo("Cancelled - nothing was submitted.")
+        click.echo("Cancelled - nothing was run.")
         return history
 
-    outcomes = _run_submissions(previews, auto)
-    click.echo()  # separate the submission summary from the next prompt
+    outcomes = _run_approvals(agent, previews, auto)
+    click.echo()  # separate the summary from the next prompt
     return _splice_outcomes(result, pending, outcomes)
 
 
@@ -254,7 +301,7 @@ def _handle_deferred(
         auto, previews = _triage_submissions(pending)
 
         if previews:
-            return _confirm_and_submit(result, pending, auto, previews, history)
+            return _confirm_and_run(agent, result, pending, auto, previews, history)
 
         if not auto:
             return history

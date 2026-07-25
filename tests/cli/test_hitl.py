@@ -16,8 +16,13 @@ Two invariants are tested:
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
+
 import pytest
 from aiida import orm
+from pydantic_ai import Agent
+from pydantic_ai.models.test import TestModel
 from pydantic_ai.messages import (
     ModelMessage,
     ModelRequest,
@@ -239,15 +244,23 @@ class TestTriageSubmissions:
         assert isinstance(resolved["x"], orm.Int) and resolved["x"].value == 2
 
 
-def test_run_submissions_records_one_outcome_per_call(
+def _approval_agent(*fns: Callable[..., Any]) -> Agent:
+    """A real agent with ``fns`` registered as approval-gated write tools."""
+    agent: Agent = Agent(TestModel(), output_type=(str, DeferredToolRequests))
+    for fn in fns:
+        agent.tool_plain(requires_approval=True)(fn)
+    return agent
+
+
+def test_run_approvals_records_one_outcome_per_call(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Each approval gets exactly one outcome, keyed by its tool-call id: an
-    auto-denied input carries its denial, a non-executable tool is skipped, a
-    raising submission records its error, and a successful one records the run
-    result.
+    auto-denied input carries its denial, a tool the agent has no function for is
+    skipped, a raising submission records its error, and a successful one records
+    the run result.
     """
-    from aiida_agents.cli.hitl import _Preview, _run_submissions
+    from aiida_agents.cli.hitl import _Preview, _run_approvals
 
     def _fake_run_submission(
         entry_point: str, process_class: object, resolved: object
@@ -272,10 +285,12 @@ def test_run_submissions_records_one_outcome_per_call(
     previews = [
         _Preview(ok, object(), {"x": 1}),
         _Preview(err, object(), {"x": 1}),
-        _Preview(other, None, None),  # not an executable submission
+        _Preview(other, None, None),  # the agent has no such tool -> unrunnable
     ]
 
-    outcomes = _run_submissions(previews, {"denied": ToolDenied("bad inputs")})
+    outcomes = _run_approvals(
+        _approval_agent(), previews, {"denied": ToolDenied("bad inputs")}
+    )
 
     assert outcomes == {
         "denied": {"rejected": "bad inputs"},
@@ -283,6 +298,50 @@ def test_run_submissions_records_one_outcome_per_call(
         "err": {"error": "submit exploded"},
         "skip": {"skipped": "other"},
     }
+
+
+class TestNonSubmitWriteToolsRun:
+    """A write tool that isn't a submission must actually run once approved.
+
+    Regression: the approval flow only knew how to execute ``submit_workflow``,
+    so any other approval-gated tool (a plugin's write tool) was previewed, the
+    user approved it, and it was then silently dropped as "not an executable
+    submission" -- the worst outcome, since the user believes they approved
+    something that never ran.
+    """
+
+    def test_approved_plugin_write_tool_is_executed(self) -> None:
+        from aiida_agents.cli.hitl import _Preview, _run_approvals
+
+        ran: list[int] = []
+
+        def plugin_write(x: int) -> str:
+            """A plugin's write tool."""
+            ran.append(x)
+            return f"wrote {x}"
+
+        call = ToolCallPart(tool_name="plugin_write", args={"x": 7}, tool_call_id="c1")
+        outcomes = _run_approvals(
+            _approval_agent(plugin_write), [_Preview(call, None, None)], {}
+        )
+
+        assert ran == [7]  # it really ran, with the model's arguments
+        assert outcomes == {"c1": "wrote 7"}
+
+    def test_raising_plugin_write_tool_records_its_error(self) -> None:
+        """A failing plugin tool is reported back to the model, not fatal."""
+        from aiida_agents.cli.hitl import _Preview, _run_approvals
+
+        def plugin_write() -> str:
+            """A plugin's write tool."""
+            raise RuntimeError("plugin exploded")
+
+        call = ToolCallPart(tool_name="plugin_write", args={}, tool_call_id="c1")
+        outcomes = _run_approvals(
+            _approval_agent(plugin_write), [_Preview(call, None, None)], {}
+        )
+
+        assert outcomes == {"c1": {"error": "plugin exploded"}}
 
 
 def test_splice_outcomes_appends_one_tool_return_per_approval() -> None:
@@ -315,9 +374,9 @@ def test_splice_outcomes_appends_one_tool_return_per_approval() -> None:
     ]
 
 
-class TestConfirmAndSubmit:
+class TestConfirmAndRun:
     @pytest.mark.parametrize("mode", ["declined", "ctrl-c-abort"])
-    def test_cancel_submits_nothing(
+    def test_cancel_runs_nothing(
         self, monkeypatch: pytest.MonkeyPatch, mode: str
     ) -> None:
         """Declining, or Ctrl-C/Ctrl-D at the prompt (click.Abort), returns the
@@ -340,11 +399,11 @@ class TestConfirmAndSubmit:
 
         monkeypatch.setattr(hitl, "_print_previews", lambda previews: None)
         monkeypatch.setattr(rich_click, "confirm", _confirm)
-        monkeypatch.setattr(hitl, "_run_submissions", _record)
+        monkeypatch.setattr(hitl, "_run_approvals", _record)
 
         history: list[ModelMessage] = []
-        out = hitl._confirm_and_submit(
-            None, DeferredToolRequests(approvals=[]), {}, [], history
+        out = hitl._confirm_and_run(
+            _approval_agent(), None, DeferredToolRequests(approvals=[]), {}, [], history
         )
 
         assert out is history
@@ -360,14 +419,14 @@ class TestConfirmAndSubmit:
         monkeypatch.setattr(hitl, "_print_previews", lambda previews: None)
         monkeypatch.setattr(rich_click, "confirm", lambda *a, **k: True)
         monkeypatch.setattr(
-            hitl, "_run_submissions", lambda previews, auto: {"id": {"pk": 1}}
+            hitl, "_run_approvals", lambda agent, previews, auto: {"id": {"pk": 1}}
         )
         monkeypatch.setattr(
             hitl, "_splice_outcomes", lambda result, pending, outcomes: spliced
         )
 
-        out = hitl._confirm_and_submit(
-            None, DeferredToolRequests(approvals=[]), {}, [], []
+        out = hitl._confirm_and_run(
+            _approval_agent(), None, DeferredToolRequests(approvals=[]), {}, [], []
         )
 
         assert out is spliced
