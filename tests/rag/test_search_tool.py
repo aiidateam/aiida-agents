@@ -8,7 +8,23 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
+
 from aiida_agents.rag import search_aiida_docs
+
+
+class _FakeCollection:
+    def __init__(self, name: str) -> None:
+        self.name = name
+
+
+class _FakeClient:
+    def __init__(self, names: list[str]) -> None:
+        self._names = names
+
+    def list_collections(self) -> list[_FakeCollection]:
+        return [_FakeCollection(n) for n in self._names]
 
 
 # ---------------------------------------------------------------------------
@@ -113,3 +129,76 @@ class TestSearchAiidaDocs:
             "[quantumespresso: topics/pseudopotentials  §  Choosing a pseudo]" in result
         )
         assert "Use SSSP for most cases." in result
+
+
+class TestUnavailableIndexMessage:
+    """What the tool tells the model when it cannot search.
+
+    Two distinct causes with two different fixes: never built (rebuild) versus
+    built under a different embedding model (start Ollama). Conflating them
+    sent users to rebuild, which only creates a *second* unreachable index.
+    """
+
+    def test_never_built_says_to_build(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from aiida_agents.rag import _unavailable_message
+
+        monkeypatch.setattr(
+            "aiida_agents.rag.store._get_client", lambda settings=None: _FakeClient([])
+        )
+        monkeypatch.setattr(
+            "aiida_agents.rag.embeddings.configured_embedding_name",
+            lambda *a, **k: "ollama/mxbai-embed-large",
+        )
+
+        msg = _unavailable_message()
+
+        assert "has not been built" in msg
+        assert "rag build" in msg
+
+    def test_embedding_mismatch_says_not_to_rebuild(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An index built with the configured model, queried with the fallback."""
+        from aiida_agents.rag import _unavailable_message
+        from aiida_agents.rag.store import _core_name_for
+
+        configured = "ollama/mxbai-embed-large"
+        monkeypatch.setattr(
+            "aiida_agents.rag.store._get_client",
+            lambda settings=None: _FakeClient([_core_name_for(configured)]),
+        )
+        monkeypatch.setattr(
+            "aiida_agents.rag.embeddings.configured_embedding_name",
+            lambda *a, **k: configured,
+        )
+
+        msg = _unavailable_message()
+
+        assert "Ollama" in msg
+        assert "NOT the fix" in msg
+
+    def test_every_unavailable_message_forbids_answering_from_memory(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The fabricated-API failure mode: the instruction must always be there.
+
+        Observed in end-to-end testing -- with the index unavailable the agent
+        invented a confident, entirely fictional AiiDA API.
+        """
+        from aiida_agents.rag import _unavailable_message
+
+        monkeypatch.setattr(
+            "aiida_agents.rag.store._get_client", lambda settings=None: _FakeClient([])
+        )
+        monkeypatch.setattr(
+            "aiida_agents.rag.embeddings.configured_embedding_name",
+            lambda *a, **k: "ollama/mxbai-embed-large",
+        )
+        assert "do NOT answer this from memory" in _unavailable_message()
+
+        # And on the degraded path, where diagnosis itself failed.
+        monkeypatch.setattr(
+            "aiida_agents.rag.store._get_client",
+            lambda settings=None: (_ for _ in ()).throw(RuntimeError("store gone")),
+        )
+        assert "do NOT answer this from memory" in _unavailable_message()

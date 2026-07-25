@@ -18,10 +18,15 @@ from aiida_agents.rag.store import (
     _DOCS_TAG,
     _collection_name,
     _collection_populated,
+    _core_name_for,
     _get_client,
     _plugin_collection_name,
 )
-from aiida_agents.rag.embeddings import EmbeddingFunction, get_embedding_function
+from aiida_agents.rag.embeddings import (
+    EmbeddingFunction,
+    configured_embedding_name,
+    get_embedding_function,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -82,6 +87,36 @@ def _query_one(
     ]
 
 
+def _warn_missing_core_index(embed_fn: EmbeddingFunction, existing: set[str]) -> None:
+    """Explain *why* the index is missing, not merely that it is.
+
+    The confusing case is an index that was built and then became invisible:
+    ``get_embedding_function`` silently falls back to sentence-transformers when
+    Ollama fails a short health check, and the collection name encodes the
+    embedding model, so a momentary blip makes a perfectly good index
+    unreachable. Telling the user to rebuild there is wrong advice -- the
+    rebuild would just produce a second index under the other name.
+    """
+    active = embed_fn.name()
+    configured = configured_embedding_name()
+    if configured != active and _core_name_for(configured) in existing:
+        logger.warning(
+            "an index exists for the configured embedding %r, but %r is active, "
+            "so searches cannot reach it. This usually means Ollama was "
+            "unreachable and the embedder fell back. Start Ollama (or set "
+            "AIIDA_AGENTS_EMBED_BACKEND) rather than rebuilding.",
+            configured,
+            active,
+        )
+        return
+    logger.warning(
+        "no index for docs %s + embedding '%s'. Build it by running: "
+        "aiida-agents rag build",
+        _DOCS_TAG,
+        active,
+    )
+
+
 def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
     """Query the AiiDA docs with a natural language string.
 
@@ -109,12 +144,7 @@ def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
 
     core_name = _collection_name(embed_fn)
     if core_name not in existing:
-        logger.warning(
-            "no index for docs %s + embedding '%s'. Build it by running: "
-            "aiida-agents rag build",
-            _DOCS_TAG,
-            embed_fn.name(),
-        )
+        _warn_missing_core_index(embed_fn, existing)
 
     query_vector = embed_fn.embed_query([query])[0]
     candidates = _query_one(

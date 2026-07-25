@@ -220,6 +220,18 @@ class OllamaSettings(_Base):
     and the RAG embeddings."""
 
 
+def _default_vector_db_path() -> Path:
+    """The per-user directory the vector store lives in by default.
+
+    ``platformdirs`` rather than a hand-rolled ``~/.local/share``: it is what
+    resolves correctly on macOS and Windows too, and it already honours
+    ``XDG_DATA_HOME``.
+    """
+    from platformdirs import user_data_dir
+
+    return Path(user_data_dir("aiida-agents")) / "vector_db"
+
+
 class RagSettings(_Base):
     """RAG / documentation-retrieval configuration (``AIIDA_AGENTS_*``)."""
 
@@ -230,8 +242,15 @@ class RagSettings(_Base):
     """Embedding model for the ollama backend (sentence-transformers uses its own
     fixed model)."""
 
-    vector_db_path: Path = Path(".aiida_agents_vector_db")
-    """Directory for the persisted ChromaDB vector store."""
+    vector_db_path: Path = Field(default_factory=_default_vector_db_path)
+    """Directory for the persisted ChromaDB vector store.
+
+    A fixed per-user location, not a relative path: the index costs minutes to
+    build, and a relative default silently resolved against the working
+    directory, so running the CLI from anywhere but the build directory found an
+    empty store and reported the index as missing. Override with
+    ``AIIDA_AGENTS_VECTOR_DB_PATH`` to keep a per-project store deliberately.
+    """
 
     # The ``ollama`` backend's endpoint lives in ``OllamaSettings`` (shared with
     # the chat model), read by ``get_embedding_function`` where it builds the

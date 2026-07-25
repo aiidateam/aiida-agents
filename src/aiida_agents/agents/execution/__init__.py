@@ -20,6 +20,7 @@ from aiida_agents.tools.execution.protocol import build_workflow_inputs
 from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
 from aiida_agents.tools.execution.structures import import_structure
 from aiida_agents.tools.processes import get_process_status
+from aiida_agents.rag import search_aiida_docs
 
 # Read-only tools: wrapped by RetryOnToolError so tool failures become ModelRetry
 _READ_TOOLS: list[Any] = [
@@ -29,6 +30,7 @@ _READ_TOOLS: list[Any] = [
     build_workflow_inputs,  # Pre-populate inputs from a protocol builder (read-only)
     list_codes,  # Discover the configured codes to submit against (read-only)
     get_process_status,  # Follow up on what was just submitted (read-only)
+    search_aiida_docs,  # Look up how a workflow/input actually works (read-only)
 ]
 
 # Load system prompt
@@ -52,6 +54,11 @@ def get_agent(
     5. Discovers the configured codes a calculation can run on (list_codes)
     6. Submits workflow specs (execute_workflow_spec, requires HITL approval)
     7. Follows up on what it submitted (get_process_status)
+
+    It can also read the AiiDA (and any installed plugin's) documentation
+    via search_aiida_docs. describe_workflow gives a workflow's input
+    *schema*; the docs are what explain what those inputs mean, which is
+    exactly what configuring a real simulation needs.
 
     It also imports a structure file into the profile (import_structure), for
     the common case where the structure to run on is a CIF/POSCAR on disk

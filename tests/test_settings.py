@@ -22,6 +22,7 @@ import pytest
 from pydantic import ValidationError
 
 from aiida_agents._settings import (
+    _default_vector_db_path,
     _SETTINGS_GROUPS,
     AgentSettings,
     LoggingSettings,
@@ -83,7 +84,10 @@ _GROUP_DEFAULTS = [
         {
             "embed_backend": "ollama",
             "embed_model": "mxbai-embed-large",
-            "vector_db_path": pathlib.Path(".aiida_agents_vector_db"),
+            # Absolute, per-user, and independent of the working directory:
+            # a relative default meant the store moved with the caller's cwd,
+            # so an index built in one directory looked missing in another.
+            "vector_db_path": _default_vector_db_path(),
         },
         id="rag",
     ),
@@ -578,3 +582,39 @@ def test_dotenv_keys_missing_file_is_empty(tmp_path: pathlib.Path) -> None:
     from aiida_agents._settings import _dotenv_keys
 
     assert _dotenv_keys(tmp_path / "absent.env") == set()
+
+
+def test_vector_db_path_does_not_follow_the_working_directory(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """The store must not move when the caller does.
+
+    Regression from end-to-end testing: the default was the relative
+    ``.aiida_agents_vector_db``, so an index built in the repo was invisible
+    from anywhere else -- which read as "I have to rebuild it every time".
+    """
+    from aiida_agents._settings import RagSettings
+
+    monkeypatch.delenv("AIIDA_AGENTS_VECTOR_DB_PATH", raising=False)
+    first = tmp_path / "one"
+    second = tmp_path / "two"
+    first.mkdir()
+    second.mkdir()
+
+    monkeypatch.chdir(first)
+    from_first = RagSettings().vector_db_path
+    monkeypatch.chdir(second)
+    from_second = RagSettings().vector_db_path
+
+    assert from_first == from_second
+    assert from_first.is_absolute()
+
+
+def test_vector_db_path_is_still_overridable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: pathlib.Path
+) -> None:
+    """A deliberate per-project store stays possible via the env var."""
+    from aiida_agents._settings import RagSettings
+
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(tmp_path / "mine"))
+    assert RagSettings().vector_db_path == tmp_path / "mine"

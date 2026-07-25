@@ -40,6 +40,56 @@ __all__ = [
 ]
 
 
+_NO_MEMORY = (
+    "Tell the user, and do NOT answer this from memory: without the docs you "
+    "would be guessing at AiiDA's API, and a plausible-looking invented "
+    "function name is worse for them than no answer."
+)
+
+
+def _unavailable_message() -> str:
+    """Why documentation search is unavailable, and what actually fixes it.
+
+    Distinguishes "never built" from "built, but the active embedding model
+    differs from the one it was built with" -- the second is the confusing one,
+    and telling the user to rebuild there is wrong advice: it would just create
+    a second index under the other name while the first stays unreachable.
+    """
+    from aiida_agents.rag.embeddings import configured_embedding_name
+    from aiida_agents.rag.store import _core_name_for, _get_client
+
+    # Both of these are offline: the configured name comes from settings, and
+    # listing collections only reads the store. Naming the *active* embedder
+    # would need a live probe, so it is attempted separately and only to make
+    # the message more specific -- never to decide which message to give.
+    try:
+        configured = configured_embedding_name()
+        existing = {c.name for c in _get_client().list_collections()}
+    except Exception:  # pragma: no cover - diagnosis is best-effort
+        return (
+            "The AiiDA documentation index is unavailable, so documentation "
+            "search cannot be used. It may need building with `aiida-agents "
+            f"rag build`. {_NO_MEMORY}"
+        )
+
+    if _core_name_for(configured) in existing:
+        return (
+            f"An AiiDA documentation index exists, built with the embedding "
+            f"model '{configured}', but a different embedder is active, so it "
+            "cannot be searched. This usually means the local Ollama server is "
+            "not running and the embedder fell back. Tell the user to start "
+            "Ollama (or set AIIDA_AGENTS_EMBED_BACKEND to match) -- rebuilding "
+            f"the index is NOT the fix here. {_NO_MEMORY}"
+        )
+
+    return (
+        "The AiiDA documentation index has not been built yet, so "
+        "documentation search is unavailable. It must be built once by "
+        "running `aiida-agents rag build` in a shell. Tell the user to run "
+        f"that. {_NO_MEMORY}"
+    )
+
+
 def search_aiida_docs(query: str) -> str:
     """Search the AiiDA documentation for conceptual knowledge.
 
@@ -65,13 +115,7 @@ def search_aiida_docs(query: str) -> str:
     results = query_docs(query, limit=3)
     if not results:
         if not docs_index_available():
-            return (
-                "The AiiDA documentation index has not been built yet, so "
-                "documentation search is unavailable. It must be built once by "
-                "running `aiida-agents rag build` in a shell. Tell the user to "
-                "run that; do not answer AiiDA documentation questions from "
-                "memory in the meantime."
-            )
+            return _unavailable_message()
         return "No relevant AiiDA documentation found for this query."
 
     formatted = []

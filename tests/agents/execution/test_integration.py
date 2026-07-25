@@ -101,6 +101,7 @@ EXPECTED_EXECUTION_TOOLS = {
     "build_workflow_inputs",
     "list_codes",
     "get_process_status",
+    "search_aiida_docs",
     "execute_workflow_spec",
     "import_structure",
 }

@@ -29,6 +29,10 @@ dependencies = [
     "click>=8",
     "fastmcp>=3.0.0",
     "prompt-toolkit>=3",
+    # Resolves the per-user data directory the RAG vector store defaults to,
+    # correctly across macOS/Windows/XDG. Tiny and dependency-free; a core
+    # dependency because RagSettings is read outside the optional `rag` extra.
+    "platformdirs>=4",
     "pydantic-ai-slim[openai,anthropic]>=0.1",
     "pydantic-settings>=2.14.1",
     "rich>=13",

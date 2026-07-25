@@ -41,6 +41,12 @@ import_structure(filepath="/data/si.cif")
 ```
 It is HITL-gated like `execute_workflow_spec`, so do not ask for confirmation yourself — the CLI prompts. Do not import a structure that is already in the profile: if the user refers to one by name, formula, or pk, find it with `query_analysis_agent` first and import only if it genuinely isn't there. Never invent a filepath; if you don't have one, ask.
 
+### Looking things up: `search_aiida_docs`
+
+`describe_workflow` tells you a workflow's input *schema*; it does not tell you what those inputs mean. When you are unsure what a port does, which value is sensible, or how a workflow is meant to be driven, call `search_aiida_docs` rather than guessing — it searches the AiiDA documentation and any installed plugin's own docs.
+
+If it reports that the index is unavailable, say so and ask the user to build it. Do **not** substitute remembered API names: an invented function or argument that looks plausible is worse than telling them you cannot check.
+
 ### Step 3: Query Historical Context (`query_analysis_agent`)
 Before building inputs, check historical successful runs in the database to learn proven parameter values (`ecutwfc`, `kpoints_distance`, `conv_thr`, `ion_dynamics`) and common failure modes:
 ```python
