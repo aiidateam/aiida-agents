@@ -56,9 +56,12 @@ rag-fallback = [
 ]
 # Structure-file parsing for `import_structure` (CIF/POSCAR/xyz -> StructureData).
 # Opt-in: only needed to bring a structure in from disk, not to run a workflow
-# on one already in the profile.
+# on one already in the profile. Just ASE, which is all the tool imports --
+# aiida-core's `atomic-tools` extra would also pull pymatgen/spglib/seekpath
+# for no use here. The specifier matches aiida-core's own (`ase~=3.21`) so the
+# two never resolve against each other.
 structures = [
-  "ase>=3.22",
+  "ase~=3.21",
 ]
 tests = [
   "pytest",
