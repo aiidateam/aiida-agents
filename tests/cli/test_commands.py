@@ -233,3 +233,34 @@ def test_ask_rejects_a_deferred_write(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert result.exit_code == 2
     assert "interactive approval" in result.output
+
+
+def test_ask_reports_a_provider_failure_cleanly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A provider error is a clean CLI message, not a raw traceback.
+
+    Regression from end-to-end testing: `chat` already caught this at its own
+    boundary, but `ask` ran the agent unguarded, so a free-tier router
+    returning malformed tool-call JSON (ModelHTTPError) reached the user as a
+    Python traceback.
+    """
+    from aiida_agents.cli import commands
+
+    async def _boom(
+        agent: object, question: str, message_history: object = None
+    ) -> object:
+        raise RuntimeError("upstream returned malformed tool-call JSON")
+
+    monkeypatch.setattr(
+        commands, "_build_agent", lambda settings, profile, agent_type: object()
+    )
+    monkeypatch.setattr(commands, "ask", _boom)
+
+    result = CliRunner().invoke(cli, ["ask", "anything"])
+
+    assert result.exit_code == 1
+    assert "Agent run failed" in result.output
+    assert "malformed tool-call JSON" in result.output
+    # Converted, not leaked as an uncaught traceback.
+    assert not isinstance(result.exception, RuntimeError)

@@ -118,7 +118,17 @@ def ask_cmd(ctx: click.Context, question: str, raw: bool) -> None:
     """Answer a single question and exit (one-shot)."""
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     agent = _build_agent(settings, ctx.obj["profile"], ctx.obj["agent"])
-    result = asyncio.run(ask(agent, question))
+    try:
+        result = asyncio.run(ask(agent, question))
+    except KeyboardInterrupt:
+        click.echo("(interrupted)", err=True)
+        raise SystemExit(130) from None
+    except Exception as exc:
+        # Deliberately broad, and the same boundary the REPL already has: a
+        # provider can fail in ways neither we nor pydantic-ai model (a free
+        # router returning malformed tool-call JSON surfaces as ModelHTTPError),
+        # and a one-shot command should report that, not print a traceback.
+        raise click.ClickException(f"Agent run failed: {exc}") from exc
     _render_tool_calls(result.new_messages(), console)  # debug-gated; no spinner here
     if isinstance(result.output, DeferredToolRequests):
         click.echo(
