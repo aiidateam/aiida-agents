@@ -19,6 +19,7 @@ previewed, approved, and then silently dropped.
 from __future__ import annotations
 
 import asyncio
+import inspect
 from typing import Any, NamedTuple
 
 import rich_click as click
@@ -171,7 +172,9 @@ def _run_approvals(
     }
     for call, process_class, resolved in previews:
         if process_class is not None and resolved is not None:
-            entry_point = call.args_as_dict().get("entry_point", "")
+            # Not args_as_dict()["entry_point"]: execute_workflow_spec nests it
+            # under validated_spec, so only _submission_args reads both shapes.
+            entry_point, _ = _submission_args(call)
             try:
                 res = _run_submission(entry_point, process_class, resolved)
             except Exception as exc:
@@ -191,6 +194,12 @@ def _run_approvals(
             continue
         try:
             result = fn(**call.args_as_dict())
+            # A plugin may contribute an async write tool (AgentTool.fn is any
+            # callable, and pydantic-ai supports coroutines). Calling one just
+            # returns a coroutine, so without this the tool never runs -- the
+            # same silent no-op this function exists to fix.
+            if inspect.iscoroutine(result):
+                result = asyncio.run(result)
         except Exception as exc:
             click.echo(f"\n❌ {call.tool_name} failed: {exc}")
             outcomes[call.tool_call_id] = {"error": str(exc)}

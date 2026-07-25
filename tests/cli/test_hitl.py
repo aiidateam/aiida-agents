@@ -17,6 +17,7 @@ Two invariants are tested:
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -83,6 +84,24 @@ class TestSubmitWorkflowRequiresApproval:
 
 
 MULTIPLY_ADD = "core.arithmetic.multiply_add"
+
+# A minimal 2-atom silicon CIF, enough for ASE to parse into a structure.
+_SILICON_CIF = """data_silicon
+_cell_length_a 3.8
+_cell_length_b 3.8
+_cell_length_c 3.8
+_cell_angle_alpha 90.0
+_cell_angle_beta 90.0
+_cell_angle_gamma 90.0
+_symmetry_space_group_name_H-M 'P 1'
+loop_
+_atom_site_label
+_atom_site_fract_x
+_atom_site_fract_y
+_atom_site_fract_z
+Si1 0.0 0.0 0.0
+Si2 0.5 0.5 0.5
+"""
 
 
 class TestSubmissionArgs:
@@ -342,6 +361,71 @@ class TestNonSubmitWriteToolsRun:
         )
 
         assert outcomes == {"c1": {"error": "plugin exploded"}}
+
+    def test_async_write_tool_is_awaited_not_left_as_a_coroutine(self) -> None:
+        """An async write tool runs to completion, rather than the approval flow
+        storing its un-awaited coroutine as the "result".
+
+        ``AgentTool.fn`` is any callable and pydantic-ai supports coroutines, so
+        a plugin may well contribute an async write tool. Calling it without
+        awaiting reproduces the very bug this module fixes: approved by the
+        user, never actually run.
+        """
+        from aiida_agents.cli.hitl import _Preview, _run_approvals
+
+        ran: list[int] = []
+
+        async def plugin_write_async(x: int) -> str:
+            """A plugin's async write tool."""
+            ran.append(x)
+            return f"wrote {x}"
+
+        call = ToolCallPart(
+            tool_name="plugin_write_async", args={"x": 9}, tool_call_id="c1"
+        )
+        outcomes = _run_approvals(
+            _approval_agent(plugin_write_async), [_Preview(call, None, None)], {}
+        )
+
+        assert ran == [9]
+        assert outcomes == {"c1": "wrote 9"}
+
+
+class TestImportStructureRunsOnApproval:
+    """The concrete case that made this bug reachable in shipped code.
+
+    ``import_structure`` is an approval-gated write tool that is *not* a
+    submission, so before this fix it was previewed, approved, and then dropped
+    with ``{"skipped": "import_structure"}`` -- the user was told nothing, and
+    no structure was ever created.
+    """
+
+    def test_approved_import_structure_actually_imports(self, tmp_path: Path) -> None:
+        from aiida_agents.cli.hitl import _Preview, _run_approvals, _triage_submissions
+
+        pytest.importorskip("ase", reason="needs ASE to parse the structure file")
+
+        path = tmp_path / "si.cif"
+        path.write_text(_SILICON_CIF)
+
+        call = ToolCallPart(
+            tool_name="import_structure",
+            args={"filepath": str(path)},
+            tool_call_id="c1",
+        )
+        # Triage leaves a non-submission unenriched: this is exactly the shape
+        # that used to fall through to "not an executable submission".
+        auto, previews = _triage_submissions(DeferredToolRequests(approvals=[call]))
+        assert previews == [_Preview(call, None, None)]
+
+        outcomes = _run_approvals(get_agent("execution"), previews, auto)
+
+        result = outcomes["c1"]
+        assert "skipped" not in result, "the approved import was silently dropped"
+        # It really wrote a node, not just reported success.
+        loaded = orm.load_node(result["pk"])
+        assert isinstance(loaded, orm.StructureData)
+        assert loaded.is_stored
 
 
 def test_splice_outcomes_appends_one_tool_return_per_approval() -> None:
