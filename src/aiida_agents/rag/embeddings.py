@@ -46,8 +46,10 @@ class _OllamaEmbedding:
         self,
         model: str = "mxbai-embed-large",
         base_url: str = "http://localhost:11434/v1",
+        timeout: int = 300,
     ) -> None:
         self.model = model
+        self.timeout = timeout
         # Strip the /v1 suffix correctly: we call /api/embed directly, not the
         # OpenAI-style /v1 routes. Use endswith+slice, not rstrip("/v1"): rstrip
         # treats its argument as a *set* of characters and would mangle a URL
@@ -68,7 +70,7 @@ class _OllamaEmbedding:
                 data=payload,
                 headers={"Content-Type": "application/json"},
             )
-            with urllib.request.urlopen(req, timeout=120) as resp:
+            with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 data = json.loads(resp.read())
                 # /api/embed returns {"embeddings": [[...], [...]]}
                 # (the old /api/embeddings returned {"embedding": [...]})
@@ -160,7 +162,9 @@ def get_embedding_function(
             ollama_settings if ollama_settings is not None else OllamaSettings()
         )
         embedding = _OllamaEmbedding(
-            model=cfg.embed_model, base_url=ollama_cfg.base_url
+            model=cfg.embed_model,
+            base_url=ollama_cfg.base_url,
+            timeout=cfg.embed_timeout,
         )
         try:
             # Health-check the bare server root. ``embedding.base_url`` already

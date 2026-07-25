@@ -242,6 +242,16 @@ class RagSettings(_Base):
     """Embedding model for the ollama backend (sentence-transformers uses its own
     fixed model)."""
 
+    embed_timeout: int = Field(default=300, ge=1)
+    """Seconds to wait for one embedding request before giving up.
+
+    Embedding is the slow half of ``rag build``, and how slow depends entirely
+    on the machine: a CPU-only Ollama can take minutes over a batch that a GPU
+    finishes in seconds. Configurable (and defaulted generously) because the
+    previous fixed 120s turned "this machine is slow" into an unrecoverable
+    build failure with no knob to turn.
+    """
+
     vector_db_path: Path = Field(default_factory=_default_vector_db_path)
     """Directory for the persisted ChromaDB vector store.
 

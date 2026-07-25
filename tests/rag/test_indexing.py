@@ -454,3 +454,98 @@ class TestIndexPluginCorpora:
 
         assert outcomes["broken/broken-corpus"] is IndexOutcome.FAILED
         assert outcomes["good/good-corpus"] is IndexOutcome.BUILT
+
+
+class TestFailedRebuildKeepsTheExistingIndex:
+    """A rebuild that dies partway must not cost the user their working index.
+
+    Regression from end-to-end testing: `rag build` timed out three times in a
+    row, and because the build deleted the live collection *before* embedding,
+    each attempt left the store with no index at all -- there was no way to get
+    back to a working state.
+    """
+
+    def test_force_rebuild_failure_leaves_the_old_index_intact(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        client: Any = chromadb.PersistentClient(path=str(tmp_path / "chroma_db"))
+        embed = _FakeEmbed()
+        name = _collection_name(embed)
+        # A good index already in place.
+        client.create_collection(name, embedding_function=embed).add(
+            ids=["old"],
+            documents=["the existing, working index"],
+            metadatas=[{"source": "s", "section": "S"}],
+        )
+
+        class _BoomEmbed(_FakeEmbed):
+            def __call__(self, input: list[str]) -> list[list[float]]:
+                raise RuntimeError("timed out in add")
+
+        _wire_index_docs(
+            monkeypatch,
+            tmp_path,
+            client=client,
+            embed=_BoomEmbed(),
+            chunks=[{"text": "new", "source": "a.txt", "section": "A"}],
+        )
+
+        with pytest.raises(RuntimeError, match="timed out in add"):
+            index_docs(force=True)
+
+        # The old index survives, still queryable, with its original content.
+        assert _collection_populated(client, name) is True
+        assert client.get_collection(name).count() == 1
+        # And no half-built staging collection is left to be mistaken for it.
+        assert all(not c.name.endswith("__building") for c in client.list_collections())
+
+    def test_successful_rebuild_swaps_in_the_new_content(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The staging build is swapped in under the real name once complete."""
+        client: Any = chromadb.PersistentClient(path=str(tmp_path / "chroma_db"))
+        embed = _FakeEmbed()
+        name = _collection_name(embed)
+        client.create_collection(name, embedding_function=embed).add(
+            ids=["old"], documents=["old"], metadatas=[{"source": "s", "section": "S"}]
+        )
+        _wire_index_docs(
+            monkeypatch,
+            tmp_path,
+            client=client,
+            embed=embed,
+            chunks=[
+                {"text": f"new {i}", "source": "a.txt", "section": "A"}
+                for i in range(3)
+            ],
+        )
+
+        assert index_docs(force=True) is IndexOutcome.BUILT
+
+        assert client.get_collection(name).count() == 3  # new content, real name
+        assert all(not c.name.endswith("__building") for c in client.list_collections())
+
+    def test_leftover_staging_from_a_killed_run_is_not_reused(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Staging is incomplete by definition, so a stale one is discarded."""
+        client: Any = chromadb.PersistentClient(path=str(tmp_path / "chroma_db"))
+        embed = _FakeEmbed()
+        name = _collection_name(embed)
+        client.create_collection(f"{name}__building", embedding_function=embed).add(
+            ids=["partial"],
+            documents=["half of a previous build"],
+            metadatas=[{"source": "s", "section": "S"}],
+        )
+        _wire_index_docs(
+            monkeypatch,
+            tmp_path,
+            client=client,
+            embed=embed,
+            chunks=[{"text": "fresh", "source": "a.txt", "section": "A"}],
+        )
+
+        assert index_docs(force=True) is IndexOutcome.BUILT
+
+        # Exactly the one fresh chunk: the abandoned partial was not carried over.
+        assert client.get_collection(name).count() == 1

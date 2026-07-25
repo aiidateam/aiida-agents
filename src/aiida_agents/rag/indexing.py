@@ -194,23 +194,30 @@ def _build_collection(
     metadata: dict[str, Any],
     progress: Callable[[int, int], None] | None,
 ) -> IndexOutcome:
-    """Atomically (re)create collection ``name`` from ``chunks``.
+    """Build collection ``name`` from ``chunks`` without risking the existing one.
 
-    Shared by the core-docs and plugin-corpus indexers: delete-then-create,
-    batch the embed+add calls, and drop the collection again if a batch fails
-    or is interrupted, so a half-built collection is never mistaken for a
-    finished one. An empty ``chunks`` leaves any existing collection untouched.
+    Shared by the core-docs and plugin-corpus indexers. The build goes into a
+    staging collection and is swapped in only once every chunk is embedded, so
+    a failure or Ctrl-C leaves whatever was already indexed exactly as it was.
+    That matters most under ``force``: the previous shape deleted the good
+    collection first and then spent minutes embedding, so a rebuild that timed
+    out partway left the user with no index at all and no way back.
+
+    Only the swap itself (drop the old, rename the new) is unprotected, and it
+    is two metadata operations with no embedding between them. An empty
+    ``chunks`` leaves any existing collection untouched.
     """
     if not chunks:
         logger.warning("no chunks loaded; leaving any existing index untouched")
         return IndexOutcome.EMPTY_CORPUS
 
-    # Only now that there are chunks to add do we replace any prior (possibly
-    # empty or stale) collection.
-    if name in {c.name for c in client.list_collections()}:
-        client.delete_collection(name)
+    staging = f"{name}__building"
+    # A previous run killed mid-build can leave staging behind; it is by
+    # definition incomplete, so never reuse it.
+    if staging in {c.name for c in client.list_collections()}:
+        client.delete_collection(staging)
     collection = client.create_collection(
-        name=name,
+        name=staging,
         embedding_function=embed_fn,
         metadata=metadata,
     )
@@ -236,13 +243,22 @@ def _build_collection(
             logger.debug("indexed batch %d/%d", i // batch + 1, -(-total // batch))
         completed = True
     finally:
-        # Ctrl-C or an embed error mid-loop would otherwise leave a partial
-        # collection the next run treats as complete; drop it to stay atomic.
+        # Drop the partial build, never the live collection: a half-filled
+        # staging collection the next run mistook for finished is the thing
+        # this guards, and the existing index must survive the failure.
         if not completed:
             logger.warning(
-                "indexing did not complete; removing partial collection '%s'", name
+                "indexing did not complete; removing partial build '%s' "
+                "(any existing '%s' is left untouched)",
+                staging,
+                name,
             )
-            client.delete_collection(name)
+            client.delete_collection(staging)
+
+    # Everything is embedded; now the swap.
+    if name in {c.name for c in client.list_collections()}:
+        client.delete_collection(name)
+    collection.modify(name=name)
 
     logger.info("indexed %d chunks into '%s'", len(texts), name)
     return IndexOutcome.BUILT
