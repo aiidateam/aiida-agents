@@ -7,6 +7,13 @@ are already found through AiiDA's own ``aiida.workflows`` / ``aiida.calculations
 registry. This channel carries what that registry cannot: domain tools,
 documentation corpora, and prompt guidance.
 
+All three hooks are wired: ``get_agent()`` registers a contributed tool and
+appends a contributed fragment to the system prompt, and ``aiida-agents rag
+build`` indexes each contributed ``rag_corpora`` entry into its own collection
+(``rag.indexing.index_plugin_corpora``), which ``search_aiida_docs`` then
+searches alongside the core AiiDA docs, attributing each hit to the corpus it
+came from.
+
 Public API
 ----------
 AgentPlugin, AgentTool, RagCorpus, PLUGIN_ENTRY_POINT_GROUP

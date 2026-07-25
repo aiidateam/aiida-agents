@@ -91,6 +91,35 @@ def test_rag_build_reports_outcome(
     assert unexpected not in result.output
 
 
+def test_rag_build_reports_plugin_corpus_outcomes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A plugin's corpus outcome is reported alongside the core docs' own,
+    including a failure -- which must not turn the command itself into an
+    error, since it is isolated per-corpus."""
+    from aiida_agents.rag import IndexOutcome
+
+    monkeypatch.setattr("aiida_agents.cli.rag._module_missing", lambda name: False)
+    monkeypatch.setattr(
+        "aiida_agents.cli.rag._prompt_pull_ollama_model", lambda model: None
+    )
+    monkeypatch.setattr(
+        "aiida_agents.rag.index_docs",
+        lambda force, progress=None: IndexOutcome.ALREADY_PRESENT,
+    )
+    monkeypatch.setattr(
+        "aiida_agents.rag.index_plugin_corpora",
+        lambda force=False: {
+            "quantumespresso/qe": IndexOutcome.BUILT,
+            "broken/corpus": IndexOutcome.FAILED,
+        },
+    )
+    result = CliRunner().invoke(cli, ["rag", "build"])
+    assert result.exit_code == 0
+    assert "Plugin corpus 'quantumespresso/qe' indexed." in result.output
+    assert "Plugin corpus 'broken/corpus' failed to index" in result.output
+
+
 def test_rag_search_errors_cleanly_without_an_index(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -185,9 +214,39 @@ def test_rag_status_reports_built_index(
     assert result.exit_code == 0
     assert "Built: yes" in result.output
     # The collections table rendered the persisted row's name and build metadata.
+    # A narrow terminal may wrap the (long) embedding name across lines, so check
+    # a prefix short enough to always land on one line rather than the full string.
     assert "aiida_docs__test" in result.output
     assert "v2.8.0" in result.output
-    assert "ollama/mxbai-embed-large" in result.output
+    assert "ollama/mxbai" in result.output
+    # No "corpus" metadata was set on this collection; it reads as the core docs.
+    assert "aiida-core" in result.output
+
+
+def test_rag_status_attributes_a_plugin_corpus_by_name(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A plugin-contributed corpus's collection shows its own corpus name in
+    the status table, not lumped in with the core docs."""
+    monkeypatch.setattr("aiida_agents.cli._guards.find_unrecognized_settings", list)
+    store = tmp_path / "vdb"
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(store))
+    import chromadb
+
+    client = chromadb.PersistentClient(path=str(store))
+    client.create_collection(
+        "aiida_agents_plugin_docs__qe__1.0__fenced1__test",
+        metadata={
+            "docs_version": "1.0",
+            "embedding": "ollama/mxbai-embed-large",
+            "corpus": "quantumespresso",
+        },
+    ).add(ids=["1"], documents=["hello"], embeddings=[[0.1, 0.2, 0.3]])
+
+    result = CliRunner().invoke(cli, ["rag", "status"])
+
+    assert result.exit_code == 0
+    assert "quantumespresso" in result.output
 
 
 def test_rag_clear_no_store_is_clean(

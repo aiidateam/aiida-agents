@@ -17,15 +17,19 @@ from unittest.mock import MagicMock
 import chromadb
 import pytest
 
+from aiida_agents.plugins import LoadedPlugin, RagCorpus
 from aiida_agents.rag.indexing import (
     IndexOutcome,
     _clone_and_build_text,
     index_docs,
+    index_plugin_corpora,
+    index_plugin_corpus,
 )
 from aiida_agents.rag.store import (
     _CORPUS_FORMAT,
     _collection_name,
     _collection_populated,
+    _plugin_collection_name,
 )
 
 
@@ -235,3 +239,218 @@ def test_index_status_reports_built_collection(
     assert info.chunks == 1
     assert info.docs_version == "v2.8.0"
     assert info.embedding == "ollama/mxbai-embed-large"
+
+
+# ---------------------------------------------------------------------------
+# Plugin-contributed corpora
+# ---------------------------------------------------------------------------
+
+
+def _wire_plugin_indexing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    *,
+    client: Any,
+    embed: _FakeEmbed,
+    chunks: list[dict[str, str]],
+    clone: MagicMock | None = None,
+) -> MagicMock:
+    """Like _wire_index_docs, for the plugin-corpus indexing functions."""
+    clone_mock = clone if clone is not None else MagicMock()
+    monkeypatch.setenv("AIIDA_AGENTS_VECTOR_DB_PATH", str(tmp_path))
+    monkeypatch.setattr(
+        "aiida_agents.rag.indexing._get_client", lambda cfg=None: client
+    )
+    monkeypatch.setattr(
+        "aiida_agents.rag.indexing.get_embedding_function", lambda cfg=None: embed
+    )
+    monkeypatch.setattr("aiida_agents.rag.indexing._clone_and_build_text", clone_mock)
+    monkeypatch.setattr("aiida_agents.rag.indexing._load_docs", lambda text_dir: chunks)
+    return clone_mock
+
+
+class TestIndexPluginCorpus:
+    def test_no_source_raises(self) -> None:
+        """A corpus naming neither text_dir nor docs_repo cannot be built."""
+        corpus = RagCorpus(name="qe", version="1.0")
+        with pytest.raises(RuntimeError, match="no text_dir and no docs_repo"):
+            index_plugin_corpus(corpus)
+
+    def test_builds_directly_from_text_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A corpus with a pre-rendered text_dir is indexed with no clone."""
+        client: Any = chromadb.PersistentClient(path=str(tmp_path / "chroma_db"))
+        embed = _FakeEmbed()
+        text_dir = tmp_path / "prebuilt_docs"
+        text_dir.mkdir()
+        corpus = RagCorpus(name="qe", version="1.0", text_dir=text_dir)
+        clone = _wire_plugin_indexing(
+            monkeypatch,
+            tmp_path,
+            client=client,
+            embed=embed,
+            chunks=[{"text": "x", "source": "a.txt", "section": "A"}],
+        )
+
+        outcome = index_plugin_corpus(corpus)
+
+        assert outcome is IndexOutcome.BUILT
+        clone.assert_not_called()
+        name = _plugin_collection_name(embed, "qe", "1.0")
+        assert _collection_populated(client, name) is True
+        assert client.get_collection(name).metadata["corpus"] == "qe"
+
+    def test_missing_text_dir_raises(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A text_dir that does not exist on disk is a clean error, not a
+        confusing empty-corpus result."""
+        client: Any = chromadb.PersistentClient(path=str(tmp_path / "chroma_db"))
+        embed = _FakeEmbed()
+        corpus = RagCorpus(name="qe", version="1.0", text_dir=tmp_path / "nope")
+        _wire_plugin_indexing(
+            monkeypatch, tmp_path, client=client, embed=embed, chunks=[]
+        )
+
+        with pytest.raises(RuntimeError, match="does not exist"):
+            index_plugin_corpus(corpus)
+
+    def test_clones_docs_repo_with_the_corpus_own_ref_and_subdir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A repo-backed corpus clones with its own repo/ref/subdir, not the
+        core docs' pinned defaults."""
+        client: Any = chromadb.PersistentClient(path=str(tmp_path / "chroma_db"))
+        embed = _FakeEmbed()
+        corpus = RagCorpus(
+            name="qe",
+            version="1.0",
+            docs_repo="https://github.com/aiidateam/aiida-quantumespresso.git",
+            docs_ref="v4.5.0",
+            docs_subdir="docs",
+        )
+        clone = _wire_plugin_indexing(
+            monkeypatch,
+            tmp_path,
+            client=client,
+            embed=embed,
+            chunks=[{"text": "x", "source": "a.txt", "section": "A"}],
+        )
+
+        assert index_plugin_corpus(corpus) is IndexOutcome.BUILT
+        clone.assert_called_once()
+        _, kwargs = clone.call_args
+        assert kwargs["docs_repo"] == corpus.docs_repo
+        assert kwargs["docs_tag"] == "v4.5.0"
+        assert kwargs["docs_subdir"] == "docs"
+
+    def test_skips_when_already_populated(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A populated plugin collection is reused, like the core docs."""
+        client: Any = chromadb.PersistentClient(path=str(tmp_path / "chroma_db"))
+        embed = _FakeEmbed()
+        corpus = RagCorpus(
+            name="qe", version="1.0", docs_repo="https://example.invalid/qe.git"
+        )
+        name = _plugin_collection_name(embed, "qe", "1.0")
+        client.create_collection(name, embedding_function=embed).add(
+            ids=["seed"],
+            documents=["seed"],
+            metadatas=[{"source": "s", "section": "S"}],
+        )
+        clone = _wire_plugin_indexing(
+            monkeypatch, tmp_path, client=client, embed=embed, chunks=[]
+        )
+
+        assert index_plugin_corpus(corpus, force=False) is IndexOutcome.ALREADY_PRESENT
+        clone.assert_not_called()
+
+
+class TestIndexPluginCorpora:
+    def test_empty_when_no_plugins_discovered(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr("aiida_agents.rag.indexing.discover_plugins", lambda: ())
+        assert index_plugin_corpora() == {}
+
+    def test_indexes_every_discovered_corpus(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Every plugin's every corpus is indexed, keyed by plugin/corpus name."""
+        client: Any = chromadb.PersistentClient(path=str(tmp_path / "chroma_db"))
+        embed = _FakeEmbed()
+        _wire_plugin_indexing(
+            monkeypatch,
+            tmp_path,
+            client=client,
+            embed=embed,
+            chunks=[{"text": "x", "source": "a.txt", "section": "A"}],
+        )
+        qe_docs = tmp_path / "qe_docs"
+        qe_docs.mkdir()
+        plugins = (
+            LoadedPlugin(
+                name="quantumespresso",
+                corpora=(RagCorpus(name="qe", version="1.0", text_dir=qe_docs),),
+            ),
+            LoadedPlugin(
+                name="siesta",
+                corpora=(
+                    RagCorpus(name="siesta-docs", version="2.0", text_dir=qe_docs),
+                ),
+            ),
+        )
+        monkeypatch.setattr(
+            "aiida_agents.rag.indexing.discover_plugins", lambda: plugins
+        )
+
+        outcomes = index_plugin_corpora()
+
+        assert outcomes == {
+            "quantumespresso/qe": IndexOutcome.BUILT,
+            "siesta/siesta-docs": IndexOutcome.BUILT,
+        }
+
+    def test_isolates_one_corpus_failure_from_the_rest(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """One plugin's corpus failing to build must not stop the others."""
+        client: Any = chromadb.PersistentClient(path=str(tmp_path / "chroma_db"))
+        embed = _FakeEmbed()
+        _wire_plugin_indexing(
+            monkeypatch,
+            tmp_path,
+            client=client,
+            embed=embed,
+            chunks=[{"text": "x", "source": "a.txt", "section": "A"}],
+        )
+        good_docs = tmp_path / "good_docs"
+        good_docs.mkdir()
+        plugins = (
+            LoadedPlugin(
+                name="broken",
+                corpora=(
+                    RagCorpus(
+                        name="broken-corpus",
+                        version="1.0",
+                        text_dir=tmp_path / "does_not_exist",
+                    ),
+                ),
+            ),
+            LoadedPlugin(
+                name="good",
+                corpora=(
+                    RagCorpus(name="good-corpus", version="1.0", text_dir=good_docs),
+                ),
+            ),
+        )
+        monkeypatch.setattr(
+            "aiida_agents.rag.indexing.discover_plugins", lambda: plugins
+        )
+
+        outcomes = index_plugin_corpora()
+
+        assert outcomes["broken/broken-corpus"] is IndexOutcome.FAILED
+        assert outcomes["good/good-corpus"] is IndexOutcome.BUILT

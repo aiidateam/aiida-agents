@@ -4,6 +4,11 @@ Runs the one-time pipeline behind ``aiida-agents rag build``: sparse-clone the
 pinned aiida-core docs, render them to fenced text (``rag._textbuild``), chunk,
 embed, and persist. Heavy and network-bound, so it is a deliberate one-shot, not
 part of querying.
+
+``index_plugin_corpus``/``index_plugin_corpora`` run the same pipeline for a
+plugin-contributed :class:`~aiida_agents.plugins.spec.RagCorpus`, each into its
+own collection (see ``rag.store._plugin_collection_name``), so a plugin's docs
+never share an index with the core docs or with another plugin's.
 """
 
 from __future__ import annotations
@@ -18,17 +23,21 @@ import tempfile
 from collections.abc import Callable
 from enum import Enum
 from pathlib import Path
+from typing import Any
 
 from aiida_agents._settings import RagSettings
+from aiida_agents.plugins import discover_plugins
+from aiida_agents.plugins.spec import RagCorpus
 from aiida_agents.rag.store import (
     _CORPUS_FORMAT,
     _DOCS_TAG,
     _collection_name,
     _collection_populated,
     _get_client,
+    _plugin_collection_name,
 )
 from aiida_agents.rag.chunking import _load_docs
-from aiida_agents.rag.embeddings import get_embedding_function
+from aiida_agents.rag.embeddings import EmbeddingFunction, get_embedding_function
 
 logger = logging.getLogger(__name__)
 
@@ -37,23 +46,39 @@ _DOCS_SUBDIR = "docs"  # need full docs/ for sphinx-build, not just source/
 
 
 class IndexOutcome(Enum):
-    """What :func:`index_docs` did, so a caller can report it precisely.
+    """What an index build did, so a caller can report it precisely.
 
     Only ``BUILT`` (re)created the collection; ``ALREADY_PRESENT`` reused a
-    populated one and ``EMPTY_CORPUS`` produced no chunks, both leaving any
+    populated one, ``EMPTY_CORPUS`` produced no chunks, and ``FAILED`` hit an
+    error partway through (see ``index_plugin_corpora``) -- all three leave any
     existing index exactly as it was.
     """
 
     BUILT = "built"
     ALREADY_PRESENT = "already_present"
     EMPTY_CORPUS = "empty_corpus"
+    FAILED = "failed"
 
 
-def _clone_and_build_text(target_dir: str) -> None:
-    """Clone aiida-core docs and run sphinx-build -b text.
+def _clone_and_build_text(
+    target_dir: str,
+    *,
+    docs_repo: str = _DOCS_REPO,
+    docs_tag: str = _DOCS_TAG,
+    docs_subdir: str = _DOCS_SUBDIR,
+) -> None:
+    """Clone a sphinx docs repo and run sphinx-build -b text.
 
     Produces .txt files in target_dir — clean prose, no RST markup.
     Notebook execution is disabled (NB_EXECUTION_MODE=off) for faster builds.
+
+    Defaults to the pinned aiida-core docs; ``index_plugin_corpus`` calls this
+    with a plugin's own ``docs_repo``/``docs_ref``/``docs_subdir`` instead.
+    ``docs_subdir`` is assumed to contain a ``source/`` directory that is the
+    actual sphinx source root (aiida-core's own layout: the full ``docs/`` tree
+    is fetched, not just ``docs/source``, because its build needs files
+    alongside ``source/`` too). A plugin whose docs don't fit that shape should
+    ship pre-rendered text via ``RagCorpus.text_dir`` instead.
     """
     # Fail fast, before the (slow) clone: the docs toolchain must be present in
     # THIS interpreter. We do not pip-install at runtime (it mutates the user's
@@ -69,10 +94,12 @@ def _clone_and_build_text(target_dir: str) -> None:
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
-        repo_dir = tmp_path / "aiida-core"
+        repo_dir = tmp_path / "repo"
 
-        # Step 1: sparse-clone only docs/ at the v2.8 tag
-        logger.info("cloning aiida-core %s (sparse, docs/ only)...", _DOCS_TAG)
+        # Step 1: sparse-clone only docs_subdir/ at the pinned tag/ref
+        logger.info(
+            "cloning %s %s (sparse, %s/ only)...", docs_repo, docs_tag, docs_subdir
+        )
         subprocess.run(
             [
                 "git",
@@ -80,10 +107,10 @@ def _clone_and_build_text(target_dir: str) -> None:
                 "--depth",
                 "1",
                 "--branch",
-                _DOCS_TAG,
+                docs_tag,
                 "--filter=blob:none",
                 "--sparse",
-                _DOCS_REPO,
+                docs_repo,
                 str(repo_dir),
             ],
             check=True,
@@ -96,13 +123,13 @@ def _clone_and_build_text(target_dir: str) -> None:
             capture_output=True,
         )
         subprocess.run(
-            ["git", "sparse-checkout", "set", _DOCS_SUBDIR],
+            ["git", "sparse-checkout", "set", docs_subdir],
             cwd=str(repo_dir),
             check=True,
             capture_output=True,
         )
 
-        docs_dir = repo_dir / "docs"
+        docs_dir = repo_dir / docs_subdir
         text_out = tmp_path / "text_build"
 
         # Step 2: run the fenced text builder (sphinx text output with
@@ -157,6 +184,68 @@ def _clone_and_build_text(target_dir: str) -> None:
         os.replace(staging, target_dir)
 
     logger.info("text corpus ready at %s", target_dir)
+
+
+def _build_collection(
+    client: Any,
+    name: str,
+    chunks: list[dict[str, str]],
+    embed_fn: EmbeddingFunction,
+    metadata: dict[str, Any],
+    progress: Callable[[int, int], None] | None,
+) -> IndexOutcome:
+    """Atomically (re)create collection ``name`` from ``chunks``.
+
+    Shared by the core-docs and plugin-corpus indexers: delete-then-create,
+    batch the embed+add calls, and drop the collection again if a batch fails
+    or is interrupted, so a half-built collection is never mistaken for a
+    finished one. An empty ``chunks`` leaves any existing collection untouched.
+    """
+    if not chunks:
+        logger.warning("no chunks loaded; leaving any existing index untouched")
+        return IndexOutcome.EMPTY_CORPUS
+
+    # Only now that there are chunks to add do we replace any prior (possibly
+    # empty or stale) collection.
+    if name in {c.name for c in client.list_collections()}:
+        client.delete_collection(name)
+    collection = client.create_collection(
+        name=name,
+        embedding_function=embed_fn,
+        metadata=metadata,
+    )
+
+    ids = [f"doc_{i}" for i in range(len(chunks))]
+    texts = [c["text"] for c in chunks]
+    metadatas = [{"source": c["source"], "section": c["section"]} for c in chunks]
+
+    total = len(texts)
+    if progress is not None:
+        progress(0, total)  # signal embed start (with the total) so a UI can init
+    batch = 50
+    completed = False
+    try:
+        for i in range(0, total, batch):
+            collection.add(
+                ids=ids[i : i + batch],
+                documents=texts[i : i + batch],
+                metadatas=metadatas[i : i + batch],
+            )
+            if progress is not None:
+                progress(min(i + batch, total), total)
+            logger.debug("indexed batch %d/%d", i // batch + 1, -(-total // batch))
+        completed = True
+    finally:
+        # Ctrl-C or an embed error mid-loop would otherwise leave a partial
+        # collection the next run treats as complete; drop it to stay atomic.
+        if not completed:
+            logger.warning(
+                "indexing did not complete; removing partial collection '%s'", name
+            )
+            client.delete_collection(name)
+
+    logger.info("indexed %d chunks into '%s'", len(texts), name)
+    return IndexOutcome.BUILT
 
 
 def index_docs(
@@ -216,52 +305,140 @@ def index_docs(
         logger.info("text corpus already exists at %s — skipping clone", text_dir)
     chunks = _load_docs(text_dir)
 
-    if not chunks:
-        logger.warning("no chunks loaded; leaving any existing index untouched")
-        return IndexOutcome.EMPTY_CORPUS
-
-    # Only now that there are chunks to add do we replace any prior (possibly
-    # empty or stale) collection.
-    if name in {c.name for c in client.list_collections()}:
-        client.delete_collection(name)
-    collection = client.create_collection(
-        name=name,
-        embedding_function=embed_fn,
+    return _build_collection(
+        client,
+        name,
+        chunks,
+        embed_fn,
         metadata={
             "hnsw:space": "cosine",
             "docs_version": _DOCS_TAG,
             "embedding": embed_fn.name(),
+            "corpus": "aiida-core",
         },
+        progress=progress,
     )
 
-    ids = [f"doc_{i}" for i in range(len(chunks))]
-    texts = [c["text"] for c in chunks]
-    metadatas = [{"source": c["source"], "section": c["section"]} for c in chunks]
 
-    total = len(texts)
-    if progress is not None:
-        progress(0, total)  # signal embed start (with the total) so a UI can init
-    batch = 50
-    completed = False
-    try:
-        for i in range(0, total, batch):
-            collection.add(
-                ids=ids[i : i + batch],
-                documents=texts[i : i + batch],
-                metadatas=metadatas[i : i + batch],
-            )
-            if progress is not None:
-                progress(min(i + batch, total), total)
-            logger.debug("indexed batch %d/%d", i // batch + 1, -(-total // batch))
-        completed = True
-    finally:
-        # Ctrl-C or an embed error mid-loop would otherwise leave a partial
-        # collection the next run treats as complete; drop it to stay atomic.
-        if not completed:
-            logger.warning(
-                "indexing did not complete; removing partial collection '%s'", name
-            )
-            client.delete_collection(name)
+def index_plugin_corpus(
+    corpus: RagCorpus,
+    force: bool = False,
+    progress: Callable[[int, int], None] | None = None,
+) -> IndexOutcome:
+    """Build or rebuild the ChromaDB collection for one plugin-contributed corpus.
 
-    logger.info("indexed %d chunks into '%s'", len(texts), name)
-    return IndexOutcome.BUILT
+    Mirrors :func:`index_docs`'s skip-if-populated and all-or-nothing build, but
+    sources its text from ``corpus.text_dir`` directly if given, or by cloning
+    ``corpus.docs_repo`` at ``corpus.docs_ref`` and rendering
+    ``corpus.docs_subdir`` the same way the core docs are built.
+
+    Args:
+        corpus: The plugin's corpus declaration. Must name a source (see
+            :attr:`RagCorpus.has_source`); a plugin's corpus is validated for
+            this already by ``discover_plugins``, but a directly-called corpus
+            is checked here too.
+        force: If True, re-render and rebuild even if a populated collection
+            already exists.
+        progress: Optional ``(done, total)`` embed-batch callback.
+
+    Returns:
+        The same :class:`IndexOutcome` vocabulary as :func:`index_docs`.
+    """
+    if not corpus.has_source:
+        msg = f"plugin corpus {corpus.name!r} names no text_dir and no docs_repo to build from."
+        raise RuntimeError(msg)
+
+    cfg = RagSettings()
+    client = _get_client(cfg)
+    embed_fn = get_embedding_function(cfg)
+    name = _plugin_collection_name(embed_fn, corpus.name, corpus.version)
+
+    if not force and _collection_populated(client, name):
+        logger.info(
+            "collection '%s' already exists — skipping index for plugin corpus %r",
+            name,
+            corpus.name,
+        )
+        return IndexOutcome.ALREADY_PRESENT
+
+    if corpus.text_dir is not None:
+        text_dir = str(corpus.text_dir)
+        if not os.path.exists(text_dir):
+            msg = (
+                f"plugin corpus {corpus.name!r} names text_dir {text_dir!r}, "
+                "which does not exist."
+            )
+            raise RuntimeError(msg)
+    else:
+        assert corpus.docs_repo is not None  # has_source guarantees one of the two
+        cache_dir = str(
+            cfg.vector_db_path
+            / f"plugin_text_corpus__{corpus.name}__{corpus.version}__{_CORPUS_FORMAT}"
+        )
+        if (
+            force
+            or not os.path.exists(cache_dir)
+            or not list(Path(cache_dir).rglob("*.txt"))
+        ):
+            _clone_and_build_text(
+                cache_dir,
+                docs_repo=corpus.docs_repo,
+                docs_tag=corpus.docs_ref or "HEAD",
+                docs_subdir=corpus.docs_subdir or "docs",
+            )
+        else:
+            logger.info("text corpus already exists at %s — skipping clone", cache_dir)
+        text_dir = cache_dir
+
+    chunks = _load_docs(text_dir)
+    return _build_collection(
+        client,
+        name,
+        chunks,
+        embed_fn,
+        metadata={
+            "hnsw:space": "cosine",
+            "docs_version": corpus.version,
+            "embedding": embed_fn.name(),
+            "corpus": corpus.name,
+        },
+        progress=progress,
+    )
+
+
+def index_plugin_corpora(
+    force: bool = False,
+    progress: Callable[[int, int], None] | None = None,
+) -> dict[str, IndexOutcome]:
+    """Build or rebuild every installed plugin's contributed corpora.
+
+    Discovers plugins fresh on each call and indexes each corpus in isolation:
+    a clone, build, or embed failure for one corpus is logged and reported as
+    ``FAILED`` rather than raised, so it never stops the corpora that follow --
+    the same error-isolation the plugin channel itself guarantees at
+    agent-build time (see ``aiida_agents.plugins.discovery``).
+
+    Returns:
+        A mapping of ``"{plugin_name}/{corpus_name}"`` to the
+        :class:`IndexOutcome` for that corpus. Empty if no installed plugin
+        contributes a corpus.
+    """
+    outcomes: dict[str, IndexOutcome] = {}
+    for plugin in discover_plugins():
+        for corpus in plugin.corpora:
+            key = f"{plugin.name}/{corpus.name}"
+            try:
+                outcomes[key] = index_plugin_corpus(
+                    corpus, force=force, progress=progress
+                )
+            except Exception:
+                # Deliberately broad: a plugin's docs repo can fail to clone, its
+                # sphinx build can error, or its text_dir can vanish -- none of
+                # that should cost the other installed plugins their index.
+                logger.exception(
+                    "plugin %r: indexing corpus %r failed; skipping",
+                    plugin.name,
+                    corpus.name,
+                )
+                outcomes[key] = IndexOutcome.FAILED
+    return outcomes

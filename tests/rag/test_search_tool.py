@@ -77,3 +77,39 @@ class TestSearchAiidaDocs:
         # Should use the source-only header format
         assert "[misc]" in result
         assert "§" not in result
+
+    def test_core_corpus_result_omits_corpus_prefix(self) -> None:
+        """A result explicitly attributed to the core docs reads exactly like
+        one with no 'corpus' key at all -- no visual noise for the common case."""
+        fake = [
+            {
+                "source": "topics/data_types",
+                "section": "KpointsData",
+                "text": "...",
+                "corpus": "aiida-core",
+            }
+        ]
+        with patch("aiida_agents.rag.query_docs", return_value=fake):
+            result = search_aiida_docs("What is KpointsData?")
+
+        assert "[topics/data_types  §  KpointsData]" in result
+        assert "aiida-core" not in result
+
+    def test_plugin_corpus_result_is_attributed_in_the_header(self) -> None:
+        """A hit from a plugin's own corpus names that plugin, so the model
+        (and a reader) can tell whose documentation answered."""
+        fake = [
+            {
+                "source": "topics/pseudopotentials",
+                "section": "Choosing a pseudo",
+                "text": "Use SSSP for most cases.",
+                "corpus": "quantumespresso",
+            }
+        ]
+        with patch("aiida_agents.rag.query_docs", return_value=fake):
+            result = search_aiida_docs("which pseudopotential should I use?")
+
+        assert (
+            "[quantumespresso: topics/pseudopotentials  §  Choosing a pseudo]" in result
+        )
+        assert "Use SSSP for most cases." in result

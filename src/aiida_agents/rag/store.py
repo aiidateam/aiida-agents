@@ -18,6 +18,7 @@ from aiida_agents._settings import RagSettings
 from aiida_agents.rag.embeddings import EmbeddingFunction
 
 _COLLECTION_PREFIX = "aiida_docs"
+_PLUGIN_COLLECTION_PREFIX = "aiida_agents_plugin_docs"
 _DOCS_TAG = "v2.8.0"  # pinned aiida-core docs version; part of the index identity
 
 # Corpus rendering format; bump when the text-build output changes shape
@@ -55,6 +56,7 @@ class CollectionInfo:
     chunks: int
     docs_version: str
     embedding: str
+    corpus: str = "aiida-core"
 
 
 @dataclass(frozen=True)
@@ -94,6 +96,7 @@ def index_status(settings: RagSettings | None = None) -> IndexStatus:
                 chunks=c.count(),
                 docs_version=(c.metadata or {}).get("docs_version", "unknown"),
                 embedding=(c.metadata or {}).get("embedding", "unknown"),
+                corpus=(c.metadata or {}).get("corpus", "aiida-core"),
             )
             for c in client.list_collections()
         )
@@ -119,3 +122,22 @@ def _collection_name(embed_fn: EmbeddingFunction) -> str:
     """
     model_slug = re.sub(r"[^A-Za-z0-9._-]", "_", embed_fn.name())
     return f"{_COLLECTION_PREFIX}__{_DOCS_TAG}__{_CORPUS_FORMAT}__{model_slug}"
+
+
+def _plugin_collection_name(
+    embed_fn: EmbeddingFunction, corpus_name: str, corpus_version: str
+) -> str:
+    """Collection name for a plugin-contributed :class:`.spec.RagCorpus`.
+
+    Keyed the same way as the core docs (corpus format + embedding model), plus
+    the corpus's own name and version, so a plugin's corpus never collides with
+    the core docs or with another plugin's, and a version bump on just that
+    corpus rebuilds only its own collection.
+    """
+    model_slug = re.sub(r"[^A-Za-z0-9._-]", "_", embed_fn.name())
+    name_slug = re.sub(r"[^A-Za-z0-9._-]", "_", corpus_name)
+    version_slug = re.sub(r"[^A-Za-z0-9._-]", "_", corpus_version)
+    return (
+        f"{_PLUGIN_COLLECTION_PREFIX}__{name_slug}__{version_slug}"
+        f"__{_CORPUS_FORMAT}__{model_slug}"
+    )
