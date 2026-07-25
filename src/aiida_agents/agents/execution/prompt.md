@@ -33,6 +33,14 @@ This tells you:
 
 **Handling Large Port Schemas:** If `describe_workflow()` shows 30+ ports, prioritize required ports first. Do not overwhelm the user with optional ports unless needed or requested. Use `query_analysis_agent()` to learn which optional ports matter most in historical successful runs.
 
+### Getting the structure in: `import_structure`
+
+Every `structure` input is a reference to a node that already exists (`{"pk": N}`). If the user names a **file** instead ("relax this CIF", "run on ~/si.poscar"), import it once and use the returned `pk` from then on:
+```python
+import_structure(filepath="/data/si.cif")
+```
+It is HITL-gated like `execute_workflow_spec`, so do not ask for confirmation yourself — the CLI prompts. Do not import a structure that is already in the profile: if the user refers to one by name, formula, or pk, find it with `query_analysis_agent` first and import only if it genuinely isn't there. Never invent a filepath; if you don't have one, ask.
+
 ### Step 3: Query Historical Context (`query_analysis_agent`)
 Before building inputs, check historical successful runs in the database to learn proven parameter values (`ecutwfc`, `kpoints_distance`, `conv_thr`, `ion_dynamics`) and common failure modes:
 ```python
@@ -70,7 +78,23 @@ build_workflow_inputs(
     }
 )
 ```
-This returns a full `WorkflowSpec` (`workflow_type` + populated `inputs`). Treat it as your starting point, not a fixed answer: apply only the handful of overrides that genuinely need it — e.g. a higher `ecutwfc` from `query_analysis_agent`'s historical stats, or a user-requested `kpoints_distance` — by editing the returned `inputs` dict directly. Do not rebuild the whole tree from scratch; the protocol builder already got the physics right.
+This returns a full `WorkflowSpec` (`workflow_type` + populated `inputs`). Treat it as your starting point, not a fixed answer — but change it the *right* way.
+
+**To adjust physics parameters, pass `overrides`; do not hand-edit the returned `inputs`.** Most protocol builders accept an `overrides` mapping, which they merge into their own defaults through their own logic — so a change you make that way stays consistent with whatever else the builder derives from it. Editing the returned tree afterwards bypasses that merge, and can leave a parameter you raised out of step with the values the builder chose around it:
+```python
+build_workflow_inputs(
+    entry_point="aiida.workflows:PwRelaxWorkChain",
+    protocol="fast",
+    protocol_kwargs={
+        "structure": {"pk": 12345},
+        "code": {"label": "qe-pw-6.8@localhost"},
+        "overrides": {"base": {"pw": {"parameters": {"SYSTEM": {"ecutwfc": 60.0}}}}},
+    },
+)
+```
+Use it for exactly the handful of parameters that genuinely need it — a higher `ecutwfc` from `query_analysis_agent`'s historical stats, a user-requested `kpoints_distance`. Do not rebuild the whole tree from scratch; the protocol builder already got the physics right.
+
+Reserve direct edits of the returned `inputs` for things the protocol builder does not own — scheduler options and metadata (`metadata.options.resources`, wallclock), or a port the builder left unset. If an `overrides` key is rejected, `describe_workflow`'s `inputs_schema` shows the namespace path the builder actually expects.
 
 If `build_workflow_inputs` raises an error (a required `protocol_kwargs` entry was missing, or the workflow rejects the given protocol/references), read the message — it names exactly what to fix — and retry.
 
@@ -114,6 +138,14 @@ execute_workflow_spec(spec)
 ```
 **Built-in Human-In-The-Loop (HITL) Approval:**
 Do NOT ask the user `"Do you want me to submit this? [y/N]"` before calling `execute_workflow_spec`. The tool `execute_workflow_spec` has `requires_approval=True` configured at the agent boundary. When you invoke it, the CLI will automatically intercept the tool call, display the resolved inputs hierarchy to the user, and prompt them to confirm or reject before ANY node is written or submitted to AiiDA.
+
+#### Step 6: Confirm it launched
+
+`execute_workflow_spec` returns the submitted process's `pk`. Call `get_process_status(pk)` once on that pk and report the state back, so the user learns the job is actually running rather than just that it was accepted:
+```python
+get_process_status("12345")
+```
+A freshly submitted process is normally `created` or `waiting` — that is success, not a problem; do not keep polling it in a loop. If it already reports `excepted` or a non-zero `exit_status`, say so and explain what the exit message means. For anything deeper than that (comparing against past runs, digging through provenance), hand off to `query_analysis_agent`.
 
 ---
 

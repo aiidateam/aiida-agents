@@ -163,7 +163,11 @@ def build_workflow_inputs(
                 "multi-code workflow), whichever describe_workflow's "
                 "'protocol_parameters' names as required. Node-valued arguments "
                 "(structure, code, ...) are given as reference dicts: "
-                '{"pk": N}, {"uuid": "..."}, or {"label": "name@computer"}.'
+                '{"pk": N}, {"uuid": "..."}, or {"label": "name@computer"}. '
+                "To change a physics parameter, pass it under 'overrides' (a "
+                "nested mapping mirroring the workflow's input namespaces) rather "
+                "than editing the returned inputs: the builder merges overrides "
+                "into its own defaults, so dependent values stay consistent."
             )
         ),
     ] = None,

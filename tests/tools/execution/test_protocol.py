@@ -195,3 +195,87 @@ class TestBuildWorkflowInputs:
         resolved = _resolve_inputs(spec["workflow_type"], spec["inputs"])
         _, node = run_get_node(ArithmeticAddCalculation, **resolved)
         assert node.outputs.sum.value == 5
+
+
+class TestOverridesReachTheBuilder:
+    """``overrides`` is the builder's own merge mechanism, so it must arrive
+    exactly as written -- the reference resolver walks nested dicts looking for
+    pk/uuid/label references, and must leave a physics-parameter tree alone.
+    """
+
+    def test_nested_overrides_pass_through_unmangled(
+        self, monkeypatch: pytest.MonkeyPatch, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        seen: dict[str, t.Any] = {}
+
+        def _recording_builder(
+            cls: type[ArithmeticAddCalculation],
+            code: orm.AbstractCode,
+            protocol: str = "fast",
+            overrides: dict[str, t.Any] | None = None,
+        ) -> t.Any:
+            seen["overrides"] = overrides
+            builder = cls.get_builder()
+            builder.code = code
+            builder.x = 2
+            builder.y = 3
+            return builder
+
+        monkeypatch.setattr(
+            ArithmeticAddCalculation,
+            "get_builder_from_protocol",
+            classmethod(_recording_builder),
+            raising=False,
+        )
+
+        overrides = {"base": {"pw": {"parameters": {"SYSTEM": {"ecutwfc": 60.0}}}}}
+        build_workflow_inputs(
+            ADD_EP,
+            protocol_kwargs={
+                "code": {"label": arithmetic_add_code.full_label},
+                "overrides": overrides,
+            },
+        )
+
+        assert seen["overrides"] == overrides
+
+    def test_reference_inside_overrides_is_still_resolved(
+        self, monkeypatch: pytest.MonkeyPatch, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """A genuine node reference nested in overrides is still loaded.
+
+        Some workflows take a node (a parent folder, a reference structure)
+        through overrides, so the resolver must reach into it -- passing the
+        raw dict through would hand the builder ``{"pk": N}`` instead of a node.
+        """
+        seen: dict[str, t.Any] = {}
+
+        def _recording_builder(
+            cls: type[ArithmeticAddCalculation],
+            code: orm.AbstractCode,
+            protocol: str = "fast",
+            overrides: dict[str, t.Any] | None = None,
+        ) -> t.Any:
+            seen["overrides"] = overrides
+            builder = cls.get_builder()
+            builder.code = code
+            builder.x = 2
+            builder.y = 3
+            return builder
+
+        monkeypatch.setattr(
+            ArithmeticAddCalculation,
+            "get_builder_from_protocol",
+            classmethod(_recording_builder),
+            raising=False,
+        )
+
+        build_workflow_inputs(
+            ADD_EP,
+            protocol_kwargs={
+                "code": {"label": arithmetic_add_code.full_label},
+                "overrides": {"base": {"parent_code": {"pk": arithmetic_add_code.pk}}},
+            },
+        )
+
+        assert seen["overrides"]["base"]["parent_code"].pk == arithmetic_add_code.pk
