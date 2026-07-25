@@ -66,7 +66,7 @@ def _ensure_docs_toolchain() -> None:
     ):
         raise click.ClickException(
             "Docs toolchain not installed. Run "
-            "`uv pip install 'aiida-core[docs]'` and retry `aiida-agents rag build`."
+            "`uv pip install 'aiida-agents[rag-build]'` and retry `aiida-agents rag build`."
         )
     try:
         _pip_install("aiida-core[docs]")
@@ -225,16 +225,40 @@ def rag_status() -> None:
         return
 
     table = Table(title="\nCollections in the store")
-    table.add_column("Corpus")
+    # Fold rather than truncate: the corpus name is what identifies a row, and
+    # six columns on an 80-col terminal is narrow enough to clip it otherwise.
+    table.add_column("Corpus", overflow="fold")
+    table.add_column("Usable")
     table.add_column("Chunks", justify="right")
     table.add_column("Docs version")
     table.add_column("Embedding", overflow="fold")
     table.add_column("Collection", style="dim", overflow="fold")
     for info in status.collections:
+        usable = "[green]yes[/]" if info.usable else "[yellow]stale[/]"
         table.add_row(
-            info.corpus, str(info.chunks), info.docs_version, info.embedding, info.name
+            info.corpus,
+            usable,
+            str(info.chunks),
+            info.docs_version,
+            info.embedding,
+            info.name,
         )
     console.print(table)
+
+    # A stale collection is the confusing case: the store looks full, but every
+    # query misses it. Say so explicitly rather than leaving the user to compare
+    # collection names by eye.
+    if status.stale:
+        console.print(
+            f"\n[yellow]⚠[/] {len(status.stale)} collection(s) above are [yellow]stale[/]: "
+            "they were built for a different docs version, corpus format, or "
+            "embedding model, so searches never reach them."
+        )
+        if not status.built:
+            console.print(
+                "  Documentation search is therefore [bold]unavailable[/]. "
+                "Rebuild with [bold]aiida-agents rag build --force[/]."
+            )
 
 
 @rag.command("search")

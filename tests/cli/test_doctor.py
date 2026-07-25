@@ -17,8 +17,11 @@ class _Profile:
 
 
 class _Index:
-    def __init__(self, built: bool) -> None:
+    def __init__(self, built: bool, stale: tuple[object, ...] = ()) -> None:
         self.built = built
+        # doctor distinguishes "never built" from "built but unreachable", so
+        # the stub carries both facts the real IndexStatus exposes.
+        self.stale = stale
 
 
 def _patch_all_checks_passing(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -158,6 +161,15 @@ def test_run_diagnostics_model_availability_policy(
             "RAG index built",
             "rag build",
             id="unbuilt-rag-index",
+        ),
+        pytest.param(
+            lambda mp: mp.setattr(
+                "aiida_agents.rag.store.index_status",
+                lambda: _Index(False, stale=(object(),)),
+            ),
+            "RAG index built",
+            "--force",
+            id="stale-rag-index",
         ),
         pytest.param(
             lambda mp: mp.setattr(

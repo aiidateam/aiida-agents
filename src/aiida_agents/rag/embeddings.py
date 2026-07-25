@@ -121,6 +121,24 @@ class _SentenceTransformerEmbedding:
         return "sentence-transformers/all-MiniLM-L6-v2"
 
 
+def configured_embedding_name(rag_settings: RagSettings | None = None) -> str:
+    """The name the *configured* backend would report, without constructing it.
+
+    ``get_embedding_function`` probes the network and may fall back to
+    sentence-transformers, which would change the name and therefore the
+    collection. Callers that must stay offline -- ``rag status`` and ``doctor``,
+    which report persisted state and must not have their answer depend on
+    whether Ollama happens to be up -- need the name config alone implies.
+
+    Kept beside the classes whose ``name()`` it mirrors, so the two cannot drift
+    apart unnoticed.
+    """
+    cfg = rag_settings if rag_settings is not None else RagSettings()
+    if cfg.embed_backend == "ollama":
+        return f"ollama/{cfg.embed_model}"
+    return "sentence-transformers/all-MiniLM-L6-v2"
+
+
 def get_embedding_function(
     rag_settings: RagSettings | None = None,
     ollama_settings: OllamaSettings | None = None,

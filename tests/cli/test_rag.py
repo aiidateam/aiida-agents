@@ -204,8 +204,13 @@ def test_rag_status_reports_built_index(
     # the setup network-free; `rag status` only reads the count and metadata.
     import chromadb
 
+    from aiida_agents.rag.store import _core_name_for
+
+    # Named exactly as retrieval would look it up: an arbitrary name is now
+    # correctly reported stale, which is a different test (see below).
+    name = _core_name_for("ollama/mxbai-embed-large")
     collection = chromadb.PersistentClient(path=str(store)).create_collection(
-        "aiida_docs__test",
+        name,
         metadata={"docs_version": "v2.8.0", "embedding": "ollama/mxbai-embed-large"},
     )
     collection.add(ids=["1"], documents=["hello"], embeddings=[[0.1, 0.2, 0.3]])
@@ -216,7 +221,7 @@ def test_rag_status_reports_built_index(
     # The collections table rendered the persisted row's name and build metadata.
     # A narrow terminal may wrap the (long) embedding name across lines, so check
     # a prefix short enough to always land on one line rather than the full string.
-    assert "aiida_docs__test" in result.output
+    assert "aiida_docs__" in result.output
     assert "v2.8.0" in result.output
     assert "ollama/mxbai" in result.output
     # No "corpus" metadata was set on this collection; it reads as the core docs.
@@ -234,8 +239,10 @@ def test_rag_status_attributes_a_plugin_corpus_by_name(
     import chromadb
 
     client = chromadb.PersistentClient(path=str(store))
+    from aiida_agents.rag.store import _plugin_name_for
+
     client.create_collection(
-        "aiida_agents_plugin_docs__qe__1.0__fenced1__test",
+        _plugin_name_for("ollama/mxbai-embed-large", "qe", "1.0"),
         metadata={
             "docs_version": "1.0",
             "embedding": "ollama/mxbai-embed-large",
@@ -246,7 +253,13 @@ def test_rag_status_attributes_a_plugin_corpus_by_name(
     result = CliRunner().invoke(cli, ["rag", "status"])
 
     assert result.exit_code == 0
-    assert "quantumespresso" in result.output
+    # A narrow terminal folds the corpus name across lines, so match a prefix
+    # short enough to stay on one (same reason as the embedding check above).
+    assert "quantumespre" in result.output
+    # No such plugin is installed here, so its collection is genuinely
+    # unreachable and must say so rather than counting as a built index.
+    assert "stale" in result.output
+    assert "Built: no" in result.output
 
 
 def test_rag_clear_no_store_is_clean(
@@ -340,7 +353,7 @@ def test_ensure_docs_toolchain_declined_raises_actionable(
     with pytest.raises(rich_click.ClickException) as exc_info:
         rag._ensure_docs_toolchain()
 
-    assert "aiida-core[docs]" in str(exc_info.value)
+    assert "aiida-agents[rag-build]" in str(exc_info.value)
 
 
 def test_ensure_docs_toolchain_installs_on_accept(

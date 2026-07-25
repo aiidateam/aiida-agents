@@ -90,10 +90,20 @@ def _check_rag_index() -> _DiagnosticRow:
     try:
         from aiida_agents.rag.store import index_status
 
-        built = index_status().built
-        return _DiagnosticRow(
-            label, built, "" if built else "run `aiida-agents rag build`"
-        )
+        status = index_status()
+        if status.built:
+            return _DiagnosticRow(label, True, "")
+        # Distinguish "never built" from "built, but nothing a query can reach":
+        # the second looks healthy in the store and is the more confusing one,
+        # so name it and give the command that actually fixes it.
+        if status.stale:
+            return _DiagnosticRow(
+                label,
+                False,
+                "stale index (built for a different docs version, corpus format, "
+                "or embedding model); run `aiida-agents rag build --force`",
+            )
+        return _DiagnosticRow(label, False, "run `aiida-agents rag build`")
     except Exception as exc:
         return _DiagnosticRow(label, False, _short_reason(exc))
 

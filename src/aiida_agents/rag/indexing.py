@@ -87,7 +87,7 @@ def _clone_and_build_text(
         msg = (
             "Building the docs corpus needs the AiiDA docs toolchain, which "
             "is not installed in this environment. Install it with:\n"
-            "    uv pip install 'aiida-core[docs]'\n"
+            "    uv pip install 'aiida-agents[rag-build]'\n"
             "then re-run indexing."
         )
         raise RuntimeError(msg)

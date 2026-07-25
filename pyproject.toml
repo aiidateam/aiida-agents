@@ -47,6 +47,14 @@ docs = [
 rag = [
   "chromadb>=1.5.9",
 ]
+# The sphinx toolchain `rag build` shells out to (rag._textbuild renders the
+# corpus). Separate from `rag` because querying an already-built index does not
+# need it, and it is heavy; but it must be installable non-interactively --
+# without it `rag build` stops to prompt, which blocks any scripted setup.
+rag-build = [
+  "aiida-agents[rag]",
+  "aiida-core[docs]",
+]
 # In-process CPU fallback embedder, used only when no Ollama server is reachable.
 # (The default `rag` extra is already local: it embeds via the local Ollama
 # daemon.) Heavy: pulls torch and on PyPI its CUDA wheel stack, so it is opt-in.
