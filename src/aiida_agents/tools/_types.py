@@ -22,6 +22,7 @@ __all__ = [
     "ProcessRecord",
     "ProcessStatus",
     "QueryResult",
+    "StructureImportResult",
     "StructureRecord",
     "SubmitResult",
 ]
@@ -61,6 +62,20 @@ class CodeRecord(TypedDict):
     computer: str | None
     default_calc_job_plugin: str | None
     node_type: str
+
+
+class StructureImportResult(TypedDict):
+    """Return shape of ``import_structure``.
+
+    ``pk`` is the point of the tool: it is what a submission's ``structure``
+    input takes as ``{"pk": ...}``.
+    """
+
+    pk: int
+    uuid: str
+    formula: str
+    num_sites: int
+    label: str
 
 
 class ProcessRecord(TypedDict):

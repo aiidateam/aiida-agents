@@ -92,3 +92,35 @@ class TestFullWorkflowIntegration:
             assert isinstance(res.output, DeferredToolRequests)
             assert len(res.output.approvals) == 1
             assert res.output.approvals[0].tool_name == "execute_workflow_spec"
+
+
+EXPECTED_EXECUTION_TOOLS = {
+    "query_analysis_agent",
+    "list_workflows",
+    "describe_workflow",
+    "build_workflow_inputs",
+    "list_codes",
+    "get_process_status",
+    "execute_workflow_spec",
+    "import_structure",
+}
+
+
+def test_execution_agent_exposes_expected_tools(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """get_agent wires exactly the execution tools onto the agent.
+
+    Pins the tool surface the way the Analysis agent's own test does, so a tool
+    added or dropped here is a deliberate edit rather than a silent drift.
+    ``get_process_status`` is shared with the Analysis agent on purpose: it is
+    how this agent follows up on what it just submitted.
+    """
+    monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", "ollama")
+    agent = get_agent()
+    fake = TestModel(call_tools=[])  # register only; don't invoke
+    with agent.override(model=fake):
+        agent.run_sync("ping")
+    params = fake.last_model_request_parameters
+    assert params is not None
+    assert {t.name for t in params.function_tools} == EXPECTED_EXECUTION_TOOLS

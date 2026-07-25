@@ -54,9 +54,18 @@ rag-fallback = [
   "aiida-agents[rag]",
   "sentence-transformers>=5.5.1",
 ]
+# Structure-file parsing for `import_structure` (CIF/POSCAR/xyz -> StructureData).
+# Opt-in: only needed to bring a structure in from disk, not to run a workflow
+# on one already in the profile.
+structures = [
+  "ase>=3.22",
+]
 tests = [
   "pytest",
-  "pytest-cov"
+  "pytest-cov",
+  # So CI actually exercises import_structure's parse path rather than
+  # skipping it; the tests skip cleanly when it is absent.
+  "aiida-agents[structures]",
 ]
 lint = [
   "mypy",

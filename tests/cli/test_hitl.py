@@ -38,17 +38,23 @@ READ_TOOL_NAMES = frozenset(tool.__name__ for tool in _READ_TOOLS)
 
 
 class TestSubmitWorkflowRequiresApproval:
-    def test_execute_workflow_spec_is_the_only_approval_tool(self) -> None:
-        """The Execution agent's write tool is approval-gated, and nothing else is.
+    def test_every_execution_write_tool_is_approval_gated(self) -> None:
+        """The Execution agent's write tools are approval-gated, and nothing else is.
 
         Approval-capable tools live in the agent's function toolset (populated
         by ``tool_plain``); read tools sit in a separate plain toolset with no
         approval mechanism. Asserting the whole set, not just membership, means
-        a second write tool added without ``requires_approval`` fails here too.
+        a further write tool added without ``requires_approval`` fails here too.
         """
         function_toolset = get_agent("execution")._function_toolset
-        assert set(function_toolset.tools) == {"execute_workflow_spec"}
-        assert function_toolset.tools["execute_workflow_spec"].requires_approval is True
+        # Both tools that touch the database: the submission itself, and the
+        # structure import that writes a StructureData from a file on disk.
+        assert set(function_toolset.tools) == {
+            "execute_workflow_spec",
+            "import_structure",
+        }
+        for name in ("execute_workflow_spec", "import_structure"):
+            assert function_toolset.tools[name].requires_approval is True
 
     def test_analysis_agent_holds_no_write_tool(self) -> None:
         """The Analysis agent is read-only: submission is the Execution agent's.
