@@ -121,8 +121,17 @@ are sub-batched at 10 texts per request to avoid timeouts on CPU hardware.
 
 ### Vector store
 
-ChromaDB with a persistent local client. The persistence path defaults to
-`.aiida_agents_vector_db/` and is overridable via `AIIDA_AGENTS_VECTOR_DB_PATH`.
+ChromaDB with a persistent local client. The persistence path defaults to a
+per-user data directory (`platformdirs`, e.g.
+`~/.local/share/aiida-agents/vector_db`) and is overridable via
+`AIIDA_AGENTS_VECTOR_DB_PATH`.
+
+> Revised: this was originally the relative `.aiida_agents_vector_db/`, which
+> resolved against the working directory. An index built in the repository was
+> therefore invisible from anywhere else, and read as "the index needs
+> rebuilding every time". An override should be an absolute path for the same
+> reason.
+
 The vector index is excluded from version control (`.gitignore`); only the
 text corpus is cached. ChromaDB runs in-process with cosine similarity
 (`hnsw:space = cosine`).
