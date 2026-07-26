@@ -1,0 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "qe-rag-stub"
+version = "0.0.0"
+description = "Dev-only local stub that registers an aiida-quantumespresso RAG corpus, so aiida-agents' plugin RAG extensibility (search_aiida_docs cross-corpus attribution) can be exercised without aiida-quantumespresso itself shipping the real aiida_agents.plugins entry point yet. Not for distribution."
+requires-python = ">=3.10"
+dependencies = ["aiida-agents"]
+
+[project.entry-points."aiida_agents.plugins"]
+quantumespresso = "qe_rag_stub:PROVIDER"
+
+[tool.hatch.build.targets.wheel]
+packages = ["qe_rag_stub"]

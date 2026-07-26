@@ -116,7 +116,13 @@ def search_aiida_docs(query: str) -> str:
     if not results:
         if not docs_index_available():
             return _unavailable_message()
-        return "No relevant AiiDA documentation found for this query."
+        return (
+            "No relevant AiiDA documentation found for this query -- the "
+            "index was searched, but nothing in it is a close enough match, "
+            "which usually means this is covered by a plugin's docs that "
+            "aren't indexed here, or isn't documented at all. "
+            f"{_NO_MEMORY}"
+        )
 
     formatted = []
     for r in results:

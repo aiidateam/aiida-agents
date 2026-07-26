@@ -93,7 +93,7 @@ class TestQueryDocs:
         core_collection.query.return_value = {
             "documents": [["core hit"]],
             "metadatas": [[{"source": "topics/core", "section": "Core"}]],
-            "distances": [[0.5]],  # farther
+            "distances": [[0.3]],  # farther, but still within the relevance cutoff
         }
         plugin_collection = MagicMock()
         plugin_collection.query.return_value = {

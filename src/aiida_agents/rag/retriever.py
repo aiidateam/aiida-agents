@@ -117,6 +117,19 @@ def _warn_missing_core_index(embed_fn: EmbeddingFunction, existing: set[str]) ->
     )
 
 
+#: Cosine-distance ceiling (mxbai-embed-large) above which a hit is treated as
+#: noise rather than a real match. Calibrated empirically: genuinely relevant
+#: hits against the aiida-core corpus land at 0.21-0.31, while queries with no
+#: real answer in the corpus (off-topic entirely) land at 0.54-0.64. A query
+#: that is AiiDA-domain-adjacent but about a concept the corpus doesn't cover
+#: (e.g. a plugin-specific parameter with no plugin corpus indexed) can still
+#: land in the 0.30-0.36 range and slip under this ceiling -- this threshold
+#: catches "nothing in the corpus is even topically close", not "the closest
+#: thing found isn't specific enough". The latter is why corpus coverage
+#: (installed plugin corpora) matters as much as this cutoff does.
+_MAX_RELEVANT_DISTANCE = 0.45
+
+
 def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
     """Query the AiiDA docs with a natural language string.
 
@@ -126,6 +139,11 @@ def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
     from. Each result carries a ``corpus`` key ("aiida-core" for the core
     docs, or the contributing plugin's corpus name), so a caller can attribute
     a plugin's docs as its own.
+
+    Hits farther than :data:`_MAX_RELEVANT_DISTANCE` from the query are
+    dropped before ``limit`` is applied: a distant "closest available" hit is
+    noise, not a weak signal, and formatting it identically to a strong match
+    invites a model to answer from it anyway (see ``search_aiida_docs``).
 
     The query is embedded with the mxbai query prefix (added inside
     ``OllamaEmbedding.embed_query``).
@@ -168,4 +186,5 @@ def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
             "corpus": c["corpus"],
         }
         for c in candidates[:limit]
+        if c["_distance"] <= _MAX_RELEVANT_DISTANCE
     ]

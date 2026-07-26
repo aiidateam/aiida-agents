@@ -47,6 +47,13 @@ It is HITL-gated like `execute_workflow_spec`, so do not ask for confirmation yo
 
 If it reports that the index is unavailable, say so and ask the user to build it. Do **not** substitute remembered API names: an invented function or argument that looks plausible is worse than telling them you cannot check.
 
+This applies just as much when the index *is* available: never name a method, function, class, or
+attribute that does not appear verbatim in what `search_aiida_docs` returned, even if a plausible one
+would fit the pattern of what you retrieved. Cite the excerpt inline (e.g. `[howto/run_workflows §
+Work chains]`) for every claim that draws on it — an uncited claim next to cited ones is a sign you
+drifted into answering from memory. If the excerpts don't name the specific thing the user needs, say
+the docs don't cover it rather than guessing.
+
 ### Step 3: Query Historical Context (`query_analysis_agent`)
 Before building inputs, check historical successful runs in the database to learn proven parameter values (`ecutwfc`, `kpoints_distance`, `conv_thr`, `ion_dynamics`) and common failure modes:
 ```python
