@@ -8,7 +8,13 @@ suite.
 
 Run with::
 
-    AIIDA_AGENTS_EVAL=1 hatch test tests/evals -m llm
+    AIIDA_AGENTS_EVAL=1 hatch test tests/evals -m llm --log-cli-level=INFO
+
+It runs against whatever model your ``.env`` (or exported environment)
+configures, and logs the resolved provider/model on every case. Check that line
+first when a run looks wrong: the very first real-model run of this tier failed
+ten cases against a model it had never contacted, because the project-wide
+``_isolate_cwd`` fixture hides ``.env`` from every test.
 
 Expect these to be *flaky by nature*: a weaker model fails them more often
 than a strong one, and that is information rather than a broken test. A
@@ -32,6 +38,7 @@ from tests.evals._harness import (
     assert_cited,
     assert_consulted_docs,
     assert_grounded_quantities,
+    copy_project_env,
     trace_run,
 )
 
@@ -44,6 +51,17 @@ pytestmark = [
         reason="real-model eval; set AIIDA_AGENTS_EVAL=1 to run",
     ),
 ]
+
+
+@pytest.fixture(autouse=True)
+def _developer_env(_isolate_cwd: None) -> None:
+    """Undo, for this tier only, the chdir that hides the developer's ``.env``.
+
+    Depends on ``_isolate_cwd`` by name rather than relying on fixture ordering:
+    the copy has to land in the temp directory *after* the project-wide autouse
+    fixture has chdir'd into it, or it goes to the repository root instead.
+    """
+    copy_project_env(Path.cwd())
 
 
 @pytest.fixture
@@ -68,10 +86,19 @@ def _run(agent: Agent, prompt: str) -> RunTrace:
     do not depend on this: the assertion messages carry the tool sequence and
     the answer themselves.
     """
+    from aiida_agents._settings import ModelSettings
+
+    # Name the model in every case, passing or failing. A grounding result is
+    # meaningless without knowing which model produced it, and an eval that
+    # silently resolved to something other than what you configured is exactly
+    # the failure this tier hit first -- it must be visible, not inferred.
+    resolved = ModelSettings()
     trace = trace_run(agent, prompt)
     logger.info(
-        "eval case %r\n  tools: %s\n  answer: %s",
+        "eval case %r [%s/%s]\n  tools: %s\n  answer: %s",
         prompt,
+        resolved.provider,
+        resolved.model,
         trace.tool_names,
         trace.answer,
     )

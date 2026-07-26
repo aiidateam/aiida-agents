@@ -114,6 +114,9 @@ Two tiers:
 - **`tests/evals/test_grounding.py`** is opt-in (`AIIDA_AGENTS_EVAL=1`, marked `llm`). It needs a real model and a built RAG index, so it never runs in CI.
 
 Expect the opt-in tier to be flaky by nature — a weaker model fails it more often, and that is a result, not a broken test. Run it after changing a system prompt, a tool description, or anything in `src/aiida_agents/rag/`.
+
+It runs against whatever model your `.env` configures, and logs the resolved provider/model on every case — read that line before concluding anything about a failure.
+Note that each case is multi-turn, so one full run is a few dozen API requests; a free tier's daily cap will not survive many of them.
 Codecov is configured `target: auto` / `threshold: 0%` (no-regression), so coverage can never drop; the floor only sets the bar.
 
 ## Release

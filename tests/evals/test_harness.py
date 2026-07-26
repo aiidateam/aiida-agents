@@ -12,6 +12,7 @@ belongs in CI.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -24,10 +25,12 @@ from pydantic_ai.messages import (
 )
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
+from tests.evals import _harness
 from tests.evals._harness import (
     assert_cited,
     assert_consulted_docs,
     assert_grounded_quantities,
+    copy_project_env,
     quantities_in,
     trace_run,
     ungrounded_quantities,
@@ -180,6 +183,70 @@ class TestQuantityDetection:
 
         # The excerpt says "60.0 Ry" / "480.0 Ry"; the answer says "60" / "480".
         assert ungrounded_quantities(trace_run(agent, "cutoffs?")) == set()
+
+
+class TestDeveloperEnvReachesSettings:
+    """The eval tier must run against the configured model, not a silent default.
+
+    Regression from the first real-model run: ``tests/conftest.py`` chdirs every
+    test into an empty temp directory so a developer's ``.env`` cannot leak into
+    hermetic tests. The eval tier inherited that, so ``ModelSettings`` found no
+    ``.env``, fell back to ``ollama``/``qwen3.5:2b``, and reported ten grounding
+    failures for a model that had never been contacted.
+    """
+
+    @staticmethod
+    def _project_with_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        """A fake project holding a ``.env``, and an empty cwd like conftest's."""
+        project = tmp_path / "project"
+        project.mkdir()
+        (project / ".env").write_text(
+            "AIIDA_AGENTS_PROVIDER=anthropic\nAIIDA_AGENTS_MODEL=some-configured-model\n"
+        )
+        monkeypatch.setattr(_harness, "project_env_file", lambda: project / ".env")
+
+        workdir = tmp_path / "work"
+        workdir.mkdir()
+        monkeypatch.chdir(workdir)
+        return project
+
+    def test_settings_read_the_copied_env(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Before the copy the defaults win; after it, the developer's config does."""
+        from aiida_agents._settings import ModelSettings
+
+        # Exported variables would mask the whole mechanism under test.
+        monkeypatch.delenv("AIIDA_AGENTS_PROVIDER", raising=False)
+        monkeypatch.delenv("AIIDA_AGENTS_MODEL", raising=False)
+        self._project_with_env(tmp_path, monkeypatch)
+
+        # The bug: an empty cwd means the bare defaults, silently.
+        assert ModelSettings().provider == "ollama"
+        assert ModelSettings().model == "qwen3.5:2b"
+
+        copy_project_env(Path.cwd())
+
+        assert ModelSettings().provider == "anthropic"
+        assert ModelSettings().model == "some-configured-model"
+
+    def test_copies_into_the_given_directory(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._project_with_env(tmp_path, monkeypatch)
+
+        written = copy_project_env(Path.cwd())
+
+        assert written == Path.cwd() / ".env"
+        assert written.is_file()
+
+    def test_absent_project_env_is_not_an_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Config may come from exported shell variables, which survive the chdir."""
+        monkeypatch.setattr(_harness, "project_env_file", lambda: tmp_path / "nope.env")
+
+        assert copy_project_env(tmp_path) is None
 
 
 class TestTraceCapture:

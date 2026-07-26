@@ -34,7 +34,9 @@ checks actually fire) and against a real model in the opt-in tier (see
 from __future__ import annotations
 
 import re
+import shutil
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from pydantic_ai import Agent, capture_run_messages
@@ -46,6 +48,43 @@ from pydantic_ai.messages import (
     ToolCallPart,
     ToolReturnPart,
 )
+
+
+def project_env_file() -> Path:
+    """Path the developer's ``.env`` would occupy, whether or not it exists."""
+    return Path(__file__).resolve().parents[2] / ".env"
+
+
+def copy_project_env(destination: Path) -> Path | None:
+    """Put the developer's ``.env`` where ``ModelSettings`` will find it.
+
+    ``tests/conftest.py`` chdirs every test into an empty temp directory, on
+    purpose, so that a developer's ``.env`` cannot leak into tests that are
+    supposed to be hermetic. This tier needs the opposite: it exists to run
+    against whatever model the developer actually configured, and pydantic-
+    settings reads ``.env`` relative to the working directory.
+
+    Without this the eval resolved to ``ModelSettings``' bare defaults --
+    ``ollama``/``qwen3.5:2b`` -- and reported grounding failures for a model
+    that had never been contacted. The conftest docstring prescribes the way
+    out ("a test that needs a ``.env`` writes its own and chdirs to it"); this
+    is that, using the real one.
+
+    Exported shell variables survive the chdir and are unaffected either way;
+    they still win over the copied file, as pydantic-settings intends.
+
+    Args:
+        destination: Directory to copy into -- normally the test's cwd.
+
+    Returns:
+        The written path, or ``None`` when the project has no ``.env``.
+    """
+    source = project_env_file()
+    if not source.is_file():
+        return None
+    target = destination / ".env"
+    shutil.copy(source, target)
+    return target
 
 
 @dataclass
