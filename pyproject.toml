@@ -233,6 +233,12 @@ venv = ".venv"
 reportUnusedFunction = "none"
 
 [tool.pytest.ini_options]
+markers = [
+    # Grounding evals in tests/evals. They hit a real model provider and need a
+    # built RAG index, so they are gated on AIIDA_AGENTS_EVAL=1 as well and are
+    # never part of a CI run. See tests/evals/test_grounding.py.
+    "llm: exercises a real model provider; opt-in, excluded from CI",
+]
 # Warnings raised by our own code are errors; third-party warnings only show.
 # A blanket `error` is unworkable here: AiiDA's dependency tree emits
 # version-specific deprecations across the 3.10-3.14 matrix (aiida-core itself

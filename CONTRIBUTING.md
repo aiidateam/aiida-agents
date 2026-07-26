@@ -19,6 +19,7 @@ uv run pre-commit install     # install git hooks (pre-commit + commit-msg)
 | Run all checks | `uv run pre-commit run --all-files` | before pushing / opening a PR |
 | Run one check | `uv run pre-commit run ruff --all-files` | iterating on a single hook (`ruff`, `mypy`, `mdformat`, `uv-lock`, …) |
 | Run tests | `uv run pytest` | while developing |
+| Run grounding evals | `AIIDA_AGENTS_EVAL=1 uv run pytest tests/evals -m llm` | after touching a system prompt or the RAG pipeline |
 | Type-check only | `uv run mypy` | iterating on types (also runs in pre-commit) |
 | Build docs | `cd docs && uv run myst build` | checking docs render |
 | Serve docs live | `cd docs && uv run myst start` | writing docs |
@@ -101,6 +102,18 @@ In `dev/`: `INP001` and `T201` (`print()` is fine in dev scripts).
 `fail_under = 80` (`pyproject.toml`) is a floor, not the goal — and the global number is a blunt instrument here, so target coverage by *what the code is*, not by chasing the percentage.
 The deterministic, safety-critical core — the Validator (schema/range checks), HITL enforcement, `QueryBuilderDict`/tool-input construction — should be ~100% covered with real objects.
 External-IO and LLM/agent boundaries (network, model calls) are marked `# pragma: no cover` and validated by the eval harness, not by mock-to-hit-lines tests — which would contradict our "real objects, test the contract" philosophy.
+
+## Grounding evals
+
+`tests/evals/` asserts on what an agent *did* — the tools it called and whether its prose is traceable to what they returned — rather than on the wording of its answer.
+It exists because the failures that actually reach users are behavioural: an agent answering a parameter question from memory, or garnishing a correctly retrieved answer with an invented cutoff. No unit test over mocked tools can see either.
+
+Two tiers:
+
+- **`tests/evals/test_harness.py`** runs in CI. It scripts a fabricating agent with `FunctionModel` and requires the checks to catch it, so the assertions can't silently rot into always-passing.
+- **`tests/evals/test_grounding.py`** is opt-in (`AIIDA_AGENTS_EVAL=1`, marked `llm`). It needs a real model and a built RAG index, so it never runs in CI.
+
+Expect the opt-in tier to be flaky by nature — a weaker model fails it more often, and that is a result, not a broken test. Run it after changing a system prompt, a tool description, or anything in `src/aiida_agents/rag/`.
 Codecov is configured `target: auto` / `threshold: 0%` (no-regression), so coverage can never drop; the floor only sets the bar.
 
 ## Release
