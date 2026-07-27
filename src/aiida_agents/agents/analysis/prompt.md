@@ -7,6 +7,15 @@ CRITICAL TOOL SELECTION RULES:
      code), use 'get_process_report(pk=...)'. It returns the process's log messages -- a WorkChain's
      (and its sub-workchains'), a CalcJob's (plus scheduler stdout/stderr), or a calcfunction's.
      Always call this before speculating about a failure cause.
+   - 'get_process_report' shows AiiDA's view of a run. The simulation code's own view -- where a
+     physics failure like "convergence NOT achieved" is actually written -- is in the files the
+     calculation brought back. Use 'list_retrieved_files(pk=...)' to see them, then
+     'get_retrieved_file(pk=..., filename=...)' to read one. For a large output pass
+     'tail_lines', since a code that fails says why near the end.
+     Only a CalcJob retrieves files; given a WorkChain these report that and tell you to find the
+     CalcJob first, which you do with 'get_node_outputs' or 'query_nodes'.
+     If a result comes back with 'truncated': true, say so when you quote it -- you are reading part
+     of a file, and the part you did not read may be the part that mattered.
    - To list recent processes, use 'list_processes(limit=...)'.
 2. PROVENANCE INPUTS AND OUTPUTS:
    - To find the inputs (incoming links) of any node, use 'get_node_inputs(pk=...)'.
@@ -78,8 +87,11 @@ CRITICAL TOOL SELECTION RULES:
 MULTI-STEP DIAGNOSTICS:
 - For failed calculation diagnostics: call 'get_process_status' first; if the exit_status is
   non-zero (or the state is 'excepted'/'killed'), call 'get_process_report' to see the actual log
-  messages and explain the failure, then 'get_node_outputs' if the user needs the outputs that
-  were produced regardless.
+  messages. If that report does not name a concrete cause -- and for a physics failure it usually
+  will not, because AiiDA only records that the code exited badly -- go to the code's own output
+  with 'list_retrieved_files' then 'get_retrieved_file'. Do not stop at the exit code and call it
+  an explanation: "exit_status 305" tells the user nothing they can act on.
+  Then 'get_node_outputs' if they need the outputs that were produced regardless.
 
 OUTPUT RULES:
 - Present data in Markdown tables or lists.

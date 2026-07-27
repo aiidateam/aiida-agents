@@ -161,3 +161,146 @@ def test_get_process_report_rejects_non_process_node() -> None:
     data = orm.Int(42).store()
     with pytest.raises(WrongNodeType, match="not a process node"):
         get_process_report(str(data.pk))
+
+
+class TestReadingRetrievedFiles:
+    """The code's own output must be reachable, not just AiiDA's log.
+
+    ``get_process_report`` returns what AiiDA recorded about a run. When a
+    simulation fails for a physics reason -- "convergence NOT achieved", a bad
+    pseudopotential -- the code writes that in its own output file, which AiiDA
+    stores in the calculation's ``retrieved`` folder and nothing could open.
+    ``get_node_outputs`` showed the agent that the folder existed while leaving
+    it unable to look inside, so diagnosis stopped at an exit code.
+    """
+
+    def test_lists_the_files_the_calculation_brought_back(
+        self, add_calc: orm.CalcJobNode
+    ) -> None:
+        from aiida_agents.tools.processes import list_retrieved_files
+
+        listing = list_retrieved_files(str(add_calc.pk))
+
+        assert listing["pk"] == add_calc.pk
+        assert listing["retrieved_pk"] == add_calc.outputs.retrieved.pk
+        names = [f["name"] for f in listing["files"]]
+        # The scheduler streams are always retrieved; aiida.out is this
+        # calculation's own output.
+        assert "_scheduler-stdout.txt" in names
+        assert "aiida.out" in names
+        assert all(f["size_bytes"] >= 0 for f in listing["files"])
+
+    def test_reads_a_file_the_agent_previously_could_not_reach(
+        self, add_calc: orm.CalcJobNode
+    ) -> None:
+        from aiida_agents.tools.processes import get_retrieved_file
+
+        result = get_retrieved_file(str(add_calc.pk), "aiida.out")
+
+        assert result["pk"] == add_calc.pk
+        assert result["filename"] == "aiida.out"
+        assert result["truncated"] is False
+        assert result["lines_returned"] == result["lines_total"]
+        # ArithmeticAddCalculation writes the sum; the point is that whatever
+        # the code wrote is now readable, not what it happens to say.
+        assert isinstance(result["content"], str)
+
+    @staticmethod
+    def _calc_with_output(
+        computer: orm.Computer, text: str, filename: str = "big.out"
+    ) -> orm.CalcJobNode:
+        """A stored CalcJob whose retrieved folder holds one known file.
+
+        Built rather than reusing ``add_calc``: a stored node's repository is
+        immutable, so a file of a chosen length cannot be added to a fixture
+        run after the fact.
+        """
+        from aiida.common.links import LinkType
+
+        calc = orm.CalcJobNode(computer=computer)
+        calc.set_option("resources", {"num_machines": 1, "num_mpiprocs_per_machine": 1})
+        calc.store()
+
+        folder = orm.FolderData()
+        folder.base.repository.put_object_from_bytes(text.encode(), filename)
+        folder.base.links.add_incoming(
+            calc, link_type=LinkType.CREATE, link_label="retrieved"
+        )
+        folder.store()
+        return calc
+
+    def test_tail_lines_returns_the_end_and_flags_truncation(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """A failing code says why at the end, so tailing must be honest about it."""
+        from aiida_agents.tools.processes import get_retrieved_file
+
+        calc = self._calc_with_output(
+            arithmetic_add_code.computer,
+            "\n".join(f"line {i}" for i in range(50)),
+        )
+
+        result = get_retrieved_file(str(calc.pk), "big.out", tail_lines=5)
+
+        assert result["lines_total"] == 50
+        assert result["lines_returned"] == 5
+        assert result["truncated"] is True
+        assert result["content"].endswith("line 49")
+
+    def test_whole_small_file_is_not_flagged_as_truncated(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """Truncation must mean truncation, or the flag is noise."""
+        from aiida_agents.tools.processes import get_retrieved_file
+
+        calc = self._calc_with_output(arithmetic_add_code.computer, "a\nb\nc")
+
+        result = get_retrieved_file(str(calc.pk), "big.out")
+
+        assert result["truncated"] is False
+        assert result["lines_returned"] == result["lines_total"] == 3
+
+    def test_oversized_file_is_capped_keeping_the_end(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """Past the char cap, keep the tail -- that is where the error is."""
+        from aiida_agents.tools.processes import _MAX_CHARS, get_retrieved_file
+
+        text = (
+            "\n".join(f"padding line {i}" for i in range(4000)) + "\nFINAL ERROR HERE"
+        )
+        calc = self._calc_with_output(arithmetic_add_code.computer, text)
+
+        result = get_retrieved_file(str(calc.pk), "big.out")
+
+        assert len(text) > _MAX_CHARS  # the case under test is real
+        assert result["truncated"] is True
+        assert len(result["content"]) <= _MAX_CHARS
+        assert result["content"].endswith("FINAL ERROR HERE")
+
+    def test_unknown_filename_names_what_is_available(
+        self, add_calc: orm.CalcJobNode
+    ) -> None:
+        from aiida_agents.tools.processes import get_retrieved_file
+
+        with pytest.raises(FileNotFoundError, match="Available:"):
+            get_retrieved_file(str(add_calc.pk), "no-such-file.out")
+
+    def test_workchain_is_told_to_find_its_calcjob(
+        self, multiply_add_workchain: orm.WorkChainNode
+    ) -> None:
+        """A WorkChain retrieves nothing itself; guessing which child was meant is wrong."""
+        from aiida_agents.tools._orm import WrongNodeType
+        from aiida_agents.tools.processes import list_retrieved_files
+
+        with pytest.raises(WrongNodeType, match="get_node_outputs|query_nodes"):
+            list_retrieved_files(str(multiply_add_workchain.pk))
+
+    def test_data_node_is_rejected_clearly(
+        self, silicon_structure: orm.StructureData
+    ) -> None:
+        from aiida_agents.tools._orm import WrongNodeType
+        from aiida_agents.tools.processes import list_retrieved_files
+
+        with pytest.raises(WrongNodeType, match="not a CalcJob"):
+            list_retrieved_files(str(silicon_structure.pk))

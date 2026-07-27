@@ -30,7 +30,9 @@ from aiida_agents.tools import (
     get_node_outputs,
     get_process_report,
     get_process_status,
+    get_retrieved_file,
     list_processes,
+    list_retrieved_files,
     query_nodes,
     search_structures,
 )
@@ -45,6 +47,8 @@ from aiida_agents.rag import search_aiida_docs
 _READ_TOOLS: list[Any] = [
     get_process_status,
     get_process_report,
+    list_retrieved_files,
+    get_retrieved_file,
     list_processes,
     query_nodes,
     get_node_inputs,

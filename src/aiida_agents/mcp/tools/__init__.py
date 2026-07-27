@@ -18,8 +18,10 @@ from aiida_agents.tools import (
     get_node_outputs,
     get_process_report,
     get_process_status,
+    get_retrieved_file,
     list_codes,
     list_processes,
+    list_retrieved_files,
     list_workflows,
     query_analysis_agent,
     query_nodes,
@@ -48,6 +50,8 @@ def register_all(mcp: FastMCP) -> None:
     register_tool(mcp, get_process_status)
     register_tool(mcp, get_process_report)
     register_tool(mcp, list_processes)
+    register_tool(mcp, list_retrieved_files)
+    register_tool(mcp, get_retrieved_file)
     register_tool(mcp, get_node_inputs)
     register_tool(mcp, get_node_outputs)
     register_tool(mcp, query_nodes)

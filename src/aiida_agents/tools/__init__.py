@@ -38,8 +38,10 @@ from aiida_agents.tools.analysis import (
 )
 from aiida_agents.tools.processes import (
     get_process_report,
+    get_retrieved_file,
     get_process_status,
     list_processes,
+    list_retrieved_files,
 )
 from aiida_agents.tools.execution import (
     build_workflow_inputs,
@@ -55,9 +57,11 @@ __all__ = [
     "get_node_inputs",
     "get_node_outputs",
     "get_process_report",
+    "get_retrieved_file",
     "get_process_status",
     "list_codes",
     "list_processes",
+    "list_retrieved_files",
     "list_workflows",
     "query_analysis_agent",
     "query_nodes",

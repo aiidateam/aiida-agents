@@ -102,6 +102,39 @@ class ProcessReport(TypedDict):
     report: str
 
 
+class RetrievedFileInfo(TypedDict):
+    """One file in a calculation's retrieved folder."""
+
+    name: str
+    size_bytes: int
+
+
+class RetrievedListing(TypedDict):
+    """Return shape of ``list_retrieved_files``."""
+
+    pk: int
+    process_label: str
+    retrieved_pk: int
+    files: list[RetrievedFileInfo]
+
+
+class RetrievedFileContent(TypedDict):
+    """Return shape of ``get_retrieved_file``.
+
+    ``truncated`` and the two line counts are part of the contract rather than
+    a detail: a silently shortened file reads exactly like a complete one, and
+    a model drawing conclusions from the wrong half of an output has no way to
+    know it is missing the part that mattered.
+    """
+
+    pk: int
+    filename: str
+    content: str
+    truncated: bool
+    lines_returned: int
+    lines_total: int
+
+
 class NodeLink(TypedDict):
     """A link returned by ``get_node_inputs`` / ``get_node_outputs``."""
 
