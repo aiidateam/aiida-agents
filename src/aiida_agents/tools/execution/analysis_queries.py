@@ -17,6 +17,46 @@ logger = logging.getLogger(__name__)
 __all__ = ["query_analysis_agent"]
 
 
+def _resolve_process_label(workflow_type: str) -> tuple[str, bool]:
+    """Turn whatever spelling of a workflow the agent used into a ``process_label``.
+
+    Nodes store ``process_label`` as the class name (``MultiplyAddWorkChain``),
+    but the agent has three plausible things to hand and no reason to prefer
+    one: the entry point ``list_workflows`` gave it
+    (``core.arithmetic.multiply_add``), the ``group:entry_point`` form that
+    ``process_type`` uses, or the class name itself.
+
+    Splitting on ``":"`` -- what this did before -- only ever worked for the
+    legacy ``aiida.workflows:PwRelaxWorkChain`` spelling seen in the prompt's
+    examples. A modern entry point has no colon, so it was passed through
+    whole and matched no node, and the caller reported "no prior runs" for a
+    database full of them. That is worse than an error: the agent then builds
+    inputs from defaults believing there is no history to draw on.
+
+    Args:
+        workflow_type: An entry point, a ``group:entry_point`` string, or a
+            process label.
+
+    Returns:
+        The ``process_label`` to filter on, and whether it was resolved
+        through the entry-point registry (``False`` means it is being used
+        as a literal label, which is correct for a class name but also what
+        happens for a typo).
+    """
+    from aiida.plugins import CalculationFactory, WorkflowFactory
+
+    candidate = workflow_type.split(":")[-1] if ":" in workflow_type else workflow_type
+
+    for factory in (WorkflowFactory, CalculationFactory):
+        try:
+            process_class = factory(candidate)
+        except Exception:  # noqa: BLE001 - any resolution failure means "not this one"
+            continue
+        return process_class.__name__, True
+
+    return candidate, False
+
+
 class PastWorkflowSummary(t.TypedDict, total=False):
     """Summary of past successful workflows of a certain type."""
 
@@ -143,9 +183,7 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
 
     workflow_type = filters.get("workflow_type", "aiida.workflows:PwRelaxWorkChain")
     structure_type = filters.get("structure_type", "metallic")
-    process_label = (
-        workflow_type.split(":")[-1] if ":" in workflow_type else workflow_type
-    )
+    process_label, resolved = _resolve_process_label(workflow_type)
 
     try:
         qb = orm.QueryBuilder()
@@ -179,7 +217,18 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
             "common_parameters": {},
             "common_failure_modes": [],
             "example_structures": [],
-            "note": "No prior runs of this workflow found in the active AiiDA database. Using defaults.",
+            "note": (
+                f"No prior runs of {process_label!r} found in the active AiiDA "
+                "database. Using defaults."
+                if resolved
+                else (
+                    f"{workflow_type!r} is not a registered entry point, so it was "
+                    f"searched for as the process label {process_label!r}, and no "
+                    "runs matched. If this workflow is installed, pass the entry "
+                    "point that list_workflows() reported; if it is not, say so "
+                    "rather than treating this as an absence of history."
+                )
+            ),
         }
 
     successful_runs = [r for r in records if r[0] == 0]
@@ -325,10 +374,9 @@ def _query_failed_attempts(filters: dict[str, t.Any]) -> dict[str, t.Any]:
             "attributes.exit_status": {"!=": 0},
         }
         if workflow_type:
-            process_label = (
-                workflow_type.split(":")[-1] if ":" in workflow_type else workflow_type
-            )
-            filters_dict["attributes.process_label"] = process_label
+            filters_dict["attributes.process_label"] = _resolve_process_label(
+                workflow_type
+            )[0]
 
         qb.append(
             orm.WorkChainNode,

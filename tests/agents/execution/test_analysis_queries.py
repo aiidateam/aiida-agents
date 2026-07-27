@@ -69,15 +69,29 @@ class TestAnalysisQueriesEdgeCases:
     """Verify behavior on empty results and unknown filters."""
 
     def test_query_past_workflows_empty_results(self) -> None:
-        """Querying a workflow without historical data should return count=0 cleanly without errors."""
+        """A workflow with no matching runs returns the full shape, not an error.
+
+        The workflow named here is not installed, so it exercises the
+        no-matches path. This test owns the *structural* contract -- every
+        statistics key present, defaults filled in, nothing raised -- so a
+        caller can read the result without branching.
+
+        What the note should *say* in that situation is asserted by
+        ``TestEntryPointSpellingsAllFindTheSameRuns`` instead. It used to be
+        checked here as "Using defaults", which encoded the very conflation
+        that hid a real bug: an unregistered name and a registered workflow
+        with no history are different facts and were reported identically.
+        """
         res = query_analysis_agent(
             query_type="past_successful_workflows",
             filters={"workflow_type": "aiida.workflows:ExoticWorkChain"},
         )
         assert res["query_type"] == "past_successful_workflows"
         assert res["count"] == 0
-        assert "note" in res
-        assert "Using defaults" in res["note"]
+        assert res["success_rate"] == 0.0
+        assert res["median_ecutwfc"] is None
+        assert res["common_parameters"] == {}
+        assert res["note"]
         assert "structure_type_filter_note" in res
 
     def test_query_available_codes_empty_results(self) -> None:
@@ -89,3 +103,61 @@ class TestAnalysisQueriesEdgeCases:
         assert res["query_type"] == "available_codes"
         assert isinstance(res["codes"], list)
         assert len(res["codes"]) == 0
+
+
+class TestEntryPointSpellingsAllFindTheSameRuns:
+    """A workflow's history must be found however the agent names the workflow.
+
+    Regression from executing the scenarios in ``docs/gsoc/agent-scenarios.md``
+    against real nodes. Nodes store ``process_label`` as the class name, but the
+    lookup derived it with ``workflow_type.split(":")[-1]``, which only works
+    for the legacy ``aiida.workflows:PwRelaxWorkChain`` spelling used in the
+    prompt's examples. ``list_workflows()`` hands the agent modern entry points
+    (``core.arithmetic.multiply_add``), which have no colon, were passed through
+    whole, and matched nothing.
+
+    The result was silent: "No prior runs of this workflow found. Using
+    defaults." on a database containing them, so the agent built inputs
+    believing there was no history to draw on.
+    """
+
+    @pytest.mark.parametrize(
+        "workflow_type",
+        [
+            "core.arithmetic.multiply_add",  # what list_workflows() reports
+            "aiida.workflows:core.arithmetic.multiply_add",  # what process_type stores
+            "MultiplyAddWorkChain",  # the class name itself
+        ],
+    )
+    def test_every_spelling_finds_the_run(
+        self,
+        multiply_add_workchain: Any,
+        workflow_type: str,
+    ) -> None:
+        res = query_analysis_agent(
+            query_type="past_successful_workflows",
+            filters={"workflow_type": workflow_type},
+        )
+
+        assert res["count"] >= 1, (
+            f"{workflow_type!r} found no runs of "
+            f"{multiply_add_workchain.process_label!r}; note was: {res.get('note')!r}"
+        )
+        assert res["success_rate"] > 0
+
+    def test_unresolvable_workflow_says_so_instead_of_claiming_no_history(
+        self,
+    ) -> None:
+        """An unregistered name must not be reported as "no prior runs".
+
+        The two are different facts and lead the agent to different actions:
+        one means proceed with defaults, the other means the request itself was
+        wrong. Conflating them is what made the original bug invisible.
+        """
+        res = query_analysis_agent(
+            query_type="past_successful_workflows",
+            filters={"workflow_type": "definitely.not.installed"},
+        )
+
+        assert res["count"] == 0
+        assert "not a registered entry point" in res["note"]
