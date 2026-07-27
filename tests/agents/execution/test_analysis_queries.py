@@ -161,3 +161,127 @@ class TestEntryPointSpellingsAllFindTheSameRuns:
 
         assert res["count"] == 0
         assert "not a registered entry point" in res["note"]
+
+
+class TestNestedWorkflowParametersAreFound:
+    """Statistics must come from nested ports, not only top-level ones.
+
+    Found by running this tool against a real database. It matched three real
+    successful ``PwRelaxWorkChain`` runs and still reported
+    ``median_ecutwfc: None`` for all of them, which reads as "no historical
+    data" rather than "we looked in the wrong place".
+
+    AiiDA stores a nested port in a flat link label joined by ``__``, and
+    ``node.inputs`` rebuilds the nesting from those labels -- so
+    ``"parameters" in node.inputs`` asks only about a top-level port.
+    ``PwRelaxWorkChain`` puts its Quantum ESPRESSO settings at
+    ``base.pw.parameters``, so the check was always False and both statistics
+    were silently skipped for exactly the workflows this tool summarises.
+
+    Built here rather than tested against aiida-quantumespresso so the shape is
+    pinned in CI without that plugin installed.
+    """
+
+    @staticmethod
+    def _finished_workchain(label: str, inputs: dict[str, Any]) -> Any:
+        """A stored, finished WorkChainNode with the given input link labels."""
+        from aiida import orm
+        from aiida.common.links import LinkType
+        from aiida.engine import ProcessState
+
+        node = orm.WorkChainNode()
+        node.base.attributes.set("process_label", label)
+        for link_label, source in inputs.items():
+            node.base.links.add_incoming(
+                source, link_type=LinkType.INPUT_WORK, link_label=link_label
+            )
+        node.store()
+        node.set_process_state(ProcessState.FINISHED)
+        node.set_exit_status(0)
+        node.seal()
+        return node
+
+    def test_cutoff_nested_under_a_subnamespace_is_found(self) -> None:
+        from aiida import orm
+
+        params = orm.Dict({"SYSTEM": {"ecutwfc": 60.0}}).store()
+        spacing = orm.Float(0.15).store()
+        self._finished_workchain(
+            "NestedParamsWorkChain",
+            {"base__pw__parameters": params, "base__kpoints_distance": spacing},
+        )
+
+        res = query_analysis_agent(
+            query_type="past_successful_workflows",
+            filters={"workflow_type": "NestedParamsWorkChain"},
+        )
+
+        assert res["count"] == 1
+        assert res["median_ecutwfc"] == 60.0
+        assert res["median_kpoints_distance"] == 0.15
+        assert res["common_parameters"] == {"ecutwfc": 60.0}
+
+    def test_top_level_ports_still_work(self) -> None:
+        """The flat case must not regress -- some workflows really are flat."""
+        from aiida import orm
+
+        params = orm.Dict({"SYSTEM": {"ecutwfc": 45.0}}).store()
+        self._finished_workchain(
+            "FlatParamsWorkChain",
+            {"parameters": params, "kpoints_distance": orm.Float(0.3).store()},
+        )
+
+        res = query_analysis_agent(
+            query_type="past_successful_workflows",
+            filters={"workflow_type": "FlatParamsWorkChain"},
+        )
+
+        assert res["median_ecutwfc"] == 45.0
+        assert res["median_kpoints_distance"] == 0.3
+
+    def test_lowercase_system_card_is_accepted(self) -> None:
+        """QE input is case-insensitive about card names; plugins use both."""
+        from aiida import orm
+
+        self._finished_workchain(
+            "LowerCardWorkChain",
+            {"base__pw__parameters": orm.Dict({"system": {"ecutwfc": 80.0}}).store()},
+        )
+
+        res = query_analysis_agent(
+            query_type="past_successful_workflows",
+            filters={"workflow_type": "LowerCardWorkChain"},
+        )
+
+        assert res["median_ecutwfc"] == 80.0
+
+    def test_several_namespaces_contribute_the_most_demanding_setting(self) -> None:
+        """One value per run: a multi-step workflow sets the port more than once.
+
+        PwBands has scf__pw__parameters and bands__pw__parameters, which can
+        differ. Taking the highest cutoff (and the densest mesh) keeps one
+        value per run and reports the setting that governed its hardest step --
+        the safer number for the agent to reuse.
+        """
+        from aiida import orm
+
+        self._finished_workchain(
+            "MultiStepWorkChain",
+            {
+                "scf__pw__parameters": orm.Dict({"SYSTEM": {"ecutwfc": 40.0}}).store(),
+                "bands__pw__parameters": orm.Dict(
+                    {"SYSTEM": {"ecutwfc": 90.0}}
+                ).store(),
+                "scf__kpoints_distance": orm.Float(0.4).store(),
+                "bands__kpoints_distance": orm.Float(0.1).store(),
+            },
+        )
+
+        res = query_analysis_agent(
+            query_type="past_successful_workflows",
+            filters={"workflow_type": "MultiStepWorkChain"},
+        )
+
+        assert res["count"] == 1
+        assert res["median_ecutwfc"] == 90.0
+        assert res["median_kpoints_distance"] == 0.1

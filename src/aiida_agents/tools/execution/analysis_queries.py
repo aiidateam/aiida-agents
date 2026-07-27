@@ -10,11 +10,68 @@ from __future__ import annotations
 import logging
 import typing as t
 
+from aiida.engine.processes.ports import PORT_NAMESPACE_SEPARATOR
 from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
 __all__ = ["query_analysis_agent"]
+
+
+def _inputs_named(node: t.Any, port_name: str) -> t.Iterator[t.Any]:
+    """Input nodes bound to ``port_name``, at any namespace depth.
+
+    AiiDA stores a nested port in a *flat* link label joined by
+    ``PORT_NAMESPACE_SEPARATOR`` (``__``), and ``node.inputs`` rebuilds the
+    nesting from those labels. So ``"parameters" in node.inputs`` asks only
+    about a *top-level* port, and a workchain that nests its Quantum ESPRESSO
+    settings -- ``PwRelaxWorkChain`` puts them at ``base.pw.parameters``, and
+    every other PW-based workflow does something similar -- answers False.
+
+    That silently skipped the statistics for exactly the workflows this tool
+    exists to summarise: the caller matched real successful runs and then
+    reported ``median_ecutwfc: None`` for all of them, which reads as "no
+    historical data" rather than "we looked in the wrong place".
+
+    Matching the link label instead works at any depth and for any workflow,
+    without hardcoding one plugin's namespace layout.
+
+    Args:
+        node: The process node to inspect.
+        port_name: The leaf port name, e.g. ``"parameters"``.
+
+    Yields:
+        Each input node bound to that port, in link-label order.
+    """
+    for link in sorted(
+        node.base.links.get_incoming().all(), key=lambda entry: entry.link_label
+    ):
+        label = link.link_label
+        if label == port_name or label.endswith(
+            f"{PORT_NAMESPACE_SEPARATOR}{port_name}"
+        ):
+            yield link.node
+
+
+def _ecutwfc_of(params: t.Any) -> float | None:
+    """The wavefunction cutoff in a parameters Dict, or None if absent.
+
+    Quantum ESPRESSO's own input is case-insensitive about card names and
+    AiiDA plugins have used both spellings, so accept either.
+    """
+    try:
+        content = params.get_dict()
+    except AttributeError:  # not a Dict -- some other node on a `parameters` port
+        return None
+
+    for card in ("SYSTEM", "system"):
+        section = content.get(card)
+        if isinstance(section, dict) and "ecutwfc" in section:
+            try:
+                return float(section["ecutwfc"])
+            except (TypeError, ValueError):
+                return None
+    return None
 
 
 def _resolve_process_label(workflow_type: str) -> tuple[str, bool]:
@@ -248,14 +305,26 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
                         example_structs.append(formula)
                 except Exception as exc:
                     logger.debug("Could not read formula for node %s: %s", row[1], exc)
-            if "parameters" in node.inputs:
-                params_dict = node.inputs.parameters.get_dict()
-                if "SYSTEM" in params_dict and "ecutwfc" in params_dict["SYSTEM"]:
-                    ecutwfc_vals.append(float(params_dict["SYSTEM"]["ecutwfc"]))
-                elif "system" in params_dict and "ecutwfc" in params_dict["system"]:
-                    ecutwfc_vals.append(float(params_dict["system"]["ecutwfc"]))
-            if "kpoints_distance" in node.inputs:
-                kpoints_vals.append(float(node.inputs.kpoints_distance.value))
+            # A run may set the same port in several sub-namespaces (PwBands
+            # has scf__pw__parameters and bands__pw__parameters, which can
+            # differ). Contribute one value per run, taking the most demanding
+            # setting: it governs the run's hardest step and is the safer
+            # number to reuse.
+            cutoffs = [
+                value
+                for params in _inputs_named(node, "parameters")
+                if (value := _ecutwfc_of(params)) is not None
+            ]
+            if cutoffs:
+                ecutwfc_vals.append(max(cutoffs))
+
+            spacings = [
+                float(spacing.value)
+                for spacing in _inputs_named(node, "kpoints_distance")
+                if hasattr(spacing, "value")
+            ]
+            if spacings:
+                kpoints_vals.append(min(spacings))  # denser mesh = more demanding
         except Exception as exc:
             logger.debug("Could not inspect parameters for node %s: %s", row[1], exc)
 
