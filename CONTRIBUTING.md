@@ -19,7 +19,7 @@ uv run pre-commit install     # install git hooks (pre-commit + commit-msg)
 | Run all checks | `uv run pre-commit run --all-files` | before pushing / opening a PR |
 | Run one check | `uv run pre-commit run ruff --all-files` | iterating on a single hook (`ruff`, `mypy`, `mdformat`, `uv-lock`, …) |
 | Run tests | `uv run pytest` | while developing |
-| Run grounding evals | `AIIDA_AGENTS_EVAL=1 uv run pytest tests/evals -m llm` | after touching a system prompt or the RAG pipeline |
+| Run grounding evals | `AIIDA_AGENTS_EVAL=1 uv run pytest tests/evals -m llm` | after touching a system prompt, the router, or the RAG pipeline |
 | Type-check only | `uv run mypy` | iterating on types (also runs in pre-commit) |
 | Build docs | `cd docs && uv run myst build` | checking docs render |
 | Serve docs live | `cd docs && uv run myst start` | writing docs |

@@ -211,3 +211,53 @@ class TestMissingIndexIsReportedNotPaperedOver:
             "agent answered a docs question with no index instead of saying it "
             f"could not look it up:\n{trace.answer}"
         )
+
+
+class TestRoutingPicksTheRightSpecialist:
+    """Whether a real model routes well -- the one thing only a model can answer.
+
+    The unit tests in ``tests/agents/router`` pin the parsing and the fallback;
+    they cannot tell you whether "relax this structure" reads as execution to
+    an actual model. ADR-09 makes mis-routing an accepted failure mode on the
+    grounds that it is measurable, and this is the measurement.
+    """
+
+    @pytest.mark.parametrize(
+        "question,expected",
+        [
+            # Unambiguously execution: something is to be run or set up.
+            ("relax the silicon structure at pk 512", "execution"),
+            ("what workflows can I run?", "execution"),
+            ("submit a band structure calculation", "execution"),
+            # Asked in order to configure a run, and the historical-statistics
+            # tool lives on execution.
+            ("what ecutwfc did my successful relaxations use?", "execution"),
+            # Unambiguously analysis: about data that already exists.
+            ("how many workchains finished successfully?", "analysis"),
+            ("why did pk 1234 fail?", "analysis"),
+            ("show me the structures with the highest band gap", "analysis"),
+            ("what is a CalcJobNode?", "analysis"),
+        ],
+    )
+    def test_request_routes_to_the_expected_specialist(
+        self, question: str, expected: str
+    ) -> None:
+        from aiida_agents.agents.router import route
+
+        chosen = route(question)
+        logger.info("routed %r -> %s (expected %s)", question, chosen, expected)
+        assert chosen == expected
+
+    def test_a_mixed_request_routes_to_the_read_only_specialist(self) -> None:
+        """ "Diagnose then resubmit" must not jump straight to submitting.
+
+        Until multi-step coordination exists, the honest handling of a mixed
+        request is the half that has to happen first -- and the half that
+        cannot write. Routing it to execution would offer a resubmission before
+        the user has been shown a reason for one.
+        """
+        from aiida_agents.agents.router import route
+
+        chosen = route("why did pk 1234 fail, and resubmit it with a longer wallclock")
+        logger.info("routed the mixed request -> %s", chosen)
+        assert chosen == "analysis"

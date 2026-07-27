@@ -18,7 +18,12 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents._settings import ModelSettings, ReplSettings
-from aiida_agents.cli.agent import _AGENT_CHOICES, _build_agent, ask
+from aiida_agents.cli.agent import (
+    _AGENT_CHOICES,
+    _build_agent,
+    _resolve_agent_type,
+    ask,
+)
 from aiida_agents.cli.hitl import _handle_deferred
 from aiida_agents.cli.output import (
     _format_duration,
@@ -188,14 +193,25 @@ def _run_repl(
     repl_cfg = ReplSettings()
     session = _make_session(repl_cfg)
 
+    banner = (
+        "AiiDA Agents (auto-routing)"
+        if agent_type == "auto"
+        else f"AiiDA {agent_type.capitalize()} Agent"
+    )
     click.echo(
-        f"AiiDA {agent_type.capitalize()} Agent [{settings.provider}:{settings.model}] - "
+        f"{banner} [{settings.provider}:{settings.model}] - "
         "type 'quit' to exit, '/clear' to start a new conversation, "
-        "'/agent [analysis|execution]' to switch agent, "
+        "'/agent [auto|analysis|execution]' to switch agent, "
         "Ctrl+Enter (or Esc then Enter) for a new line\n"
     )
 
-    history: list[ModelMessage] = []
+    # In auto mode each specialist keeps its own conversation and its own agent,
+    # built on first use. Their tool sets differ, so replaying one's history to
+    # the other would reference tools it does not have. Carrying context *across*
+    # specialists is the next increment (ADR-09); until then a routed switch
+    # starts that specialist where it last left off, not mid-thread on another.
+    agents: dict[str, Agent] = {} if agent_type == "auto" else {agent_type: agent}
+    histories: dict[str, list[ModelMessage]] = {}
     while True:
         # Ctrl-C aborts the current line (like a shell); Ctrl-D at an empty
         # prompt exits. prompt_toolkit raises KeyboardInterrupt / EOFError.
@@ -215,19 +231,28 @@ def _run_repl(
         if question.lower() in ("quit", "exit", "q"):
             break
         if question.lower() == "/clear":
-            history = []
+            histories.clear()
             click.echo("Conversation cleared.\n")
             continue
         if question.lower().startswith("/agent"):
             requested = _parse_agent_switch(question, agent_type)
             if requested is not None and requested != agent_type:
                 agent_type = requested
-                agent = _build_agent(settings, profile, agent_type)
-                history = []
-                click.echo(
-                    f"Switched to {agent_type.capitalize()} Agent. "
-                    "Conversation cleared.\n"
+                agents.clear()
+                histories.clear()
+                if agent_type != "auto":
+                    agents[agent_type] = _build_agent(settings, profile, agent_type)
+                label = (
+                    "auto-routing"
+                    if agent_type == "auto"
+                    else f"{agent_type.capitalize()} Agent"
                 )
+                click.echo(f"Switched to {label}. Conversation cleared.\n")
             continue
 
-        history = _run_turn(agent, question, history, repl_cfg)
+        active = _resolve_agent_type(agent_type, question, settings)
+        if active not in agents:
+            agents[active] = _build_agent(settings, profile, active)
+        histories[active] = _run_turn(
+            agents[active], question, histories.get(active, []), repl_cfg
+        )

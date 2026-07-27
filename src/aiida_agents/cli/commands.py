@@ -31,6 +31,7 @@ from aiida_agents.cli.output import (
 from aiida_agents.cli.rag import rag
 from aiida_agents.cli.repl import _run_repl
 from aiida_agents.cli.agent import (
+    _resolve_agent_type,
     _AGENT_CHOICES,
     _build_agent,
     _check_reachable,
@@ -64,9 +65,12 @@ _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
     "--agent",
     "-a",
     type=click.Choice(_AGENT_CHOICES, case_sensitive=False),
-    default="analysis",
+    default="auto",
     show_default=True,
-    help="Which agent to run for `chat` / `ask` (switch mid-session with `/agent`).",
+    help=(
+        "Which agent runs `chat` / `ask`. `auto` routes each request to a "
+        "specialist; naming one overrides that (switch mid-session with `/agent`)."
+    ),
 )
 @click.pass_context
 def cli(
@@ -117,7 +121,8 @@ def chat(ctx: click.Context) -> None:  # pragma: no cover
 def ask_cmd(ctx: click.Context, question: str, raw: bool) -> None:
     """Answer a single question and exit (one-shot)."""
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
-    agent = _build_agent(settings, ctx.obj["profile"], ctx.obj["agent"])
+    agent_type = _resolve_agent_type(ctx.obj["agent"], question, settings)
+    agent = _build_agent(settings, ctx.obj["profile"], agent_type)
     try:
         result = asyncio.run(ask(agent, question))
     except KeyboardInterrupt:

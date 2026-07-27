@@ -21,15 +21,21 @@ from typing_extensions import assert_never
 
 from aiida_agents._settings import ModelSettings, _Provider, _format_validation_error
 from aiida_agents.cli.ollama import _ensure_ollama_model, _ollama_pull
-from aiida_agents.cli.output import _trace_tool_calls
+from aiida_agents.cli.output import _trace_tool_calls, console
 
 logger = logging.getLogger(__name__)
 
-# The agents the CLI can launch. ``analysis`` (read-only exploration) is the
-# default; ``execution`` adds the workflow generate/validate/submit pipeline.
+# The agents the CLI can launch. ``analysis`` (read-only exploration) and
+# ``execution`` (the workflow generate/validate/submit pipeline) are the two
+# specialists; ``auto`` (the default) picks between them per request with the
+# router (ADR-09), so a user need not know the taxonomy. Naming a specialist
+# explicitly overrides the router.
 # The tuple is the single source for the ``--agent`` choice and the REPL's
 # ``/agent`` switch, so the two never drift apart.
-_AGENT_CHOICES = ("analysis", "execution")
+_AGENT_CHOICES = ("auto", "analysis", "execution")
+#: The specialists a request can actually be run by -- ``auto`` is a decision,
+#: not an agent, so it is never passed to ``get_agent``.
+_SPECIALISTS = ("analysis", "execution")
 
 # Colored status glyphs so ``check`` marks success/failure the same green/red as
 # ``doctor`` (which renders its rows through rich). ``click.echo`` strips the
@@ -97,13 +103,22 @@ def _build_agent(
 
     ``agent_type`` selects which agent to build (``"analysis"`` or
     ``"execution"``); the value is already constrained by the ``--agent`` choice
-    and the REPL's ``/agent`` switch. The aiida / agent-stack imports stay local
+    and the REPL's ``/agent`` switch. ``"auto"`` is a routing decision rather
+    than an agent, so callers resolve it with :func:`_resolve_agent_type`
+    before getting here. The aiida / agent-stack imports stay local
     so ``--help`` and shell completion don't pay for loading AiiDA. Expected
     configuration failures are surfaced as clean CLI errors instead of a
     traceback.
     """
     from aiida import load_profile
     from aiida_agents.agents import get_agent
+
+    if agent_type not in _SPECIALISTS:
+        msg = (
+            f"{agent_type!r} is not a runnable agent. Resolve it with "
+            "_resolve_agent_type() first."
+        )
+        raise ValueError(msg)
 
     try:
         _ensure_ollama_model(settings)
@@ -267,3 +282,26 @@ def _diagnose_probe_failure(settings: ModelSettings, exc: Exception) -> None:
         )
         return
     click.echo(f"{_FAIL} {exc}", err=True)
+
+
+def _resolve_agent_type(
+    agent_type: str, question: str, settings: ModelSettings
+) -> str:  # pragma: no cover
+    """Turn the ``--agent`` value into the specialist that will run this request.
+
+    ``auto`` asks the router (ADR-09); an explicitly named specialist is
+    honoured as given, so ``-a execution`` remains a way to bypass routing --
+    for debugging, and for a user who already knows what they want.
+
+    The choice is echoed rather than made silently: which specialist answered
+    changes what the answer can be, and a router that has quietly stopped
+    routing should be visible in the output, not inferred from odd replies.
+    """
+    if agent_type != "auto":
+        return agent_type
+
+    from aiida_agents.agents.router import route
+
+    chosen = route(question, settings)
+    console.print(f"[dim]→ {chosen} agent[/dim]")
+    return chosen
