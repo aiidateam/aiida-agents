@@ -1,8 +1,17 @@
-"""Interface to Analysis Agent capabilities.
+"""What this profile already contains, for the run the agent is about to set up.
 
-Execution Agent calls query_analysis_agent() to ask Analysis Agent about
-past successful runs, available codes, failure patterns, etc. This decouples
-Execution Agent from Analysis Agent's implementation.
+Answers four questions about the active AiiDA database and its configuration:
+what past runs of a workflow looked like, what codes are installed, how similar
+attempts failed, and which pseudopotential families are available. The
+Execution agent asks before building inputs, so a new run can start from values
+that have actually worked here rather than from a guess.
+
+Named ``query_analysis_agent`` until ADR-09, with a docstring claiming it asked
+the Analysis agent. It never did -- it runs ``QueryBuilder`` queries directly,
+in this process. That name cost real time twice: it implied a delegation that
+would have owned the lookup logic, so two bugs *in* this module (an entry-point
+form that matched nothing, and statistics read only from top-level ports) were
+each looked for somewhere else first. The module is now named for what it does.
 """
 
 from __future__ import annotations
@@ -15,7 +24,24 @@ from pydantic import Field
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["query_analysis_agent"]
+__all__ = ["query_run_context"]
+
+#: Units for the statistics this module reports, returned alongside the values.
+#:
+#: A bare number invites the caller to supply a unit, and a model asked for a
+#: cutoff has done exactly that -- correctly ("Ry") twice and wrongly ("eV")
+#: once, a factor-of-twenty error in a value someone would run a calculation
+#: with. The tool knows the unit and the caller does not, so the tool says it.
+#:
+#: Both are grounded rather than assumed. ``ecutwfc`` is read out of a Quantum
+#: ESPRESSO ``SYSTEM`` card, where QE's own input format defines it in Rydberg.
+#: ``kpoints_distance`` is aiida-quantumespresso's port, documented as a
+#: reciprocal-space distance in 1/Angstrom -- named as that plugin's convention
+#: because a different plugin could define a port of the same name otherwise.
+_UNITS = {
+    "ecutwfc": "Ry",
+    "kpoints_distance": "1/A (aiida-quantumespresso convention)",
+}
 
 
 def _inputs_named(node: t.Any, port_name: str) -> t.Iterator[t.Any]:
@@ -138,6 +164,9 @@ class PastWorkflowSummary(t.TypedDict, total=False):
     example_structures: list[str]
     """Sample structure formulas"""
 
+    units: dict[str, str]
+    """Unit of each reported quantity -- state these, never infer one"""
+
 
 class AvailableCodeInfo(t.TypedDict, total=False):
     """Information about available computation codes."""
@@ -152,7 +181,7 @@ class AvailableCodeInfo(t.TypedDict, total=False):
     """Any caveats or notes"""
 
 
-def query_analysis_agent(
+def query_run_context(
     query_type: t.Annotated[
         str,
         Field(
@@ -178,7 +207,7 @@ def query_analysis_agent(
 
     This tool provides loose coupling between Execution Agent and Analysis Agent.
     Instead of Execution Agent importing Analysis Agent's tools directly, it calls
-    query_analysis_agent() and gets back structured context.
+    query_run_context() and gets back structured context.
 
     The Execution Agent uses this context to:
     1. Learn what parameters worked for similar structures in the past.
@@ -197,7 +226,7 @@ def query_analysis_agent(
         filters = {}
 
     logger.debug(
-        "query_analysis_agent(query_type=%r, filters=%r)",
+        "query_run_context(query_type=%r, filters=%r)",
         query_type,
         filters,
     )
@@ -271,6 +300,7 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
             "success_rate": 0.0,
             "median_ecutwfc": None,
             "median_kpoints_distance": None,
+            "units": _UNITS,
             "common_parameters": {},
             "common_failure_modes": [],
             "example_structures": [],
@@ -354,6 +384,7 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
         "success_rate": success_rate,
         "median_ecutwfc": med_ecutwfc,
         "median_kpoints_distance": med_kpoints,
+        "units": _UNITS,
         "common_parameters": {"ecutwfc": med_ecutwfc} if med_ecutwfc else {},
         "common_failure_modes": list(set(failure_modes))[:3],
         "example_structures": example_structs,

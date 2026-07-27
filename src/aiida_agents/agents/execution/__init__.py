@@ -13,7 +13,7 @@ from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
 
-from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
+from aiida_agents.tools.execution.run_context import query_run_context
 from aiida_agents.tools.execution.codes import list_codes
 from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
 from aiida_agents.tools.execution.protocol import build_workflow_inputs
@@ -24,7 +24,7 @@ from aiida_agents.rag import search_aiida_docs
 
 # Read-only tools: wrapped by RetryOnToolError so tool failures become ModelRetry
 _READ_TOOLS: list[Any] = [
-    query_analysis_agent,  # Query the AiiDA database for context (read-only)
+    query_run_context,  # Query the AiiDA database for context (read-only)
     list_workflows,  # Discover registered workflow and calculation entry points (read-only)
     describe_workflow,  # Inspect process schema, ports, defaults, and exit codes (read-only)
     build_workflow_inputs,  # Pre-populate inputs from a protocol builder (read-only)
@@ -47,7 +47,7 @@ def get_agent(
     """Build and return the Execution Agent.
 
     The Execution Agent:
-    1. Queries the AiiDA database for context on past runs (query_analysis_agent)
+    1. Queries the AiiDA database for context on past runs (query_run_context)
     2. Discovers installed workflow and calculation entry points (list_workflows)
     3. Introspects process schemas, required/optional ports, and exit codes (describe_workflow)
     4. Pre-populates inputs from a protocol builder when one exists (build_workflow_inputs)
@@ -67,7 +67,7 @@ def get_agent(
 
     Step 7 is why ``get_process_status`` is shared rather than Analysis-owned:
     "did the job I just started actually launch?" is part of submitting, and
-    routing a single pk lookup through ``query_analysis_agent`` would spend a
+    routing a single pk lookup through ``query_run_context`` would spend a
     whole extra agent run on it.
 
     All read tools are wrapped by RetryOnToolError so tool failures

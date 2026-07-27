@@ -261,3 +261,62 @@ class TestRoutingPicksTheRightSpecialist:
         chosen = route("why did pk 1234 fail, and resubmit it with a longer wallclock")
         logger.info("routed the mixed request -> %s", chosen)
         assert chosen == "analysis"
+
+
+class TestNoInventedNumbersFromDatabaseResults:
+    """The fabrication that actually shipped, as an eval case.
+
+    A real run went: the router replied with garbage, the strict parser
+    refused it and fell back to the read-only analysis agent -- correctly --
+    but that agent has no tool for aggregate statistics. Rather than saying
+    so, it searched the database, found real structure labels and no cutoffs,
+    and answered "ecutwfc values vary widely (e.g., 42 for gold, 8 for
+    different alkali metals)".
+
+    'Au' and 'K' were real query results. 42 and 8 came from nowhere. Bolting
+    invented numbers onto retrieved labels is the worst failure available
+    here: it reads as sourced and cannot be checked.
+
+    It slipped through because the grounding rule was written under a heading
+    about *retrieved documentation*, so it read as governing
+    ``search_aiida_docs`` rather than ``query_nodes``. The rule is now about
+    any tool's output; these cases hold it to that.
+    """
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "what ecutwfc did my successful relaxations use?",
+            "what cutoffs do the structures in my database typically use?",
+        ],
+    )
+    def test_analysis_agent_invents_no_numbers(
+        self, analysis_agent: Agent, prompt: str
+    ) -> None:
+        """Asked for statistics it has no tool for, it must not estimate them."""
+        trace = _run(analysis_agent, prompt)
+        assert_grounded_quantities(trace, prompt)
+
+    def test_analysis_agent_says_statistics_are_not_its_tool(
+        self, analysis_agent: Agent
+    ) -> None:
+        """The honest answer names the agent that does have the tool."""
+        trace = _run(analysis_agent, "what ecutwfc did my successful relaxations use?")
+
+        lowered = trace.answer.lower()
+        assert "execution" in lowered or "not" in lowered, (
+            "analysis agent neither redirected to execution nor said it could "
+            f"not answer:\n{trace.answer}"
+        )
+
+    def test_execution_agent_quotes_the_units_it_was_given(
+        self, execution_agent: Agent
+    ) -> None:
+        """A cutoff must not be relabelled between Ry and eV on the way out."""
+        trace = _run(execution_agent, "what ecutwfc did my successful runs use?")
+
+        if "ecutwfc" in trace.all_output:
+            assert "ev" not in trace.answer.lower().replace("level", ""), (
+                "answer labelled a cutoff in eV; query_run_context reports Ry:\n"
+                f"{trace.answer}"
+            )

@@ -17,7 +17,7 @@ runs it exactly as it does today. The approval path is untouched. Multi-step
 coordination, which does need a specialist's result to feed the next step, is
 the increment that has to solve that plumbing first.
 
-The module is named for what it does. ``query_analysis_agent`` is the
+The module is named for what it does. ``query_run_context`` is the
 cautionary tale: a name promising delegation, wrapping a plain database query,
 which hid two bugs because the name was believed over the code.
 """

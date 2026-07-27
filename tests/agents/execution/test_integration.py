@@ -9,7 +9,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents.agents.execution import get_agent
-from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
+from aiida_agents.tools.execution.run_context import query_run_context
 from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
 from aiida_agents.tools.execution.schemas import WorkflowSpec
 from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
@@ -21,7 +21,7 @@ class TestFullWorkflowIntegration:
     def test_full_successful_workflow_discovery_and_describe(self) -> None:
         """Agent discovery workflow: query context → list workflows → describe specific workflow."""
         # Step 1: Query for context
-        context = query_analysis_agent(
+        context = query_run_context(
             query_type="past_successful_workflows",
             filters={
                 "workflow_type": "core.arithmetic.multiply_add",
@@ -95,7 +95,7 @@ class TestFullWorkflowIntegration:
 
 
 EXPECTED_EXECUTION_TOOLS = {
-    "query_analysis_agent",
+    "query_run_context",
     "list_workflows",
     "describe_workflow",
     "build_workflow_inputs",

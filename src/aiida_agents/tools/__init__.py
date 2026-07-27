@@ -20,7 +20,7 @@ query_nodes, get_node_inputs, get_node_outputs, search_structures
     Analysis agent's read-only AiiDA query tools (``tools/analysis/``), safe to
     register on an agent or expose over MCP.
 list_workflows, describe_workflow, build_workflow_inputs, list_codes,
-query_analysis_agent
+query_run_context
     Execution agent's read-only tools (``tools/execution/``): entry-point and
     ``Process.spec()`` introspection, protocol-based input pre-population,
     installed-code discovery, and historical context from the Analysis agent.
@@ -47,7 +47,7 @@ from aiida_agents.tools.execution import (
     build_workflow_inputs,
     describe_workflow,
     list_workflows,
-    query_analysis_agent,
+    query_run_context,
 )
 from aiida_agents.tools.execution.codes import list_codes
 
@@ -63,7 +63,7 @@ __all__ = [
     "list_processes",
     "list_retrieved_files",
     "list_workflows",
-    "query_analysis_agent",
+    "query_run_context",
     "query_nodes",
     "search_structures",
 ]

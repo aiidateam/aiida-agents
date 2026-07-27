@@ -181,7 +181,7 @@ def build_workflow_inputs(
     ``inputs`` by hand whenever ``describe_workflow`` reports
     ``has_protocol_builder: true``: start from the returned spec and adjust
     only the handful of parameters that genuinely need it (per
-    ``query_analysis_agent``'s historical context, say), rather than
+    ``query_run_context``'s historical context, say), rather than
     inventing the full input tree.
 
     Args:

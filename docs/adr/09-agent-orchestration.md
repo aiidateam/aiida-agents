@@ -12,8 +12,9 @@ The CLI selects the agent with `--agent` / `-a`, and `/agent` switches mid-sessi
 Every request is already routed; the open question is only whether a model can make that choice instead of the user.
 
 **No agent has ever called another agent.**
-`tools/execution/analysis_queries.py` is named `query_analysis_agent` and its docstring says the Execution agent uses it "to ask Analysis Agent about past successful runs".
-It does not: it runs `QueryBuilder` queries directly.
+`tools/execution/analysis_queries.py` exposed `query_analysis_agent`, whose docstring said the Execution agent used it "to ask Analysis Agent about past successful runs".
+It did not: it runs `QueryBuilder` queries directly, in this process.
+(It has since been renamed to `query_run_context`, as this ADR decides below.)
 ADR-04 left "A2A vs. plain function calls" to be "decided empirically", and there has been no empirical input — only an artifact whose name implies the question was already settled.
 
 **The constraint that motivated splitting has weakened.**
@@ -41,7 +42,7 @@ Routing also turns out to be lower-risk than assumed.
 The two most ambiguous request classes — status checks and documentation questions — are ones *both* agents can serve, so mis-routing there costs nothing.
 
 Multi-step coordination remains worth building, but as the second increment and on narrower grounds: one scenario needs it (diagnose a failure, then resubmit with the fix), and that scenario is plausibly the most valuable thing the system could do.
-A second candidate — using historical parameters to inform a new submission — turned out to be already served inside Execution by `query_analysis_agent`, which is evidence that some cross-agent needs are better met by a plain tool than by delegation.
+A second candidate — using historical parameters to inform a new submission — turned out to be already served inside Execution by `query_run_context`, which is evidence that some cross-agent needs are better met by a plain tool than by delegation.
 
 ```mermaid
 sequenceDiagram
@@ -69,7 +70,7 @@ Concretely:
 - **Specialists do not call each other.**
   All agent-to-agent traffic goes through the coordinator, so there is one routing path rather than two places for the same bug to live.
   This settles ADR-04's open A2A question in favour of plain in-process function calls: a separate agent-to-agent protocol buys nothing while both specialists run in the same interpreter against the same profile.
-- `query_analysis_agent` is renamed to what it is — a historical-statistics tool over the database — so the naming stops implying a delegation that does not happen.
+- `query_analysis_agent` is renamed `query_run_context` — a query about what this profile already contains — so the naming stops implying a delegation that does not happen.
 - Cap at two specialists.
   Diagnosis stays a tool on Analysis (`get_process_report`) rather than becoming a third agent; the timeline already pairs them as "explore/diagnostic".
 

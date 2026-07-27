@@ -23,7 +23,7 @@ from aiida_agents.tools import (
     list_processes,
     list_retrieved_files,
     list_workflows,
-    query_analysis_agent,
+    query_run_context,
     query_nodes,
     search_structures,
 )
@@ -61,4 +61,4 @@ def register_all(mcp: FastMCP) -> None:
     register_tool(mcp, describe_workflow)
     register_tool(mcp, build_workflow_inputs)
     register_tool(mcp, list_codes)
-    register_tool(mcp, query_analysis_agent)
+    register_tool(mcp, query_run_context)

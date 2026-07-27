@@ -1,19 +1,19 @@
-"""Test suite for query_analysis_agent tool."""
+"""Test suite for query_run_context tool."""
 
 from __future__ import annotations
 
 import pytest
 from typing import Any
 
-from aiida_agents.tools.execution.analysis_queries import query_analysis_agent
+from aiida_agents.tools.execution.run_context import query_run_context
 
 
 class TestAnalysisQueries:
-    """Verify query_analysis_agent queries return expected structure and data."""
+    """Verify query_run_context queries return expected structure and data."""
 
     def test_query_past_workflows_returns_expected_structure(self) -> None:
         """Querying past workflows must return required structured fields."""
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="past_successful_workflows",
             filters={"workflow_type": "PwRelaxWorkChain", "structure_type": "metallic"},
         )
@@ -36,7 +36,7 @@ class TestAnalysisQueries:
         Uses the ``arithmetic_add_code`` session fixture to guarantee at least
         one real code exists in the in-memory test profile.
         """
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="available_codes",
             filters={},
         )
@@ -51,7 +51,7 @@ class TestAnalysisQueries:
 
     def test_query_failed_attempts_structured(self) -> None:
         """Querying failed attempts should return structured failure modes."""
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="failed_attempts",
             filters={"workflow_type": "PwRelaxWorkChain"},
         )
@@ -62,7 +62,7 @@ class TestAnalysisQueries:
     def test_invalid_query_type_raises_error(self) -> None:
         """Unknown query_type must raise ValueError."""
         with pytest.raises(ValueError, match="Unknown query_type"):
-            query_analysis_agent("invalid_query_type", {})
+            query_run_context("invalid_query_type", {})
 
 
 class TestAnalysisQueriesEdgeCases:
@@ -82,7 +82,7 @@ class TestAnalysisQueriesEdgeCases:
         that hid a real bug: an unregistered name and a registered workflow
         with no history are different facts and were reported identically.
         """
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="past_successful_workflows",
             filters={"workflow_type": "aiida.workflows:ExoticWorkChain"},
         )
@@ -96,7 +96,7 @@ class TestAnalysisQueriesEdgeCases:
 
     def test_query_available_codes_empty_results(self) -> None:
         """Querying an unknown code should return an empty codes list."""
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="available_codes",
             filters={"code": "unknown-abinit-code"},
         )
@@ -134,7 +134,7 @@ class TestEntryPointSpellingsAllFindTheSameRuns:
         multiply_add_workchain: Any,
         workflow_type: str,
     ) -> None:
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="past_successful_workflows",
             filters={"workflow_type": workflow_type},
         )
@@ -154,7 +154,7 @@ class TestEntryPointSpellingsAllFindTheSameRuns:
         one means proceed with defaults, the other means the request itself was
         wrong. Conflating them is what made the original bug invisible.
         """
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="past_successful_workflows",
             filters={"workflow_type": "definitely.not.installed"},
         )
@@ -211,7 +211,7 @@ class TestNestedWorkflowParametersAreFound:
             {"base__pw__parameters": params, "base__kpoints_distance": spacing},
         )
 
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="past_successful_workflows",
             filters={"workflow_type": "NestedParamsWorkChain"},
         )
@@ -231,7 +231,7 @@ class TestNestedWorkflowParametersAreFound:
             {"parameters": params, "kpoints_distance": orm.Float(0.3).store()},
         )
 
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="past_successful_workflows",
             filters={"workflow_type": "FlatParamsWorkChain"},
         )
@@ -248,7 +248,7 @@ class TestNestedWorkflowParametersAreFound:
             {"base__pw__parameters": orm.Dict({"system": {"ecutwfc": 80.0}}).store()},
         )
 
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="past_successful_workflows",
             filters={"workflow_type": "LowerCardWorkChain"},
         )
@@ -277,7 +277,7 @@ class TestNestedWorkflowParametersAreFound:
             },
         )
 
-        res = query_analysis_agent(
+        res = query_run_context(
             query_type="past_successful_workflows",
             filters={"workflow_type": "MultiStepWorkChain"},
         )
@@ -285,3 +285,38 @@ class TestNestedWorkflowParametersAreFound:
         assert res["count"] == 1
         assert res["median_ecutwfc"] == 90.0
         assert res["median_kpoints_distance"] == 0.1
+
+
+class TestStatisticsCarryTheirUnits:
+    """A bare number invites the caller to supply a unit, and one did.
+
+    Across three real-model runs the same 60.0 cutoff was reported as "Ry"
+    twice and "eV" once -- a factor-of-twenty error in a value someone would
+    configure a calculation with. The tool knows the unit and the caller does
+    not, so the tool states it rather than leaving a gap for a guess.
+    """
+
+    def test_units_are_reported_alongside_the_values(
+        self, multiply_add_workchain: Any
+    ) -> None:
+        res = query_run_context(
+            query_type="past_successful_workflows",
+            filters={"workflow_type": "MultiplyAddWorkChain"},
+        )
+
+        assert res["units"]["ecutwfc"] == "Ry"
+        assert "1/A" in res["units"]["kpoints_distance"]
+
+    def test_units_are_present_even_when_there_are_no_runs(self) -> None:
+        """The caller must not have to branch on whether data was found.
+
+        An empty result that omits the units invites exactly the improvisation
+        this field exists to prevent, on the next result that does have values.
+        """
+        res = query_run_context(
+            query_type="past_successful_workflows",
+            filters={"workflow_type": "definitely.not.installed"},
+        )
+
+        assert res["count"] == 0
+        assert res["units"]["ecutwfc"] == "Ry"

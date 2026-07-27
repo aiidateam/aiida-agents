@@ -23,7 +23,7 @@ Where a scenario below is wrong or missing, the conclusion it feeds may change.
 | `get_process_report` | `describe_workflow`            |
 | `list_processes`     | `build_workflow_inputs`        |
 | `query_nodes`        | `list_codes`                   |
-| `get_node_inputs`    | `query_analysis_agent`         |
+| `get_node_inputs`    | `query_run_context`            |
 | `get_node_outputs`   | `get_process_status`           |
 | `search_structures`  | `search_aiida_docs`            |
 | `search_aiida_docs`  | `execute_workflow_spec` (HITL) |
@@ -45,7 +45,7 @@ Verdict key — **A**: Analysis alone. **E**: Execution alone. **A→E**: needs 
 | 6   | "What workflows can I run, and what inputs does `PwRelaxWorkChain` need?"         | E             | `list_workflows` then `describe_workflow`.                                                                                                                                        |
 | 7   | "Relax the silicon structure at pk 512."                                          | E             | Full discover → describe → `list_codes` → `build_workflow_inputs` → `execute_workflow_spec` chain.                                                                                |
 | 8   | "Relax the structure in `~/si.cif`."                                              | E             | Adds `import_structure` at the front. Both writes are HITL-gated.                                                                                                                 |
-| 9   | "What `ecutwfc` did my successful Si relaxations use? Use that for this new one." | **E**         | **Already served inside Execution** — `query_analysis_agent` returns `median_ecutwfc`, `median_kpoints_distance`, `common_parameters` and success rate. No Analysis call needed.  |
+| 9   | "What `ecutwfc` did my successful Si relaxations use? Use that for this new one." | **E**         | **Already served inside Execution** — `query_run_context` returns `median_ecutwfc`, `median_kpoints_distance`, `common_parameters` and success rate. No Analysis call needed.     |
 | 10  | "Why did pk 1234 fail, and resubmit it with a longer wallclock."                  | **A→E**       | Diagnosis (`get_process_report`) must inform the resubmission. Not servable today by either agent alone.                                                                          |
 | 11  | "Which of my relaxations failed this week? Resubmit them with a higher cutoff."   | **A→E** + GAP | Cross-agent, and additionally needs iteration over a result set — no tool submits in batch.                                                                                       |
 | 12  | "Compare the final energies of pk 1234 and pk 1240."                              | A             | `get_node_outputs` on both.                                                                                                                                                       |
@@ -66,8 +66,8 @@ Mis-routing there costs nothing.
 The requests where routing genuinely matters (#7, #8 to Execution; #1, #2 to Analysis) are strongly signalled by their own wording.
 
 **4. One of the coordinator's motivating examples is already solved.**
-"Use history to inform a new submission" (#9) is handled inside Execution by `query_analysis_agent`.
-It is misleadingly named — it queries the database rather than the Analysis agent — but the capability is there.
+"Use history to inform a new submission" (#9) is handled inside Execution by `query_run_context` (called `query_analysis_agent` when this exercise was written).
+The old name was misleading — it queries the database rather than the Analysis agent — but the capability was there.
 This weakens the case that cross-agent state-passing is broadly needed: the most common instance of it was already built as a plain tool.
 
 **5. The genuine cross-agent case is diagnose-then-act.**
