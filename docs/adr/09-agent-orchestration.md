@@ -30,13 +30,18 @@ So the orchestrator has to justify itself on capability, not on safety and not o
 
 ## Decision
 
-Build a **coordinator**, not a router.
+Build a coordinator, in two increments: **routing first, multi-step plans second.**
 
-A router picks one specialist per turn.
-That replaces a CLI flag: it costs an extra model round-trip per request and introduces mis-routing as a new failure mode, in exchange for convenience the flag already provides.
+An earlier draft of this ADR argued the reverse — that routing merely automates a CLI flag, and only multi-step coordination justified the layer.
+The scenarios exercise ([`docs/gsoc/agent-scenarios.md`](/docs/gsoc/agent-scenarios.md)) does not support that.
+Of twelve plausible requests, eight are served by a single specialist and two are served equally well by either, so cross-agent coordination is not load-bearing for the common case.
+Routing, by contrast, is needed by all twelve: today every request requires the user to know the agent taxonomy and pass `-a`, and there is no request for which asking them to choose improves the answer.
 
-A coordinator runs a multi-step job **across** specialists, carrying state between them.
-That is capability no flag can provide, and it is what the project's "multi-agent" claim cashes out to.
+Routing also turns out to be lower-risk than assumed.
+The two most ambiguous request classes — status checks and documentation questions — are ones *both* agents can serve, so mis-routing there costs nothing.
+
+Multi-step coordination remains worth building, but as the second increment and on narrower grounds: one scenario needs it (diagnose a failure, then resubmit with the fix), and that scenario is plausibly the most valuable thing the system could do.
+A second candidate — using historical parameters to inform a new submission — turned out to be already served inside Execution by `query_analysis_agent`, which is evidence that some cross-agent needs are better met by a plain tool than by delegation.
 
 ```mermaid
 sequenceDiagram
@@ -96,9 +101,10 @@ The coordinator is a language layer over a system whose safety-critical behaviou
 
 ## Alternatives considered
 
-- **A router that picks one agent per turn.**
-  Rejected as the primary goal: it automates a flag while adding a round-trip and a failure mode.
-  It is, however, the degenerate case of the coordinator — a one-step plan — so nothing here forecloses it.
+- **A router that picks one agent per turn, and nothing more.**
+  Not rejected — adopted as the first increment, on the scenarios evidence that routing is what pays off across every request.
+  It is the degenerate case of the coordinator (a one-step plan), so the second increment extends it rather than replacing it.
+  Stopping permanently at a router is a legitimate outcome if the multi-step case does not prove out in use.
 - **No orchestrator; keep `--agent`.**
   Genuinely defensible, and cheaper.
   Rejected because it leaves every cross-agent job (diagnose then resubmit) impossible, and because requiring users to know the agent taxonomy is a poor interface for a natural-language tool.
@@ -113,8 +119,13 @@ The coordinator is a language layer over a system whose safety-critical behaviou
 
 ## Validation
 
-This decision is falsifiable, and should be tested before the code is written.
+This decision was made falsifiable and then tested, before any code was written.
 
-The first step is a scenarios document: 8–10 real user requests the system should serve end to end, each checked against what the current agents can do.
-If most of them turn out to be answerable by a single specialist, the coordinator is over-engineering and this ADR should be revised down to a router — or to nothing.
-That exercise is the empirical input ADR-04 asked for and never received.
+[`docs/gsoc/agent-scenarios.md`](/docs/gsoc/agent-scenarios.md) lists twelve plausible requests and checks each against the tools the two agents hold.
+It partly falsified the first draft of this ADR — the multi-step justification is narrower than claimed, and one motivating example was already solved — which is why the Decision above leads with routing.
+The structural decisions were unaffected: one routing path, specialists that do not call each other, approval enforced by `requires_approval` and propagated through the coordinator, two specialists rather than three.
+
+Two caveats bound how much weight this evidence carries.
+The scenarios were written by inference from the tool surface and the domain, not gathered from the MSD group or from usage logs, so they should be reviewed by someone with the scientific context before being treated as requirements.
+And the exercise surfaced a capability gap that partly undercuts the coordinator's strongest scenario: nothing can read a calculation's own output files, so a diagnosis that feeds a resubmission cannot yet see why the calculation actually failed.
+That gap is worth closing first.
