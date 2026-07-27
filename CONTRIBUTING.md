@@ -16,6 +16,7 @@ uv run pre-commit install     # install git hooks (pre-commit + commit-msg)
 |---|---|---|
 | Add / remove a dependency | `uv add <pkg>` / `uv remove <pkg>` | adding/removing a dependency — updates `pyproject.toml`, `uv.lock`, and the env in one step |
 | Sync the environment | `uv sync` | after `git pull`, or to (re)create the env from `uv.lock` |
+| Sync with Quantum ESPRESSO | `uv sync --group qe` | to work against real QE workflows and their docs corpus |
 | Run all checks | `uv run pre-commit run --all-files` | before pushing / opening a PR |
 | Run one check | `uv run pre-commit run ruff --all-files` | iterating on a single hook (`ruff`, `mypy`, `mdformat`, `uv-lock`, …) |
 | Run tests | `uv run pytest` | while developing |
@@ -56,6 +57,26 @@ npx @modelcontextprotocol/inspector
 ```
 
 For tool metadata without a GUI: `fastmcp inspect src/aiida_agents/mcp/server.py:mcp`.
+
+## Working against Quantum ESPRESSO
+
+The agents are built to drive real plugin workflows, but `aiida-quantumespresso` is not a dependency of this package — installing `aiida-agents` should not drag in one plugin's stack.
+For local work against real QE workflows there is a `qe` dependency group:
+
+```bash
+uv sync --group qe
+```
+
+It installs `aiida-quantumespresso`, `aiida-pseudo`, and `dev/qe_rag_stub` (editable) — the dev-only package that registers QE's documentation as a RAG corpus, since upstream does not ship the `aiida_agents.plugins` entry point yet.
+A dependency group rather than an extra, deliberately: this is local development only and is not published in the package's metadata.
+
+**`uv sync` is exact.** It makes the environment match `uv.lock` for the groups and extras you name, and *removes* everything else — including packages you installed ad hoc.
+That is why QE has to be a group at all: installed by hand, it vanished on the next plain `uv sync`, taking every `quantumespresso.*` entry point with it.
+The same applies to the optional extras, so name everything you want in one command:
+
+```bash
+uv sync --group qe --extra rag-fallback     # QE *and* the local fallback embedder
+```
 
 ## Lockfile (`uv.lock`)
 

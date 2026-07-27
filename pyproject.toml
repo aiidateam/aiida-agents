@@ -97,6 +97,26 @@ dev = [
   "aiida-agents[docs,tests,rag,pre-commit]",
   "pytest-asyncio>=1.4.0",
 ]
+# Everything needed to exercise the agents against a real Quantum ESPRESSO
+# setup: the plugin whose workflows and docs the execution agent drives, and
+# the dev-only stub that registers those docs as a RAG corpus (upstream does
+# not ship the aiida_agents.plugins entry point yet).
+#
+# A *group* rather than an extra, deliberately: this is local development only
+# and must not be published in the package's metadata. It exists because
+# `uv sync` makes the environment match uv.lock exactly, so anything installed
+# ad hoc -- as these were -- is silently removed on the next sync, taking every
+# quantumespresso.* entry point with it. `uv sync --group qe` keeps them.
+qe = [
+  "aiida-quantumespresso~=5.0",
+  "aiida-pseudo~=1.8",
+  "qe-rag-stub",
+]
+
+[tool.uv.sources]
+# The stub lives in this repository; installing it editable means a change to
+# dev/qe_rag_stub takes effect without reinstalling.
+qe-rag-stub = { path = "dev/qe_rag_stub", editable = true }
 
 [tool.hatch.metadata]
 allow-direct-references = true
