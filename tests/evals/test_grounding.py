@@ -213,10 +213,10 @@ class TestMissingIndexIsReportedNotPaperedOver:
         )
 
 
-class TestRoutingPicksTheRightSpecialist:
+class TestPlanningPicksTheRightSpecialist:
     """Whether a real model routes well -- the one thing only a model can answer.
 
-    The unit tests in ``tests/agents/router`` pin the parsing and the fallback;
+    The unit tests in ``tests/agents/planner`` pin the parsing and the fallback;
     they cannot tell you whether "relax this structure" reads as execution to
     an actual model. ADR-09 makes mis-routing an accepted failure mode on the
     grounds that it is measurable, and this is the measurement.
@@ -242,9 +242,10 @@ class TestRoutingPicksTheRightSpecialist:
     def test_request_routes_to_the_expected_specialist(
         self, question: str, expected: str
     ) -> None:
-        from aiida_agents.agents.router import route
+        from aiida_agents.agents.planner import plan
 
-        chosen = route(question)
+        steps = plan(question)
+        chosen = steps[0].specialist
         logger.info("routed %r -> %s (expected %s)", question, chosen, expected)
         assert chosen == expected
 
@@ -256,11 +257,15 @@ class TestRoutingPicksTheRightSpecialist:
         cannot write. Routing it to execution would offer a resubmission before
         the user has been shown a reason for one.
         """
-        from aiida_agents.agents.router import route
+        from aiida_agents.agents.planner import plan
 
-        chosen = route("why did pk 1234 fail, and resubmit it with a longer wallclock")
-        logger.info("routed the mixed request -> %s", chosen)
-        assert chosen == "analysis"
+        steps = plan("why did pk 1234 fail, and resubmit it with a longer wallclock")
+        logger.info(
+            "planned the mixed request -> %s", [(s.specialist, s.task) for s in steps]
+        )
+        assert steps[0].specialist == "analysis", (
+            "diagnosis has to happen before a resubmission can be built sensibly"
+        )
 
 
 class TestNoInventedNumbersFromDatabaseResults:
@@ -320,3 +325,54 @@ class TestNoInventedNumbersFromDatabaseResults:
                 "answer labelled a cutoff in eV; query_run_context reports Ry:\n"
                 f"{trace.answer}"
             )
+
+
+class TestMultiStepPlanning:
+    """Does a real model split a request only when it genuinely needs splitting?
+
+    Two ways to be wrong, and both cost something. Planning one step for a
+    request that needs two produces an answer built on a premise nobody
+    checked. Planning two for a request that needs one spends an extra model
+    call and an extra chance to drift.
+    """
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "why did pk 1234 fail, and resubmit it with a longer wallclock",
+            "find my most recent failed relaxation and resubmit it with a higher cutoff",
+        ],
+    )
+    def test_a_diagnose_then_act_request_gets_more_than_one_step(
+        self, prompt: str
+    ) -> None:
+        from aiida_agents.agents.planner import plan
+
+        steps = plan(prompt)
+        logger.info("planned %r -> %s", prompt, [(s.specialist, s.task) for s in steps])
+
+        assert len(steps) >= 2, "the resubmission depends on what the diagnosis finds"
+        assert steps[0].specialist == "analysis"
+        assert steps[-1].specialist == "execution"
+
+    @pytest.mark.parametrize(
+        "prompt",
+        [
+            "how many workchains finished successfully?",
+            "what workflows can I run?",
+            "relax the silicon structure at pk 512",
+            "why did pk 1234 fail?",
+        ],
+    )
+    def test_a_single_specialist_request_stays_one_step(self, prompt: str) -> None:
+        """Including "relax pk 512" -- the execution agent does discovery itself.
+
+        And "why did pk 1234 fail?" -- the user did not ask for a
+        resubmission, so planning one would be acting beyond the request.
+        """
+        from aiida_agents.agents.planner import plan
+
+        steps = plan(prompt)
+        logger.info("planned %r -> %s", prompt, [(s.specialist, s.task) for s in steps])
+
+        assert len(steps) == 1, "no step here depends on another step's findings"

@@ -1,4 +1,4 @@
-# ADR-09: Agent orchestration — a coordinator over two specialists
+# ADR-09: Agent orchestration — a planner over two specialists
 
 ## Context
 
@@ -31,7 +31,10 @@ So the orchestrator has to justify itself on capability, not on safety and not o
 
 ## Decision
 
-Build a coordinator, in two increments: **routing first, multi-step plans second.**
+Build a **planner**: one component that decides which specialist does what, and in what order.
+
+Routing and multi-step coordination were scheduled as two increments, and shipped as one component, because routing a request to a single specialist is the degenerate case of planning — a plan of length one.
+A separate router would have had to be replaced rather than extended, and a simple request would have paid for two model calls instead of one.
 
 An earlier draft of this ADR argued the reverse — that routing merely automates a CLI flag, and only multi-step coordination justified the layer.
 The scenarios exercise ([`docs/gsoc/agent-scenarios.md`](/docs/gsoc/agent-scenarios.md)) does not support that.
@@ -41,31 +44,44 @@ Routing, by contrast, is needed by all twelve: today every request requires the 
 Routing also turns out to be lower-risk than assumed.
 The two most ambiguous request classes — status checks and documentation questions — are ones *both* agents can serve, so mis-routing there costs nothing.
 
-Multi-step coordination remains worth building, but as the second increment and on narrower grounds: one scenario needs it (diagnose a failure, then resubmit with the fix), and that scenario is plausibly the most valuable thing the system could do.
+Multi-step planning is worth having on narrower grounds than the first draft claimed: one scenario needs it (diagnose a failure, then resubmit with the fix), and that scenario is plausibly the most valuable thing the system could do.
 A second candidate — using historical parameters to inform a new submission — turned out to be already served inside Execution by `query_run_context`, which is evidence that some cross-agent needs are better met by a plain tool than by delegation.
+
+The planner never calls a specialist; the CLI does, one step at a time.
+That is what keeps the approval path intact.
 
 ```mermaid
 sequenceDiagram
     actor User
-    participant C as Coordinator
+    participant CLI
+    participant P as Planner
     participant A as Analysis
     participant E as Execution
-    participant CLI
 
-    User->>C: "why did pk 1234 fail, and resubmit with a longer wallclock"
-    C->>A: ask_analysis("why did 1234 fail")
-    A-->>C: exceeded wallclock in the SCF step
-    C->>E: ask_execution("resubmit 1234's workflow, raise wallclock")
-    E-->>C: DeferredToolRequests (approval needed)
-    C-->>CLI: DeferredToolRequests (propagated, not swallowed)
+    User->>CLI: "why did pk 1234 fail, and resubmit with a longer wallclock"
+    CLI->>P: plan this
+    P-->>CLI: analysis: diagnose pk 1234<br/>execution: resubmit with a longer wallclock
+    Note over CLI: the plan is printed, not confirmed:<br/>a plan can only read before the approval gate
+
+    CLI->>A: diagnose pk 1234
+    A-->>CLI: exceeded its wallclock in the SCF step
+    CLI->>E: resubmit with a longer wallclock<br/>+ the diagnosis as labelled context
+    E-->>CLI: DeferredToolRequests (approval needed)
+    Note over CLI: unchanged from a single-agent turn --<br/>Execution ran at the top level, so this<br/>reaches the CLI as the run's own output
     CLI->>User: preview + confirm?
     User->>CLI: approve
-    CLI-->>C: submitted pk 1241
+    CLI-->>User: submitted pk 1241
 ```
 
 Concretely:
 
-- The Orchestrator is a `pydantic_ai.Agent` whose only tools are the specialist calls (`ask_analysis`, `ask_execution`), exactly as ADR-04 specified.
+- The planner is a `pydantic_ai.Agent` with **no tools at all**, which is a departure from ADR-04's sketch of an orchestrator whose tools are the specialist calls.
+  Wrapping the specialists in tools would break the human-in-the-loop guarantee: HITL works because a specialist's run returns `DeferredToolRequests` as its *output* and the CLI intercepts it, then resumes that same agent with the approved results.
+  A specialist running inside another agent's tool call would hand that request back as a tool *result* the CLI never sees, and the approval loop would resume the wrong agent.
+  So the planner only names steps, and the CLI runs each specialist at the top level exactly as it does for a single-agent turn — the approval path is untouched by construction rather than by care.
+- A step's answer is handed to the next step as **explicit text**, labelled with which specialist produced it, not as replayed message history: the specialists hold different tools, so one agent's history references tools the other does not have.
+- **Three steps at most.** Beyond that a plan is speculation about what earlier steps will find, and the planner has seen none of them.
+- A plan that cannot be parsed is rejected **whole** and falls back to a single read-only step. Running the usable half of a rejected plan would be a different plan, whose remaining steps act on a premise nobody established.
 - It becomes the default entry point for `chat` and `ask`; `--agent` remains as an override for debugging and for users who know which specialist they want.
 - **Specialists do not call each other.**
   All agent-to-agent traffic goes through the coordinator, so there is one routing path rather than two places for the same bug to live.

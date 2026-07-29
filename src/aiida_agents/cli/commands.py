@@ -32,7 +32,9 @@ from aiida_agents.cli.output import (
 from aiida_agents.cli.rag import rag
 from aiida_agents.cli.repl import _run_repl
 from aiida_agents.cli.agent import (
-    _resolve_agent_type,
+    _resolve_plan,
+    _step_prompt,
+    _StepResult,
     _AGENT_CHOICES,
     _build_agent,
     _check_reachable,
@@ -122,29 +124,48 @@ def chat(ctx: click.Context) -> None:  # pragma: no cover
 def ask_cmd(ctx: click.Context, question: str, raw: bool) -> None:
     """Answer a single question and exit (one-shot)."""
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
-    agent_type = _resolve_agent_type(ctx.obj["agent"], question, settings)
-    agent = _build_agent(settings, ctx.obj["profile"], agent_type)
-    try:
-        result = asyncio.run(ask(agent, question))
-    except KeyboardInterrupt:
-        click.echo("(interrupted)", err=True)
-        raise SystemExit(130) from None
-    except Exception as exc:
-        # Deliberately broad, and the same boundary the REPL already has: a
-        # provider can fail in ways neither we nor pydantic-ai model (a free
-        # router returning malformed tool-call JSON surfaces as ModelHTTPError),
-        # and a one-shot command should report that, not print a traceback.
-        raise click.ClickException(f"Agent run failed: {exc}") from exc
-    _render_tool_calls(result.new_messages(), console)  # debug-gated; no spinner here
-    if isinstance(result.output, DeferredToolRequests):
-        click.echo(
-            "The agent proposed a write action, which needs interactive approval. "
-            "Re-run it in `aiida-agents chat`.",
-            err=True,
-        )
-        raise SystemExit(2)
-    _print_reply(result.output, raw=raw)
-    _warn_ungrounded(result.output, result.all_messages(), question)
+    steps = _resolve_plan(ctx.obj["agent"], question, settings)
+
+    previous: _StepResult | None = None
+    for index, step in enumerate(steps, start=1):
+        agent = _build_agent(settings, ctx.obj["profile"], step.specialist)
+        prompt = _step_prompt(step, question, previous)
+        try:
+            result = asyncio.run(ask(agent, prompt))
+        except KeyboardInterrupt:
+            click.echo("(interrupted)", err=True)
+            raise SystemExit(130) from None
+        except Exception as exc:
+            # Deliberately broad, and the same boundary the REPL already has: a
+            # provider can fail in ways neither we nor pydantic-ai model (a free
+            # router returning malformed tool-call JSON surfaces as
+            # ModelHTTPError), and a one-shot command should report that, not
+            # print a traceback.
+            # Name the step only when there is more than one; on the common
+            # single-step request "step 1 (analysis)" is noise in front of the
+            # actual error.
+            where = f" on step {index} ({step.specialist})" if len(steps) > 1 else ""
+            raise click.ClickException(f"Agent run failed{where}: {exc}") from exc
+
+        _render_tool_calls(result.new_messages(), console)  # debug-gated
+        if isinstance(result.output, DeferredToolRequests):
+            # A write needs a terminal. Stopping here rather than continuing is
+            # the point: later steps would build on a submission that never
+            # happened.
+            click.echo(
+                "The agent proposed a write action, which needs interactive "
+                "approval. Re-run it in `aiida-agents chat`.",
+                err=True,
+            )
+            raise SystemExit(2)
+
+        if len(steps) > 1:
+            console.print(
+                f"[dim]— step {index}/{len(steps)} ({step.specialist}) —[/dim]"
+            )
+        _print_reply(result.output, raw=raw)
+        _warn_ungrounded(result.output, result.all_messages(), prompt)
+        previous = _StepResult(step.specialist, result.output)
 
 
 @cli.command()

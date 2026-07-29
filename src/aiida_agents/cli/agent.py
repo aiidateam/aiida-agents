@@ -20,8 +20,17 @@ from pydantic_ai.messages import ModelMessage
 from typing_extensions import assert_never
 
 from aiida_agents._settings import ModelSettings, _Provider, _format_validation_error
+from aiida_agents.agents.planner import Specialist, Step
 from aiida_agents.cli.ollama import _ensure_ollama_model, _ollama_pull
 from aiida_agents.cli.output import _trace_tool_calls, console
+
+
+class _StepResult(NamedTuple):
+    """What one executed step produced, for the next step to build on."""
+
+    specialist: Specialist
+    answer: str
+
 
 logger = logging.getLogger(__name__)
 
@@ -104,8 +113,8 @@ def _build_agent(
     ``agent_type`` selects which agent to build (``"analysis"`` or
     ``"execution"``); the value is already constrained by the ``--agent`` choice
     and the REPL's ``/agent`` switch. ``"auto"`` is a routing decision rather
-    than an agent, so callers resolve it with :func:`_resolve_agent_type`
-    before getting here. The aiida / agent-stack imports stay local
+    than an agent, so callers resolve it with :func:`_resolve_plan` before
+    getting here. The aiida / agent-stack imports stay local
     so ``--help`` and shell completion don't pay for loading AiiDA. Expected
     configuration failures are surfaced as clean CLI errors instead of a
     traceback.
@@ -116,7 +125,7 @@ def _build_agent(
     if agent_type not in _SPECIALISTS:
         msg = (
             f"{agent_type!r} is not a runnable agent. Resolve it with "
-            "_resolve_agent_type() first."
+            "_resolve_plan() first."
         )
         raise ValueError(msg)
 
@@ -284,24 +293,72 @@ def _diagnose_probe_failure(settings: ModelSettings, exc: Exception) -> None:
     click.echo(f"{_FAIL} {exc}", err=True)
 
 
-def _resolve_agent_type(
+def _resolve_plan(
     agent_type: str, question: str, settings: ModelSettings
-) -> str:  # pragma: no cover
-    """Turn the ``--agent`` value into the specialist that will run this request.
+) -> list[Step]:  # pragma: no cover
+    """Turn the ``--agent`` value and the request into the steps to run.
 
-    ``auto`` asks the router (ADR-09); an explicitly named specialist is
-    honoured as given, so ``-a execution`` remains a way to bypass routing --
-    for debugging, and for a user who already knows what they want.
+    ``auto`` asks the planner (ADR-09). An explicitly named specialist is
+    honoured as a single step, so ``-a execution`` remains a way to bypass
+    planning entirely -- for debugging, and for a user who already knows what
+    they want.
 
-    The choice is echoed rather than made silently: which specialist answered
-    changes what the answer can be, and a router that has quietly stopped
-    routing should be visible in the output, not inferred from odd replies.
+    The plan is printed rather than executed silently. Which specialist
+    answered changes what the answer can be, and a planner that has quietly
+    stopped planning should be visible in the output rather than inferred from
+    odd replies. It is shown, not confirmed: every write is already gated by
+    ``requires_approval``, so a plan can only *read* before the user is asked,
+    and a second prompt stacked on the approval prompt would train people to
+    dismiss both.
     """
+    from aiida_agents.agents.planner import Step, plan
+
     if agent_type != "auto":
-        return agent_type
+        return [Step(_as_specialist_literal(agent_type), "")]
 
-    from aiida_agents.agents.router import route
+    steps = plan(question, settings)
+    if len(steps) == 1:
+        console.print(f"[dim]→ {steps[0].specialist} agent[/dim]")
+    else:
+        console.print("[dim]→ plan:[/dim]")
+        for index, step in enumerate(steps, start=1):
+            console.print(f"[dim]   {index}. {step.specialist}: {step.task}[/dim]")
+    return steps
 
-    chosen = route(question, settings)
-    console.print(f"[dim]→ {chosen} agent[/dim]")
-    return chosen
+
+def _as_specialist_literal(name: str) -> Specialist:
+    """Narrow a ``--agent`` value the Click choice has already constrained."""
+    return "execution" if name == "execution" else "analysis"
+
+
+#: How an earlier step's answer is handed to the next one.
+#:
+#: Explicit text rather than replayed message history: the specialists hold
+#: different tools, so one agent's history references tools the other does not
+#: have. Labelled with its source so the receiving agent can weigh it as a
+#: finding rather than as the user's own words -- and so a user reading the
+#: transcript can see exactly what was carried forward.
+_STEP_CONTEXT = """{task}
+
+Context from the previous step ({specialist} agent):
+\"\"\"
+{answer}
+\"\"\"
+
+Use that context as the findings it is. Do not restate values it does not
+contain, and if it does not give you what this step needs, say so rather than
+proceeding on an assumption."""
+
+
+def _step_prompt(step: Step, question: str, previous: _StepResult | None) -> str:
+    """The prompt for one step: its task, plus what the last step found.
+
+    A step with no task of its own runs the user's request verbatim -- the
+    single-step case, where rephrasing could only lose detail.
+    """
+    task = step.task or question
+    if previous is None:
+        return task
+    return _STEP_CONTEXT.format(
+        task=task, specialist=previous.specialist, answer=previous.answer
+    )

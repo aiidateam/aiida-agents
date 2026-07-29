@@ -21,7 +21,9 @@ from aiida_agents._settings import ModelSettings, ReplSettings
 from aiida_agents.cli.agent import (
     _AGENT_CHOICES,
     _build_agent,
-    _resolve_agent_type,
+    _resolve_plan,
+    _step_prompt,
+    _StepResult,
     ask,
 )
 from aiida_agents.cli.hitl import _handle_deferred
@@ -124,11 +126,16 @@ def _run_turn(
     question: str,
     history: list[ModelMessage],
     repl_cfg: ReplSettings,
-) -> list[ModelMessage]:  # pragma: no cover
-    """Run one query, render its reply, and return the updated history.
+) -> tuple[list[ModelMessage], str | None]:  # pragma: no cover
+    """Run one query, render its reply, and return the history and the answer.
 
     Returns ``history`` unchanged if the run is interrupted (Ctrl-C) or errors,
     so a failed turn never corrupts the conversation.
+
+    The answer comes back alongside it because a multi-step plan feeds each
+    step's answer into the next. ``None`` means this turn produced no text to
+    pass on -- it errored, was interrupted, or ended in an approval flow -- and
+    a plan stops there rather than continuing on nothing.
     """
     start = time.monotonic()
     try:
@@ -142,10 +149,10 @@ def _run_turn(
             )
     except KeyboardInterrupt:
         click.echo("(interrupted)")
-        return history
+        return history, None
     except Exception as exc:
         click.echo(f"❌ Error: {exc}")
-        return history
+        return history, None
     elapsed = time.monotonic() - start
 
     # Render the run's tool-call trace now that the spinner has stopped: the
@@ -153,14 +160,16 @@ def _run_turn(
     # region above would fight its redraws. Debug-gated inside.
     _render_tool_calls(result.new_messages(), console)
 
+    answer: str | None = None
     if isinstance(result.output, DeferredToolRequests):
         history = _handle_deferred(agent, result, history)
     else:
         _print_agent(result.output)
         _warn_ungrounded(result.output, result.all_messages(), question)
         history = result.all_messages()
+        answer = result.output
     console.print(f"[dim]⏱ {_format_duration(elapsed)}[/]")
-    return history
+    return history, answer
 
 
 def _parse_agent_switch(question: str, current: str) -> str | None:
@@ -252,9 +261,29 @@ def _run_repl(
                 click.echo(f"Switched to {label}. Conversation cleared.\n")
             continue
 
-        active = _resolve_agent_type(agent_type, question, settings)
-        if active not in agents:
-            agents[active] = _build_agent(settings, profile, active)
-        histories[active] = _run_turn(
-            agents[active], question, histories.get(active, []), repl_cfg
-        )
+        previous: _StepResult | None = None
+        steps = _resolve_plan(agent_type, question, settings)
+        for index, step in enumerate(steps, start=1):
+            active = step.specialist
+            if active not in agents:
+                agents[active] = _build_agent(settings, profile, active)
+            if len(steps) > 1:
+                click.echo(f"— step {index}/{len(steps)} ({active}) —")
+
+            histories[active], answer = _run_turn(
+                agents[active],
+                _step_prompt(step, question, previous),
+                histories.get(active, []),
+                repl_cfg,
+            )
+            if answer is None:
+                # The step errored, was interrupted, or ended in an approval
+                # flow. Continuing would hand the next specialist a premise
+                # nobody established -- a resubmission built on a diagnosis
+                # that never completed is worse than no resubmission.
+                if index < len(steps):
+                    click.echo(
+                        "Plan stopped: this step produced nothing to build on.\n"
+                    )
+                break
+            previous = _StepResult(active, answer)
