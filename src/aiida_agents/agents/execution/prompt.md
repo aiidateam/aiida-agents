@@ -76,10 +76,7 @@ Before building inputs, check historical successful runs in the database to lear
 ```python
 query_run_context(
     query_type="past_successful_workflows",
-    filters={
-        "workflow_type": "aiida.workflows:PwRelaxWorkChain",
-        "structure_type": "metallic"
-    }
+    filters={"workflow_type": "aiida.workflows:PwRelaxWorkChain"}
 )
 ```
 `query_run_context` returns a `units` field naming the unit of each statistic. Quote values with
@@ -87,7 +84,8 @@ those units verbatim and never supply one yourself: a cutoff reported as `60.0` 
 calling it 60 eV is a factor-of-twenty error in a number the user may run a calculation with. If a
 statistic comes back `null`, the database holds no value for it — say that rather than estimating.
 
-> **Note:** `structure_type` in filters (`"metallic"`, `"insulator"`, `"semiconductor"`) is metadata to guide parameter heuristics — it is not applied as a strict database query predicate.
+`workflow_type` is required — statistics across every workflow type in the profile would not mean
+anything, so omitting it is an error rather than a broad search.
 
 ### Step 4: Gather References & Build Inputs (`build`)
 To submit a calculation, you need the user's specific atomic structure reference. If they haven't provided it yet, ask cleanly:

@@ -174,9 +174,6 @@ class AvailableCodeInfo(t.TypedDict, total=False):
     codes: list[dict[str, t.Any]]
     """List of available codes with versions"""
 
-    recommended_version: str | None
-    """Which version is recommended"""
-
     note: str
     """Any caveats or notes"""
 
@@ -196,9 +193,10 @@ def query_run_context(
         dict[str, t.Any],
         Field(
             description=(
-                "Context-specific filters (e.g. structure_type, composition, workflow_type). "
-                "Note: 'structure_type' is not a database-level filter — AiiDA stores no "
-                "per-node material-class attribute. It is echoed back as metadata only."
+                "Filters for this query_type. 'past_successful_workflows' requires "
+                "{'workflow_type': <entry point>}; 'available_codes' takes an "
+                "optional {'code': <substring>}; 'failed_attempts' takes an optional "
+                "{'workflow_type': ...} and/or {'structure_pk': ...}."
             )
         ),
     ],
@@ -217,7 +215,7 @@ def query_run_context(
 
     Args:
         query_type: The kind of information to retrieve.
-        filters: Context that narrows the query (workflow_type, structure_type, etc.).
+        filters: What to narrow the query to; see the field description.
 
     Returns:
         dict with context-specific data (past runs, codes, failures, etc.).
@@ -257,18 +255,26 @@ def query_run_context(
 
 
 def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
-    """Query real AiiDA database for completed workflow statistics.
+    """Summarise past runs of one workflow, from the active AiiDA database.
 
-    Note: ``structure_type`` in *filters* is not applied as a database predicate.
-    AiiDA stores no per-node material-class attribute, so all finished workflows
-    of the requested type are included regardless of ``structure_type``.
-    The value is echoed back in the return dict as metadata.
+    Reports only what the database holds. Where a value is absent it is
+    reported as ``None`` rather than estimated, and nothing here ranks or
+    recommends: an endorsement this function has no basis for would read to a
+    caller as one it does.
     """
-    from aiida import orm
     from statistics import median
 
-    workflow_type = filters.get("workflow_type", "aiida.workflows:PwRelaxWorkChain")
-    structure_type = filters.get("structure_type", "metallic")
+    from aiida import orm
+
+    workflow_type = filters.get("workflow_type")
+    if not workflow_type:
+        msg = (
+            "past_successful_workflows needs filters={'workflow_type': ...} -- the "
+            "entry point of the workflow to summarise, as list_workflows() reports "
+            "it. Statistics across every workflow type in the profile would not "
+            "mean anything."
+        )
+        raise ValueError(msg)
     process_label, resolved = _resolve_process_label(workflow_type)
 
     try:
@@ -291,11 +297,6 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
         return {
             "query_type": "past_successful_workflows",
             "workflow_type": workflow_type,
-            "structure_type": structure_type,
-            "structure_type_filter_note": (
-                "structure_type is not filterable at the database level; "
-                "all finished workflows of this type are included."
-            ),
             "count": 0,
             "success_rate": 0.0,
             "median_ecutwfc": None,
@@ -375,11 +376,6 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
     return {
         "query_type": "past_successful_workflows",
         "workflow_type": workflow_type,
-        "structure_type": structure_type,
-        "structure_type_filter_note": (
-            "structure_type is not filterable at the database level; "
-            "all finished workflows of this type are included."
-        ),
         "count": len(successful_runs),
         "success_rate": success_rate,
         "median_ecutwfc": med_ecutwfc,
@@ -411,7 +407,6 @@ def _query_available_codes(filters: dict[str, t.Any]) -> dict[str, t.Any]:
         filters.get("code") or filters.get("plugin") or filters.get("code_label")
     )
     codes_list: list[dict[str, str]] = []
-    recommended: str | None = None
     for row in results:
         label, plugin, desc = row[0], row[1], row[2]
         if code_filter and (
@@ -426,14 +421,11 @@ def _query_available_codes(filters: dict[str, t.Any]) -> dict[str, t.Any]:
                 "description": str(desc) if desc else "",
             }
         )
-        if not recommended or "pw" in str(label).lower():
-            recommended = str(label)
 
     if not codes_list and code_filter and "unknown" in str(code_filter).lower():
         return {
             "query_type": "available_codes",
             "codes": [],
-            "recommended_version": None,
             "note": f"No codes found matching {code_filter!r} in active AiiDA profile.",
         }
 
@@ -441,7 +433,6 @@ def _query_available_codes(filters: dict[str, t.Any]) -> dict[str, t.Any]:
         return {
             "query_type": "available_codes",
             "codes": [],
-            "recommended_version": None,
             "note": (
                 "No codes found in the active AiiDA profile. "
                 "Please set up a code first: verdi code setup"
@@ -451,11 +442,10 @@ def _query_available_codes(filters: dict[str, t.Any]) -> dict[str, t.Any]:
     return {
         "query_type": "available_codes",
         "codes": codes_list,
-        "recommended_version": recommended,
         "note": (
-            f"Found {len(codes_list)} available code(s) matching filter in active AiiDA profile."
-            if results
-            else "No matching codes found in active AiiDA profile. Providing schema recommendation."
+            f"Found {len(codes_list)} code(s) in the active AiiDA profile. Pick one "
+            "by its entry point with list_codes(entry_point=...); nothing here "
+            "ranks them."
         ),
     }
 
@@ -570,8 +560,5 @@ def _query_available_pseudos(filters: dict[str, t.Any]) -> dict[str, t.Any]:
         "query_type": "available_pseudos",
         "installed_families": pseudo_families,
         "upf_data_count": upf_count,
-        "recommended_family": pseudo_families[0]["label"]
-        if pseudo_families
-        else "SSSP/1.3/PBE/efficiency (needs installation)",
         "note": note,
     }
