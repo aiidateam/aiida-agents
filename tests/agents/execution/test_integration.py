@@ -9,7 +9,7 @@ from pydantic_ai.models.test import TestModel
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents.agents.execution import get_agent
-from aiida_agents.tools.execution.run_context import query_run_context
+from aiida_agents.tools.run_context import query_run_context
 from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
 from aiida_agents.tools.execution.schemas import WorkflowSpec
 from aiida_agents.tools.execution.spec_execution import execute_workflow_spec

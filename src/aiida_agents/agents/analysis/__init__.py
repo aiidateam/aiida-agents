@@ -34,6 +34,7 @@ from aiida_agents.tools import (
     list_processes,
     list_retrieved_files,
     query_nodes,
+    query_run_context,
     search_structures,
 )
 from aiida_agents.rag import search_aiida_docs
@@ -54,6 +55,7 @@ _READ_TOOLS: list[Any] = [
     get_node_inputs,
     get_node_outputs,
     search_structures,
+    query_run_context,
     search_aiida_docs,
 ]
 

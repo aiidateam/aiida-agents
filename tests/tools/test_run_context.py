@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from typing import Any
 
-from aiida_agents.tools.execution.run_context import query_run_context
+from aiida_agents.tools.run_context import query_run_context
 
 
 class TestAnalysisQueries:

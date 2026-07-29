@@ -20,6 +20,8 @@ from rich.text import Text
 
 from aiida_agents._logging import ToolPart, trace_response, trace_tool_part
 
+logger = logging.getLogger(__name__)
+
 console = Console()
 
 
@@ -129,3 +131,34 @@ def _format_duration(seconds: float) -> str:
         return f"{seconds:.1f}s"
     minutes, secs = divmod(int(seconds), 60)
     return f"{minutes}m {secs}s"
+
+
+def _warn_ungrounded(text: str, messages: list[ModelMessage], question: str) -> None:
+    """Flag any physical quantity in a reply that no tool produced.
+
+    The agents are asked what cutoff to use, so a wrong number is not a wrong
+    answer -- it configures a calculation. The failure that occurs is a
+    plausible value, often attached to a real label the model did retrieve, and
+    the user cannot tell it apart from a sourced one by reading.
+
+    This runs on every reply because the prompt-level version of the same rule
+    has a measured failure rate: an explicit instruction not to do this was
+    ignored in five test runs out of five. A check that reads the answer
+    afterwards does not depend on the model having complied.
+
+    Warns rather than blocks: the detector is deliberately narrow (see
+    ``aiida_agents.grounding``) but a false positive must cost a line of output,
+    never a withheld answer.
+    """
+    from aiida_agents.grounding import tool_output_text, ungrounded_quantities
+
+    invented = ungrounded_quantities(text, tool_output_text(messages), question)
+    if not invented:
+        return
+
+    values = ", ".join(sorted(invented))
+    console.print(
+        f"[yellow]⚠ Not found in any tool output: {values}. "
+        "Verify before using these values.[/yellow]"
+    )
+    logger.warning("ungrounded quantities in reply: %s", values)

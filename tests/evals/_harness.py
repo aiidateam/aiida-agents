@@ -20,7 +20,10 @@ agent has actually gone wrong here:
 
 ``ungrounded_quantities``
     Does every physical quantity in the answer appear in something a tool
-    returned? A model that retrieves correctly can still garnish the answer
+    returned? The detection itself lives in ``aiida_agents.grounding``, which
+    the CLI also runs on every reply -- one implementation, so the check that
+    guards a shipped answer and the check that guards this suite cannot drift
+    apart. A model that retrieves correctly can still garnish the answer
     with a plausible cutoff or k-point spacing it invented. That reads as
     authoritative, is unverifiable by the user, and quietly configures a wrong
     calculation.
@@ -39,6 +42,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from aiida_agents.grounding import quantities_in as quantities_in  # re-exported
+from aiida_agents.grounding import ungrounded_quantities as _ungrounded
 from pydantic_ai import Agent, capture_run_messages
 from pydantic_ai.messages import (
     ModelMessage,
@@ -194,60 +199,6 @@ def trace_run(agent: Agent, prompt: str, **kwargs: Any) -> RunTrace:
     return trace
 
 
-#: Units and parameter names whose values are physics claims --- the ones that
-#: silently configure a wrong calculation when invented. Deliberately narrow:
-#: a bare integer in prose ("step 2", "3 structures") is not a claim about
-#: physics, and flagging it would make this check noise rather than signal.
-_UNITS = r"Ry|eV|meV|Ha|Hartree|Bohr|bohr|Å⁻¹|Å-1|Å|Ang|angstrom|K|GPa|kbar"
-_PARAMS = (
-    r"ecutwfc|ecutrho|conv_thr|degauss|kpoints_distance|kpoint_distance|"
-    r"k-?point spacing|mixing_beta|smearing|etot_conv_thr|forc_conv_thr|"
-    r"press_conv_thr|nbnd|electron_maxstep"
-)
-
-#: A number attached to a unit ("60 Ry", "0.15 Å⁻¹"), or one attached to a
-#: named parameter in either order ("ecutwfc of 60", "60 for ecutwfc").
-_QUANTITY_PATTERNS = (
-    re.compile(rf"(?P<num>\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\s*(?:{_UNITS})\b"),
-    re.compile(rf"(?:{_PARAMS})\D{{0,20}}?(?P<num>\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)"),
-    re.compile(rf"(?P<num>\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)\D{{0,20}}?(?:{_PARAMS})"),
-)
-
-
-def _numbers_in(text: str) -> set[str]:
-    """Every numeric literal in ``text``, normalised for comparison."""
-    found = set()
-    for raw in re.findall(r"\d+(?:\.\d+)?(?:[eE][-+]?\d+)?", text):
-        found.add(_normalise(raw))
-    return found
-
-
-def _normalise(number: str) -> str:
-    """Canonicalise a numeric literal so 60, 60.0 and 6e1 compare equal.
-
-    Without this the check reports false fabrications constantly: a tool
-    returns ``60.0`` and the model writes "60 Ry", which is the same claim
-    correctly repeated.
-    """
-    try:
-        return repr(float(number))
-    except ValueError:  # pragma: no cover - regex only yields parseable numbers
-        return number
-
-
-def quantities_in(text: str) -> set[str]:
-    """Physical quantities asserted in ``text``, as normalised numbers.
-
-    Only numbers carrying a unit or bound to a named simulation parameter
-    count --- see :data:`_QUANTITY_PATTERNS`.
-    """
-    return {
-        _normalise(m.group("num"))
-        for pattern in _QUANTITY_PATTERNS
-        for m in pattern.finditer(text)
-    }
-
-
 def ungrounded_quantities(trace: RunTrace, prompt: str = "") -> set[str]:
     """Quantities in the answer that no tool output and no user turn contains.
 
@@ -266,11 +217,7 @@ def ungrounded_quantities(trace: RunTrace, prompt: str = "") -> set[str]:
         Normalised numeric literals with no source. Empty means every physics
         number in the answer is traceable.
     """
-    return (
-        quantities_in(trace.answer)
-        - _numbers_in(trace.all_output)
-        - _numbers_in(prompt)
-    )
+    return _ungrounded(trace.answer, trace.all_output, prompt)
 
 
 def assert_grounded_quantities(trace: RunTrace, prompt: str = "") -> None:

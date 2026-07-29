@@ -29,6 +29,7 @@ models.ALLOW_MODEL_REQUESTS = False
 EXPECTED_TOOLS = {
     "get_process_status",
     "get_process_report",
+    "query_run_context",
     "list_retrieved_files",
     "get_retrieved_file",
     "list_processes",

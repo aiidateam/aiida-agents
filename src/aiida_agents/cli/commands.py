@@ -23,6 +23,7 @@ from aiida_agents.cli.config import config
 from aiida_agents.cli.doctor import doctor
 from aiida_agents.cli.mcp import mcp
 from aiida_agents.cli.output import (
+    _warn_ungrounded,
     _format_duration,
     _print_reply,
     _render_tool_calls,
@@ -143,6 +144,7 @@ def ask_cmd(ctx: click.Context, question: str, raw: bool) -> None:
         )
         raise SystemExit(2)
     _print_reply(result.output, raw=raw)
+    _warn_ungrounded(result.output, result.all_messages(), question)
 
 
 @cli.command()

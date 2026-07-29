@@ -139,6 +139,15 @@ class _FakeResult:
     def new_messages(self) -> list[object]:
         return []
 
+    def all_messages(self) -> list[object]:
+        """No tool calls -- the grounding check reads these on every reply.
+
+        Empty rather than absent: a fake that omits it would make the check
+        raise, and making the check tolerate a missing method would let it skip
+        silently in production too.
+        """
+        return []
+
 
 def test_ask_prints_the_answer(monkeypatch: pytest.MonkeyPatch) -> None:
     """A one-shot `ask` prints the agent's reply and exits cleanly."""

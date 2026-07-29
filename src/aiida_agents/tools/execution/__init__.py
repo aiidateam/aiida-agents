@@ -23,7 +23,7 @@ it after building and validating a spec.
 
 from __future__ import annotations
 
-from aiida_agents.tools.execution.run_context import query_run_context
+from aiida_agents.tools.run_context import query_run_context
 from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
 from aiida_agents.tools.execution.protocol import build_workflow_inputs
 from aiida_agents.tools.execution.schemas import (

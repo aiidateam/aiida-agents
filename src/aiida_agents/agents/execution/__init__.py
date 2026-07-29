@@ -13,7 +13,7 @@ from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
 
-from aiida_agents.tools.execution.run_context import query_run_context
+from aiida_agents.tools.run_context import query_run_context
 from aiida_agents.tools.execution.codes import list_codes
 from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
 from aiida_agents.tools.execution.protocol import build_workflow_inputs
