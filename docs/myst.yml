@@ -6,5 +6,12 @@ project:
   # authors: []
   # github: https://github.com/
   # To autogenerate a Table of Contents, run "myst init --write-toc"
+  toc:
+    - file: index.md
+    - file: architecture.md
+    - file: extending.md
+    - title: Decision records
+      children:
+        - pattern: adr/*.md
 site:
   template: book-theme

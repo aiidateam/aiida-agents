@@ -6,6 +6,11 @@ This started as a Google Summer of Code 2026 project under NumFOCUS / AiiDA.
 It is **exploratory** — we're finding out what works first — but the goal is to grow it into a production-quality tool, not to stop at a prototype.
 
 ```{warning}
-Early development: engineering scaffolding is in place, there is no functional release yet, and the architecture is still being decided.
-See the Architecture Decision Records in `docs/adr/` for the current design state.
+Early development: engineering scaffolding is in place and there is no functional release yet.
 ```
+
+## Where to start
+
+- **[Architecture](/docs/architecture.md)** — how a request travels through the system, and why the pieces are arranged as they are.
+- **[Extending](/docs/extending.md)** — adding a tool, a documentation corpus, or a whole specialist; and how an AiiDA plugin contributes to the agents without either package depending on the other.
+- **[Architecture Decision Records](/docs/adr/README.md)** — the reasoning behind each individual decision, including the ones that were later revised.

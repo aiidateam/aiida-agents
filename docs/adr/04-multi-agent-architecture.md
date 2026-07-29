@@ -79,6 +79,13 @@ CLI to handle (ADR-08).
 
 ### Future multi-agent architecture (Weeks 7–8)
 
+> **Superseded by [ADR-09](/docs/adr/09-agent-orchestration.md).** The table below
+> planned three specialists behind an Orchestrator whose tools are the specialist
+> `run()` calls. Two specialists were built, with diagnosis folded into the
+> Analysis agent, and the orchestration layer is a *planner* with no tools —
+> wrapping the specialists in tools would have broken the human-in-the-loop
+> guarantee. ADR-09 gives the reasoning.
+
 Once the single-agent foundation is stable, the architecture expands to:
 
 | Agent                | Responsibility                       | AiiDA access        |

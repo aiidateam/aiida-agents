@@ -216,3 +216,4 @@ docs/_build
 
 # aiida-agents RAG vector store (regenerable via `aiida-agents rag init`)
 .aiida_agents_vector_db/
+_build/
