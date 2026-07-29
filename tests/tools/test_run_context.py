@@ -15,7 +15,7 @@ class TestAnalysisQueries:
         """Querying past workflows must return required structured fields."""
         res = query_run_context(
             query_type="past_successful_workflows",
-            filters={"workflow_type": "PwRelaxWorkChain", "structure_type": "metallic"},
+            filters={"workflow_type": "PwRelaxWorkChain"},
         )
         assert res["query_type"] == "past_successful_workflows"
         assert res["workflow_type"] == "PwRelaxWorkChain"
@@ -25,10 +25,6 @@ class TestAnalysisQueries:
         assert "common_parameters" in res
         assert "common_failure_modes" in res
         assert "example_structures" in res
-        assert "structure_type_filter_note" in res, (
-            "structure_type_filter_note must be present so the model knows "
-            "structure_type is not a DB-level filter"
-        )
 
     def test_query_available_codes_returns_list(self, arithmetic_add_code: Any) -> None:
         """Querying available codes returns a list of codes with expected structure.
@@ -92,7 +88,6 @@ class TestAnalysisQueriesEdgeCases:
         assert res["median_ecutwfc"] is None
         assert res["common_parameters"] == {}
         assert res["note"]
-        assert "structure_type_filter_note" in res
 
     def test_query_available_codes_empty_results(self) -> None:
         """Querying an unknown code should return an empty codes list."""
@@ -320,3 +315,66 @@ class TestStatisticsCarryTheirUnits:
 
         assert res["count"] == 0
         assert res["units"]["ecutwfc"] == "Ry"
+
+
+class TestTheToolStatesNothingItCannotSupport:
+    """No invented subject, no invented qualifier, no unfounded endorsement.
+
+    Audit finding. Every item below was a value the tool supplied itself and
+    the caller could not tell apart from a queried one -- which is exactly what
+    the agents' grounding rules forbid the *model* from doing, enforced
+    everywhere except in the tool feeding it.
+    """
+
+    def test_missing_workflow_type_is_an_error_not_a_guess(self) -> None:
+        """It used to default to PwRelaxWorkChain and report that as the subject.
+
+        On a profile with 35 entry points, a caller who omitted the filter got
+        confident statistics about a workflow they never named.
+        """
+        with pytest.raises(ValueError, match="needs filters"):
+            query_run_context(query_type="past_successful_workflows", filters={})
+
+    def test_no_structure_type_is_echoed_back(
+        self, multiply_add_workchain: Any
+    ) -> None:
+        """It used to default to "metallic" and return it as if asked.
+
+        Nothing filters on it and nothing verifies it, so a model could report
+        "for metallic structures, the median is ..." on a qualifier that came
+        from the tool rather than from the user or the database.
+        """
+        res = query_run_context(
+            query_type="past_successful_workflows",
+            filters={"workflow_type": "MultiplyAddWorkChain"},
+        )
+
+        assert "structure_type" not in res
+        assert "structure_type_filter_note" not in res
+
+    def test_codes_are_not_ranked(self, arithmetic_add_code: Any) -> None:
+        """`recommended_version` was "the first code, or any whose label has 'pw'".
+
+        That is not a recommendation, and the field name asserted an
+        endorsement the tool has no basis for -- while also holding a label
+        rather than a version.
+        """
+        res = query_run_context(query_type="available_codes", filters={})
+
+        assert res["codes"], "fixture code should be found"
+        assert "recommended_version" not in res
+
+    def test_no_pseudo_family_is_named_when_none_is_installed(self) -> None:
+        """The worst of them: it returned "SSSP/1.3/PBE/efficiency (needs installation)".
+
+        A family label for something not in the profile, in a field a model
+        would reasonably pass on as a workflow input. The note still tells the
+        user how to install one -- guidance in prose, not a usable-looking
+        reference.
+        """
+        res = query_run_context(query_type="available_pseudos", filters={})
+
+        assert "recommended_family" not in res
+        assert "installed_families" in res
+        if not res["installed_families"]:
+            assert "aiida-pseudo install" in res["note"]
