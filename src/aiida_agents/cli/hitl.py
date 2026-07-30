@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
 from typing import Any, NamedTuple
 
 import rich_click as click
@@ -28,6 +29,8 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, ToolReturnPart
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents.cli.output import _log_tool_calls_debug, _print_agent, console
+
+logger = logging.getLogger(__name__)
 
 
 # Bound the propose -> deny -> retry loop so a model that keeps emitting bad
@@ -126,12 +129,35 @@ def _triage_submissions(
     return auto, previews
 
 
+def _range_warnings(call: Any) -> list[str]:
+    """Physics findings to show beside a submission, if there are any.
+
+    Run here rather than only offered as a tool, for the same reason the
+    grounding check runs on every reply: an instruction to check can be
+    ignored, and this is the last moment before core-hours are spent. A
+    failure inside the check is swallowed --- an approval prompt that raises
+    instead of asking is worse than one that shows nothing.
+    """
+    from aiida_agents.tools.execution.ranges import check_input_ranges
+
+    entry_point, inputs = _submission_args(call)
+    if not entry_point or not isinstance(inputs, dict):
+        return []
+    try:
+        findings = check_input_ranges({"workflow_type": entry_point, "inputs": inputs})
+    except Exception:
+        logger.debug("range check failed for %s", entry_point, exc_info=True)
+        return []
+    return [finding["message"] for finding in findings]
+
+
 def _print_previews(previews: list[_Preview]) -> None:
     """Print the calls awaiting the user's confirmation.
 
     A submission shows its entry point and fully resolved inputs, so the user can
     see what will be created before anything is written; any other approval-gated
-    tool shows the raw arguments the model supplied.
+    tool shows the raw arguments the model supplied, plus any cutoff that
+    disagrees with what its pseudopotentials were converged for.
     """
     from aiida_agents.tools.execution.submit import _format_resolved_inputs
 
@@ -144,6 +170,8 @@ def _print_previews(previews: list[_Preview]) -> None:
         entry_point, _ = _submission_args(call)
         click.echo(f"   Entry : {entry_point or '<unknown>'}")
         click.echo(f"   Inputs (resolved):\n{_format_resolved_inputs(resolved)}")
+        for message in _range_warnings(call):
+            click.echo(f"   ⚠️  {message}")
 
 
 def _run_approvals(

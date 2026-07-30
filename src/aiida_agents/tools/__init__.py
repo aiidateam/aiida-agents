@@ -48,6 +48,7 @@ from aiida_agents.tools.processes import (
 )
 from aiida_agents.tools.execution import (
     build_workflow_inputs,
+    check_input_ranges,
     describe_workflow,
     draft_workflow_inputs,
     list_workflows,
@@ -57,6 +58,7 @@ from aiida_agents.tools.execution.codes import list_codes
 
 __all__ = [
     "build_workflow_inputs",
+    "check_input_ranges",
     "describe_workflow",
     "diagnose_process_failure",
     "draft_workflow_inputs",

@@ -74,6 +74,7 @@ structures = [
     { name = "ase" },
 ]
 tests = [
+    { name = "aiida-pseudo" },
     { name = "ase" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -98,6 +99,7 @@ vasp = [
 requires-dist = [
     { name = "aiida-core", git = "https://github.com/aiidateam/aiida-core.git" },
     { name = "aiida-core", extras = ["docs"], marker = "extra == 'rag-build'" },
+    { name = "aiida-pseudo", marker = "extra == 'tests'", specifier = "~=1.8" },
     { name = "aiida-restapi", git = "https://github.com/edan-bainglass/aiida-restapi?rev=deps" },
     { name = "ase", marker = "extra == 'structures'", specifier = "~=3.21" },
     { name = "ase", marker = "extra == 'tests'", specifier = "~=3.21" },

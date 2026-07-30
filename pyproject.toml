@@ -81,6 +81,12 @@ tests = [
   # So CI actually exercises import_structure's parse path rather than
   # skipping it; the tests skip cleanly when it is absent.
   "aiida-agents[structures]",
+  # check_input_ranges compares against a pseudopotential family's published
+  # cutoffs. The source needs nothing from aiida-pseudo -- it reads the family
+  # through AiiDA's group API -- but the tests build a real family to compare
+  # against, rather than mocking away the one part worth doubting. A test
+  # dependency only, so the package itself stays code-agnostic.
+  "aiida-pseudo~=1.8",
 ]
 lint = [
   "mypy",
@@ -213,6 +219,11 @@ follow_imports_for_stubs = true
 # types directly, so skip its stubs instead of bumping the whole target to 3.12.
 module = ["numpy", "numpy.*"]
 follow_imports = "skip"
+
+[[tool.mypy.overrides]]
+# aiida-pseudo ships no ``py.typed``, and only the tests import it directly.
+module = ["aiida_pseudo.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # The dev stubs under ``dev/`` are installed only by their own dependency group

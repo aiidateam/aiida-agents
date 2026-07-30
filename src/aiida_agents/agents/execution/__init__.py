@@ -18,6 +18,7 @@ from aiida_agents.tools.execution.codes import list_codes
 from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
 from aiida_agents.tools.execution.drafting import draft_workflow_inputs
 from aiida_agents.tools.execution.protocol import build_workflow_inputs
+from aiida_agents.tools.execution.ranges import check_input_ranges
 from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
 from aiida_agents.tools.execution.structures import import_structure
 from aiida_agents.tools.processes import get_process_status
@@ -30,6 +31,7 @@ _READ_TOOLS: list[Any] = [
     describe_workflow,  # Inspect process schema, ports, defaults, and exit codes (read-only)
     build_workflow_inputs,  # Pre-populate inputs from a protocol builder (read-only)
     draft_workflow_inputs,  # Draft inputs from the process spec, when it has no protocol builder (read-only)
+    check_input_ranges,  # Compare a spec's cutoffs against its pseudopotentials (read-only)
     list_codes,  # Discover the configured codes to submit against (read-only)
     get_process_status,  # Follow up on what was just submitted (read-only)
     search_aiida_docs,  # Look up how a workflow/input actually works (read-only)

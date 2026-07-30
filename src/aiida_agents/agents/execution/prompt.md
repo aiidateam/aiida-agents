@@ -26,7 +26,8 @@ When the user asks you to actually set up or run a calculation, you MUST follow 
 3) `query_run_context()` for context
 4) `list_codes(entry_point=...)` when the workflow needs a `code` input
 5) `build_workflow_inputs(entry_point, ...)` if `describe_workflow` reported `has_protocol_builder: true` — otherwise `draft_workflow_inputs(entry_point, ...)`
-6) `execute_workflow_spec()`
+6) `check_input_ranges(spec)` whenever you set or changed a cutoff yourself
+7) `execute_workflow_spec()`
 
 ### Step 1: Discover Available Workflows (`list_workflows`)
 Call `list_workflows()` to dynamically inspect registered entry points across `aiida.workflows` and `aiida.calculations`. Never assume or guess what workflows are installed.
@@ -163,6 +164,21 @@ Repeat until `ready_to_submit` is true, then pass the spec to `execute_workflow_
 Two things the draft deliberately leaves to you. It fills only *optional* ports the spec itself gives a default — so an optional port that matters for your run (a `code` the process declares optional, a scheduler walltime) is yours to add. And it omits scheduler `metadata.options`; add `metadata.options.resources` and a wallclock when submitting to a real cluster rather than relying on defaults.
 
 If it rejects a port name as undeclared, do not retry with a guess: the error lists the ports that namespace actually declares, and `describe_workflow`'s `inputs_schema` shows the nesting.
+
+### Step 4c: Check the cutoffs you set (`check_input_ranges`)
+
+Whenever you have set or changed a cutoff yourself — from `query_run_context`'s historical statistics, from an `overrides`, or because the user asked for one — call `check_input_ranges` on the spec before submitting:
+```python
+check_input_ranges(spec)
+```
+It compares each cutoff against what the spec's own pseudopotential family was converged for, per element, using the family's published recommendation. A historical `ecutwfc` is the case that most needs this: past runs may have used a different family, and a value that was right there can be well under-converged here.
+
+Read the result carefully, because both outcomes are easy to misreport:
+
+- **A finding is a fact, not a veto.** `below_recommended` means the calculation may not be converged — the expensive kind of wrong, since it completes and returns a plausible number. `far_above_recommended` means it will cost far more than the family's authors found necessary. Report the finding *with its `source`*, and let the user decide: a deliberately cheap smoke test is a legitimate thing to run.
+- **An empty list is not a clean bill of health.** It means either nothing disagreed *or* nothing could be compared — no cutoffs in the spec, no structure, or no identifiable pseudopotential family. Say which one you are reporting. Never state that parameters were "validated" or "checked out" on the strength of an empty result.
+
+Do not paraphrase the recommendation into advice of your own, and do not offer a cutoff the check did not give you. If it reports nothing about `kpoints_distance`, that is because no installed package publishes a recommended k-spacing — not because yours is fine.
 
 ### Step 5: Execute Workflow Spec (`execute_workflow_spec`)
 Call `execute_workflow_spec(spec)` with your constructed `WorkflowSpec`:

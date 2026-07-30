@@ -13,6 +13,9 @@ draft_workflow_inputs
     Draft the same spec shape from a process's own input ports, for the
     processes that have no protocol builder --- most calculations, and any
     plugin that never adopted the convention.
+check_input_ranges
+    Compare a spec's cutoffs against what its pseudopotential family was
+    converged for, before it is submitted.
 query_run_context
     Query the Analysis agent for historical context (past successful
     workflows, optimal parameters, structure classifications).
@@ -31,6 +34,7 @@ from aiida_agents.tools.run_context import query_run_context
 from aiida_agents.tools.execution.drafting import draft_workflow_inputs
 from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
 from aiida_agents.tools.execution.protocol import build_workflow_inputs
+from aiida_agents.tools.execution.ranges import check_input_ranges
 from aiida_agents.tools.execution.schemas import (
     ValidationError,
     ValidationResult,
@@ -43,6 +47,7 @@ __all__ = [
     "ValidationResult",
     "WorkflowSpec",
     "build_workflow_inputs",
+    "check_input_ranges",
     "describe_workflow",
     "draft_workflow_inputs",
     "execute_workflow_spec",
