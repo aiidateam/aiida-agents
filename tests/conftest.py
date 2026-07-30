@@ -126,3 +126,30 @@ def silicon_structure() -> orm.StructureData:
     structure.append_atom(position=(1.5, 1.5, 1.5), symbols="Si")
     structure.store()
     return structure
+
+
+@pytest.fixture(scope="session")
+def failed_multiply_add(
+    arithmetic_add_code: orm.InstalledCode,
+) -> orm.WorkChainNode:
+    """A real, *failed* ``MultiplyAddWorkChain`` run (session-scoped).
+
+    Runs ``core.arithmetic.multiply_add`` with ``z=-100``, so ``x * y + z`` is
+    negative: the nested ``ArithmeticAddCalculation`` exits 410 and the work
+    chain exits 400. The nesting is the point --- the work chain's own code says
+    only that a sub-process failed, and the cause is one level down --- so this
+    is the fixture for anything that has to find a root cause rather than read
+    a top-level exit status.
+
+    :return: The stored top-level ``WorkChainNode`` for the failed run.
+    """
+    _, node = run_get_node(
+        MultiplyAddWorkChain,
+        x=orm.Int(2),
+        y=orm.Int(3),
+        z=orm.Int(-100),
+        code=arithmetic_add_code,
+    )
+    assert isinstance(node, orm.WorkChainNode)
+    assert node.exit_status, "the fixture is only useful if the run actually failed"
+    return node

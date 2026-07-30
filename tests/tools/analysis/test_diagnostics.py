@@ -8,10 +8,11 @@ it goes. A mock of any of those would pin the mock's shape rather than AiiDA's.
 
 Two failures are built:
 
-``failed_workchain``
+``failed_multiply_add`` (from ``tests/conftest.py``)
     ``MultiplyAddWorkChain`` with a negative ``z``, so the nested
     ``ArithmeticAddCalculation`` exits 410 and the work chain exits 400. A real
-    two-level failure chain, with no restart machinery involved.
+    two-level failure chain, with no restart machinery involved. Shared with the
+    eval tier, which needs the same failure to ask a model about.
 
 ``exhausted_workchain``
     A ``BaseRestartWorkChain`` whose handler recognises exit 410 and restarts,
@@ -35,7 +36,6 @@ from aiida.engine import (
     while_,
 )
 from aiida.engine.processes.workchains.utils import process_handler
-from aiida.workflows.arithmetic.multiply_add import MultiplyAddWorkChain
 
 from aiida_agents.tools._orm import WrongNodeType
 from aiida_agents.tools.analysis.diagnostics import (
@@ -95,20 +95,6 @@ class RestartDemo(BaseRestartWorkChain):
 
 
 @pytest.fixture(scope="module")
-def failed_workchain(arithmetic_add_code: orm.InstalledCode) -> orm.WorkChainNode:
-    """A ``MultiplyAddWorkChain`` that failed because its addition went negative."""
-    _, node = run_get_node(
-        MultiplyAddWorkChain,
-        x=orm.Int(2),
-        y=orm.Int(3),
-        z=orm.Int(-100),
-        code=arithmetic_add_code,
-    )
-    assert isinstance(node, orm.WorkChainNode)
-    return node
-
-
-@pytest.fixture(scope="module")
 def exhausted_workchain(arithmetic_add_code: orm.InstalledCode) -> orm.WorkChainNode:
     """A restart work chain that applied its remedy twice and still failed."""
     _, node = run_get_node(
@@ -125,19 +111,19 @@ class TestFailureChain:
     """Finding the process that actually broke."""
 
     def test_the_chain_reaches_the_calculation_below_the_workchain(
-        self, failed_workchain: orm.WorkChainNode
+        self, failed_multiply_add: orm.WorkChainNode
     ) -> None:
-        diagnosis = diagnose_process_failure(str(failed_workchain.pk))
+        diagnosis = diagnose_process_failure(str(failed_multiply_add.pk))
 
         assert diagnosis["failed"] is True
         labels = [step["process_label"] for step in diagnosis["failure_chain"]]
         assert labels == ["MultiplyAddWorkChain", "ArithmeticAddCalculation"]
 
     def test_the_root_cause_is_the_calculation_not_the_workchain(
-        self, failed_workchain: orm.WorkChainNode
+        self, failed_multiply_add: orm.WorkChainNode
     ) -> None:
         """The work chain's own 400 only says a sub-process failed."""
-        diagnosis = diagnose_process_failure(str(failed_workchain.pk))
+        diagnosis = diagnose_process_failure(str(failed_multiply_add.pk))
         root = diagnosis["root_cause"]
 
         assert root is not None
@@ -146,9 +132,9 @@ class TestFailureChain:
         assert diagnosis["exit_status"] == 400
 
     def test_the_exit_codes_meaning_comes_from_the_process_class(
-        self, failed_workchain: orm.WorkChainNode
+        self, failed_multiply_add: orm.WorkChainNode
     ) -> None:
-        diagnosis = diagnose_process_failure(str(failed_workchain.pk))
+        diagnosis = diagnose_process_failure(str(failed_multiply_add.pk))
         root = diagnosis["root_cause"]
 
         assert root is not None
@@ -157,21 +143,21 @@ class TestFailureChain:
         )
 
     def test_the_failed_calcjob_is_offered_for_its_output_files(
-        self, failed_workchain: orm.WorkChainNode
+        self, failed_multiply_add: orm.WorkChainNode
     ) -> None:
         """The pk to hand to list_retrieved_files, where the code's own error is."""
-        diagnosis = diagnose_process_failure(str(failed_workchain.pk))
+        diagnosis = diagnose_process_failure(str(failed_multiply_add.pk))
         root = diagnosis["root_cause"]
 
         assert root is not None
         assert diagnosis["retrieved_files_pk"] == root["pk"]
 
     def test_asking_about_the_calculation_directly_also_works(
-        self, failed_workchain: orm.WorkChainNode
+        self, failed_multiply_add: orm.WorkChainNode
     ) -> None:
         calcjob = next(
             child
-            for child in failed_workchain.called
+            for child in failed_multiply_add.called
             if isinstance(child, orm.CalcJobNode)
         )
 
@@ -211,9 +197,9 @@ class TestHandlingAttempted:
         )
 
     def test_a_workchain_with_no_restart_machinery_reports_no_attempts(
-        self, failed_workchain: orm.WorkChainNode
+        self, failed_multiply_add: orm.WorkChainNode
     ) -> None:
-        diagnosis = diagnose_process_failure(str(failed_workchain.pk))
+        diagnosis = diagnose_process_failure(str(failed_multiply_add.pk))
 
         assert diagnosis["handling_attempted"] == []
 
@@ -247,10 +233,10 @@ class TestKnownRemedies:
         )
 
     def test_a_plain_workchain_offers_no_remedies(
-        self, failed_workchain: orm.WorkChainNode
+        self, failed_multiply_add: orm.WorkChainNode
     ) -> None:
         """MultiplyAddWorkChain registers no handlers; nothing is invented."""
-        diagnosis = diagnose_process_failure(str(failed_workchain.pk))
+        diagnosis = diagnose_process_failure(str(failed_multiply_add.pk))
 
         assert diagnosis["known_remedies"] == []
 

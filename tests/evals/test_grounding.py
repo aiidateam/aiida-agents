@@ -31,6 +31,7 @@ import os
 from pathlib import Path
 
 import pytest
+from aiida import orm
 from pydantic_ai import Agent
 
 from tests.evals._harness import (
@@ -325,6 +326,76 @@ class TestNoInventedNumbersFromDatabaseResults:
                 "answer labelled a cutoff in eV; query_run_context reports Ry:\n"
                 f"{trace.answer}"
             )
+
+
+class TestFailureDiagnosisReachesTheDiagnosisTool:
+    """A failure question has to be resolved, not narrated.
+
+    ``diagnose_process_failure`` exists because the three things a diagnosis
+    needs --- which process really broke, what its exit code means, what the
+    workflow already tried --- were being inferred by the model from a log.
+    Adding the tool does not make the model reach for it, and the prompt
+    ordering that tells it to is exactly the kind of instruction that decays
+    silently as the prompt grows. This is the measurement.
+
+    The fixture is a real nested failure (``failed_multiply_add``): the work
+    chain exits 400 saying only that a sub-process failed, and the cause ---
+    exit 410, a negative sum --- is one level down. An agent that stops at the
+    top-level code has not answered the question.
+    """
+
+    def test_a_failure_question_reaches_the_diagnosis_tool(
+        self, analysis_agent: Agent, failed_multiply_add: orm.WorkChainNode
+    ) -> None:
+        trace = _run(analysis_agent, f"why did pk {failed_multiply_add.pk} fail?")
+
+        assert trace.called("diagnose_process_failure"), (
+            "a 'why did it fail' question was answered without diagnosing it; "
+            f"tools called: {trace.tool_names}"
+        )
+
+    def test_the_diagnosis_comes_before_the_log(
+        self, analysis_agent: Agent, failed_multiply_add: orm.WorkChainNode
+    ) -> None:
+        """The prompt's ladder, pinned.
+
+        Reading the report first is not wrong, only wasteful and prone to
+        stopping at a symptom: the diagnosis already resolves what the log has
+        to be read to work out.
+        """
+        trace = _run(analysis_agent, f"why did pk {failed_multiply_add.pk} fail?")
+
+        names = trace.tool_names
+        if "get_process_report" not in names:
+            return
+        assert names.index("diagnose_process_failure") < names.index(
+            "get_process_report"
+        ), f"read the log before diagnosing; tools called: {names}"
+
+    def test_the_answer_reaches_the_calculation_not_just_the_workchain(
+        self, analysis_agent: Agent, failed_multiply_add: orm.WorkChainNode
+    ) -> None:
+        """The root cause is a level below the pk the user asked about.
+
+        Asserted against the tool output rather than the prose, so a model that
+        phrases the cause in its own words still passes and one that never
+        obtained it still fails.
+        """
+        trace = _run(analysis_agent, f"why did pk {failed_multiply_add.pk} fail?")
+
+        assert "410" in trace.all_output, (
+            "never retrieved the nested calculation's exit code, so any cause "
+            f"named in the answer was inferred:\n{trace.answer}"
+        )
+
+    def test_a_failure_explanation_invents_no_numbers(
+        self, analysis_agent: Agent, failed_multiply_add: orm.WorkChainNode
+    ) -> None:
+        """An invented exit code or parameter reads exactly like a real one."""
+        prompt = f"why did pk {failed_multiply_add.pk} fail?"
+        trace = _run(analysis_agent, prompt)
+
+        assert_grounded_quantities(trace, prompt)
 
 
 class TestMultiStepPlanning:
