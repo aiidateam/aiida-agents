@@ -215,6 +215,17 @@ module = ["numpy", "numpy.*"]
 follow_imports = "skip"
 
 [[tool.mypy.overrides]]
+# The dev stubs under ``dev/`` are installed only by their own dependency group
+# (``uv sync --group qe`` / ``--group vasp``), so they are absent wherever those
+# groups are not synced -- CI included. Their tests skip at runtime via
+# ``importorskip``, but mypy resolves the import regardless and would fail the
+# lint job on a package it was never meant to need. Both ship ``py.typed``, so
+# where they *are* installed they are still checked normally; this only stops
+# their absence from being an error.
+module = ["qe_rag_stub.*", "vasp_rag_stub.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 # AiiDA's ORM is only partially typed (``orm.Int()``, ``append_atom()``, ...),
 # so strict mypy flags every ORM call in the tests as ``no-untyped-call``. That
 # is AiiDA's gap, not ours, and a per-call ``# type: ignore`` is unsustainable.
