@@ -17,6 +17,7 @@ uv run pre-commit install     # install git hooks (pre-commit + commit-msg)
 | Add / remove a dependency | `uv add <pkg>` / `uv remove <pkg>` | adding/removing a dependency — updates `pyproject.toml`, `uv.lock`, and the env in one step |
 | Sync the environment | `uv sync` | after `git pull`, or to (re)create the env from `uv.lock` |
 | Sync with Quantum ESPRESSO | `uv sync --group qe` | to work against real QE workflows and their docs corpus |
+| Sync with VASP | `uv sync --group vasp` | the same, for `aiida-vasp` |
 | Run all checks | `uv run pre-commit run --all-files` | before pushing / opening a PR |
 | Run one check | `uv run pre-commit run ruff --all-files` | iterating on a single hook (`ruff`, `mypy`, `mdformat`, `uv-lock`, …) |
 | Run tests | `uv run pytest` | while developing |
@@ -77,6 +78,14 @@ The same applies to the optional extras, so name everything you want in one comm
 ```bash
 uv sync --group qe --extra rag-fallback     # QE *and* the local fallback embedder
 ```
+
+### Other plugins
+
+`vasp` is the same arrangement for `aiida-vasp` (`uv sync --group vasp`, installing the plugin and `dev/vasp_rag_stub`), and a second corpus is what makes cross-corpus attribution testable against real docs rather than a fixture.
+Note that nothing in `tools/` is plugin-specific: installing a plugin registers its entry points, and `list_workflows` / `describe_workflow` / `build_workflow_inputs` / `draft_workflow_inputs` read whatever is installed.
+A group buys the *documentation*, not the workflow support.
+
+No pseudopotential package accompanies `vasp`: VASP's POTCARs are licensed and cannot be redistributed, so supply them out of band.
 
 ## Lockfile (`uv.lock`)
 

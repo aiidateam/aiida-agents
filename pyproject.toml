@@ -113,10 +113,25 @@ qe = [
   "qe-rag-stub",
 ]
 
+# The same arrangement for VASP, and a group of its own so a QE-only setup does
+# not pay for it. Nothing in the tool layer is plugin-specific -- installing
+# aiida-vasp registers its entry points, and list_workflows/describe_workflow/
+# build_workflow_inputs read them like any other -- so what this group really
+# adds is the documentation corpus, without which an agent can discover a
+# VaspRelaxWorkChain's ports but not what any of them mean.
+#
+# No pseudopotential package here, deliberately: VASP's POTCARs are licensed
+# and cannot be distributed, so a working setup supplies them out of band.
+vasp = [
+  "aiida-vasp~=5.1",
+  "vasp-rag-stub",
+]
+
 [tool.uv.sources]
-# The stub lives in this repository; installing it editable means a change to
-# dev/qe_rag_stub takes effect without reinstalling.
+# The stubs live in this repository; installing them editable means a change to
+# dev/*_rag_stub takes effect without reinstalling.
 qe-rag-stub = { path = "dev/qe_rag_stub", editable = true }
+vasp-rag-stub = { path = "dev/vasp_rag_stub", editable = true }
 
 [tool.hatch.metadata]
 allow-direct-references = true

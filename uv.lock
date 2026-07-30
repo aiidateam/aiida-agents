@@ -89,6 +89,10 @@ qe = [
     { name = "aiida-quantumespresso" },
     { name = "qe-rag-stub" },
 ]
+vasp = [
+    { name = "aiida-vasp" },
+    { name = "vasp-rag-stub" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -133,6 +137,10 @@ qe = [
     { name = "aiida-pseudo", specifier = "~=1.8" },
     { name = "aiida-quantumespresso", specifier = "~=5.0" },
     { name = "qe-rag-stub", editable = "dev/qe_rag_stub" },
+]
+vasp = [
+    { name = "aiida-vasp", specifier = "~=5.1" },
+    { name = "vasp-rag-stub", editable = "dev/vasp_rag_stub" },
 ]
 
 [[package]]
@@ -252,6 +260,26 @@ dependencies = [
     { name = "python-multipart" },
     { name = "starlette-graphene3" },
     { name = "uvicorn", extra = ["standard"] },
+]
+
+[[package]]
+name = "aiida-vasp"
+version = "5.1.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "aiida-core" },
+    { name = "ase" },
+    { name = "lxml" },
+    { name = "packaging" },
+    { name = "parsevasp" },
+    { name = "pydantic" },
+    { name = "pyyaml" },
+    { name = "seekpath" },
+    { name = "spglib" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/d6/c0/59a73233e24af28cf1a18e84ef381ce7ccf67c56594eae47251045ec43bc/aiida_vasp-5.1.0.tar.gz", hash = "sha256:558c39c1de110254a9bb93095e0da9cec96411d8cb07881fa7d02d6f6f7f576d", size = 14410804, upload-time = "2026-06-18T10:32:54.207Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/52/83/ec97fd4480cc5e5aaf68639fce27588c1745d661535a6e7cc37466a01981/aiida_vasp-5.1.0-py3-none-any.whl", hash = "sha256:2b93e6e6efbc03bab7790a2f10094b3dc9c759793fd56505842e9c9eec5384b4", size = 559930, upload-time = "2026-06-18T10:32:52.464Z" },
 ]
 
 [[package]]
@@ -5046,6 +5074,21 @@ wheels = [
 ]
 
 [[package]]
+name = "parsevasp"
+version = "3.4.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "lxml" },
+    { name = "numpy", version = "2.2.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "pyyaml" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ce/2c/d5316225556aa217f8933465e269ed23a67c04d0e3bb55d3caf39fb6da05/parsevasp-3.4.0.tar.gz", hash = "sha256:c761f2c85572eae5924e7fca2fc89ee31ed8f6c3f21babf8ece9da983629904f", size = 1908101, upload-time = "2025-10-24T09:53:32.974Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/81/0e/c5a7ad44df9a4753a3bdccc5649857e9d74201f0091298c5b33f0af94bb4/parsevasp-3.4.0-py3-none-any.whl", hash = "sha256:a8f8766ec257ea3e8cb8ad8ea565f031b0cda2cdc01002ec0864ccee865dd4af", size = 82848, upload-time = "2025-10-24T09:53:31.022Z" },
+]
+
+[[package]]
 name = "parso"
 version = "0.8.7"
 source = { registry = "https://pypi.org/simple" }
@@ -8239,6 +8282,17 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/97/cc/48d232f33d60e2e2e0b42f4e73455b146b76ebe216487e862700457fbf3c/uvloop-0.22.1-cp314-cp314t-musllinux_1_2_aarch64.whl", hash = "sha256:daf620c2995d193449393d6c62131b3fbd40a63bf7b307a1527856ace637fe88", size = 4328384, upload-time = "2025-10-16T22:16:59.36Z" },
     { url = "https://files.pythonhosted.org/packages/e4/16/c1fd27e9549f3c4baf1dc9c20c456cd2f822dbf8de9f463824b0c0357e06/uvloop-0.22.1-cp314-cp314t-musllinux_1_2_x86_64.whl", hash = "sha256:6cde23eeda1a25c75b2e07d39970f3374105d5eafbaab2a4482be82f272d5a5e", size = 4296730, upload-time = "2025-10-16T22:17:00.744Z" },
 ]
+
+[[package]]
+name = "vasp-rag-stub"
+version = "0.0.0"
+source = { editable = "dev/vasp_rag_stub" }
+dependencies = [
+    { name = "aiida-agents" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "aiida-agents" }]
 
 [[package]]
 name = "virtualenv"
