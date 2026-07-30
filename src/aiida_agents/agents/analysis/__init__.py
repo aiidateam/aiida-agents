@@ -26,6 +26,7 @@ from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
 from aiida_agents.plugins import LoadedPlugin, discover_plugins
 from aiida_agents.tools import (
+    diagnose_process_failure,
     get_node_inputs,
     get_node_outputs,
     get_process_report,
@@ -48,6 +49,7 @@ from aiida_agents.rag import search_aiida_docs
 _READ_TOOLS: list[Any] = [
     get_process_status,
     get_process_report,
+    diagnose_process_failure,
     list_retrieved_files,
     get_retrieved_file,
     list_processes,

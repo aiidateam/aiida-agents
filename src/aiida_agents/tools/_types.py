@@ -17,12 +17,16 @@ from typing_extensions import TypedDict
 
 __all__ = [
     "CodeRecord",
+    "FailedStep",
+    "FailureDiagnosis",
+    "HandlerAttempt",
     "Identifier",
     "NodeLink",
     "ProcessRecord",
     "ProcessReport",
     "ProcessStatus",
     "QueryResult",
+    "RegisteredHandler",
     "StructureImportResult",
     "StructureRecord",
     "SubmitResult",
@@ -175,3 +179,74 @@ class SubmitResult(TypedDict):
     uuid: str
     workflow: str
     state: str
+
+
+class FailedStep(TypedDict):
+    """One process on the path from a reported failure down to its cause.
+
+    ``exit_message`` is what the run stored; ``exit_code_meaning`` is what the
+    process class *declares* that status to mean. They usually agree, but a
+    templated exit code stores the formatted message while the declaration
+    carries the general one, and the general one is often the more diagnostic
+    of the two.
+    """
+
+    pk: int
+    process_label: str
+    node_type: str
+    state: str | None
+    exit_status: int | None
+    exit_message: str | None
+    exit_code_meaning: str | None
+
+
+class HandlerAttempt(TypedDict):
+    """One registered handler's verdict on one iteration of a restart loop.
+
+    ``applied`` false means the handler was consulted and declined --- it does
+    not recognise this failure --- which is as informative as a handler that
+    fired, because it rules that remedy out.
+    """
+
+    iteration: int
+    handler: str
+    applied: bool
+    do_break: bool | None
+    exit_status: int | None
+    description: str | None
+
+
+class RegisteredHandler(TypedDict):
+    """A remedy a restart work chain knows how to apply.
+
+    ``handles_exit_statuses`` is ``None`` when the handler declares no exit
+    codes (it is consulted for every failure) *or* when the declaration could
+    not be read; both mean the same thing to a caller --- it might apply.
+    """
+
+    name: str
+    priority: int | None
+    enabled: bool | None
+    handles_exit_statuses: list[int] | None
+    description: str | None
+
+
+class FailureDiagnosis(TypedDict):
+    """Return shape of ``diagnose_process_failure``.
+
+    ``failed`` is stated rather than implied, so a process that finished fine
+    cannot be read as a failure with nothing found. When it is false, the
+    remaining fields describe a healthy or still-running process.
+    """
+
+    pk: int
+    process_label: str
+    state: str | None
+    failed: bool
+    exit_status: int | None
+    exit_message: str | None
+    failure_chain: list[FailedStep]
+    root_cause: FailedStep | None
+    handling_attempted: list[HandlerAttempt]
+    known_remedies: list[RegisteredHandler]
+    retrieved_files_pk: int | None

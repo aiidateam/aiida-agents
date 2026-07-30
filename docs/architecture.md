@@ -86,7 +86,7 @@ The language layer is thin on purpose. Everything a wrong answer could damage is
 
 **Planner** (`agents/planner/`) — no tools, one cheap call. Emits `specialist: task` lines, parsed strictly. A plan that cannot be parsed is rejected whole and falls back to a single read-only step. Capped at three steps. See [ADR-09](/docs/adr/09-agent-orchestration.md).
 
-**Analysis agent** (`agents/analysis/`) — read-only exploration: querying nodes, following provenance, reading process reports and the files a calculation brought back, summarising past runs, searching the docs.
+**Analysis agent** (`agents/analysis/`) — read-only exploration: querying nodes, following provenance, reading process reports and the files a calculation brought back, diagnosing a failure against the workflow's own exit codes and restart handlers, summarising past runs, searching the docs.
 
 **Execution agent** (`agents/execution/`) — discovering installed workflows, inspecting their input schemas, building inputs from a workflow's own protocol builder (or, for a process that has none, drafting them from its declared ports), importing a structure, and submitting. Its two write tools are approval-gated.
 

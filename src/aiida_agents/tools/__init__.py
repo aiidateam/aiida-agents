@@ -16,9 +16,10 @@ get_process_status, get_process_report, list_processes
     Process inspection, shared by both agents (``tools/processes.py``): the
     Analysis agent reports on runs and explains failures, the Execution agent
     follows up on what it just submitted.
-query_nodes, get_node_inputs, get_node_outputs, search_structures
-    Analysis agent's read-only AiiDA query tools (``tools/analysis/``), safe to
-    register on an agent or expose over MCP.
+query_nodes, get_node_inputs, get_node_outputs, search_structures,
+diagnose_process_failure
+    Analysis agent's read-only AiiDA query and diagnosis tools
+    (``tools/analysis/``), safe to register on an agent or expose over MCP.
 list_workflows, describe_workflow, build_workflow_inputs,
 draft_workflow_inputs, list_codes, query_run_context
     Execution agent's read-only tools (``tools/execution/``): entry-point and
@@ -32,6 +33,7 @@ draft_workflow_inputs, list_codes, query_run_context
 from __future__ import annotations
 
 from aiida_agents.tools.analysis import (
+    diagnose_process_failure,
     get_node_inputs,
     get_node_outputs,
     query_nodes,
@@ -56,6 +58,7 @@ from aiida_agents.tools.execution.codes import list_codes
 __all__ = [
     "build_workflow_inputs",
     "describe_workflow",
+    "diagnose_process_failure",
     "draft_workflow_inputs",
     "get_node_inputs",
     "get_node_outputs",
