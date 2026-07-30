@@ -94,6 +94,31 @@ class RestartDemo(BaseRestartWorkChain):
         """Unrelated remedy, for an exit code this run never produces."""
 
 
+class RecoveringRestartDemo(RestartDemo):
+    """The same work chain, with a handler that actually fixes the problem."""
+
+    @process_handler(
+        priority=500,
+        exit_codes=ArithmeticAddCalculation.exit_codes.ERROR_NEGATIVE_NUMBER,
+    )
+    def handle_negative_sum(self, node: orm.CalcJobNode) -> ProcessHandlerReport:
+        """Flip the sign of the operand so the sum comes out positive."""
+        self.ctx.inputs["y"] = orm.Int(abs(node.inputs.y.value))
+        return ProcessHandlerReport(True)
+
+
+@pytest.fixture(scope="module")
+def recovered_workchain(arithmetic_add_code: orm.InstalledCode) -> orm.WorkChainNode:
+    """A restart work chain that hit exit 410, fixed it, and finished cleanly."""
+    _, node = run_get_node(
+        RecoveringRestartDemo,
+        add={"x": orm.Int(2), "y": orm.Int(-100), "code": arithmetic_add_code},
+    )
+    assert isinstance(node, orm.WorkChainNode)
+    assert node.exit_status == 0, "the fixture is only useful if the run recovered"
+    return node
+
+
 @pytest.fixture(scope="module")
 def exhausted_workchain(arithmetic_add_code: orm.InstalledCode) -> orm.WorkChainNode:
     """A restart work chain that applied its remedy twice and still failed."""
@@ -275,14 +300,29 @@ class TestNonFailures:
         assert diagnosis["failure_chain"] == []
         assert diagnosis["known_remedies"] == []
 
-    def test_a_running_or_healthy_process_yields_no_diagnosis_fields(
+    def test_a_healthy_process_yields_no_diagnosis_fields(
         self, add_calc: orm.CalcJobNode
     ) -> None:
-        """Nothing is populated speculatively for a process that is fine."""
+        """Nothing is populated speculatively for a process that never faltered."""
         diagnosis = diagnose_process_failure(str(add_calc.pk))
 
         assert diagnosis["handling_attempted"] == []
         assert diagnosis["retrieved_files_pk"] is None
+
+    def test_a_recovered_run_still_shows_what_it_had_to_do(
+        self, recovered_workchain: orm.WorkChainNode
+    ) -> None:
+        """Succeeding after two restarts is not the same as succeeding.
+
+        Reported even though ``failed`` is false: the trail is a fact about the
+        run, and suppressing it hides trouble behind a green result.
+        """
+        diagnosis = diagnose_process_failure(str(recovered_workchain.pk))
+
+        assert diagnosis["failed"] is False
+        assert diagnosis["root_cause"] is None
+        applied = [a for a in diagnosis["handling_attempted"] if a["applied"]]
+        assert [a["handler"] for a in applied] == ["handle_negative_sum"]
 
     def test_a_data_node_is_rejected(
         self, silicon_structure: orm.StructureData

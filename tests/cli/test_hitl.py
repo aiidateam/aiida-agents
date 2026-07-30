@@ -70,7 +70,7 @@ class TestSubmitWorkflowRequiresApproval:
         """
         assert set(get_agent("analysis")._function_toolset.tools) == set()
 
-    def test_read_tools_match_the_registered_set(self) -> None:
+    def test_read_tools_match_the_registered_set(self, without_plugins: None) -> None:
         """The read toolset is exactly ``_READ_TOOLS``, and no write tool leaks
         into it, an ungated write tool here would bypass approval.
         """

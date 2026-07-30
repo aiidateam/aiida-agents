@@ -45,7 +45,9 @@ EXPECTED_TOOLS = {
 # agent wiring (no real LLM)
 
 
-def test_agent_exposes_expected_tools(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_agent_exposes_expected_tools(
+    monkeypatch: pytest.MonkeyPatch, without_plugins: None
+) -> None:
     """get_agent wires exactly our tools onto the agent (no more, no fewer)."""
     monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", "ollama")
     agent = get_agent()

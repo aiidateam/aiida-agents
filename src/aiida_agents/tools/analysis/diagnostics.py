@@ -355,7 +355,11 @@ def diagnose_process_failure(identifier: Identifier) -> FailureDiagnosis:
 
     Returns:
         The diagnosis. ``failed`` is false for a process that succeeded or is
-        still running, in which case there is nothing to explain.
+        still running, in which case there is nothing to explain --- though
+        ``handling_attempted`` can still be non-empty, for a run that recovered
+        from its own trouble. Say so when it is: a workflow that succeeded only
+        after restarting three times is worth mentioning, not hiding behind
+        "it worked".
 
     Raises:
         WrongNodeType: If the identifier names a data node rather than a process.
@@ -371,6 +375,11 @@ def diagnose_process_failure(identifier: Identifier) -> FailureDiagnosis:
         raise WrongNodeType(msg)
 
     if not _has_failed(node):
+        # A run that recovered is not a failure, but it is not the same as one
+        # that never had trouble: "it succeeded" and "it succeeded once its
+        # remedy had fired twice" answer different questions, and only the
+        # handler trail distinguishes them. Report it. There is no failure to
+        # chain, no root cause, and nothing left to remedy.
         return FailureDiagnosis(
             pk=t.cast(int, node.pk),
             process_label=t.cast(str, node.process_label),
@@ -380,7 +389,7 @@ def diagnose_process_failure(identifier: Identifier) -> FailureDiagnosis:
             exit_message=node.exit_message,
             failure_chain=[],
             root_cause=None,
-            handling_attempted=[],
+            handling_attempted=_handling_attempted([node], _restart_handlers([node])),
             known_remedies=[],
             retrieved_files_pk=None,
         )

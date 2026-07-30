@@ -153,3 +153,22 @@ def failed_multiply_add(
     assert isinstance(node, orm.WorkChainNode)
     assert node.exit_status, "the fixture is only useful if the run actually failed"
     return node
+
+
+@pytest.fixture
+def without_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Build agents as if no plugin were installed.
+
+    Two tests pin an agent's tool surface by *exact* equality, which is only
+    meaningful for the tools this package registers itself. A plugin may
+    contribute more --- ``dev/qe_rag_stub`` does, once ``uv sync --group qe``
+    has run --- and without this those assertions fail on a developer's machine
+    while passing in CI, where no plugin is installed. That is the worst
+    direction for a test to be wrong in.
+
+    Plugin contribution is not left untested by stubbing it here; it is tested
+    where it belongs, in ``tests/plugins/``.
+    """
+    from aiida_agents.agents import analysis
+
+    monkeypatch.setattr(analysis, "discover_plugins", lambda: ())

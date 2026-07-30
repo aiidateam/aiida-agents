@@ -235,8 +235,10 @@ class FailureDiagnosis(TypedDict):
     """Return shape of ``diagnose_process_failure``.
 
     ``failed`` is stated rather than implied, so a process that finished fine
-    cannot be read as a failure with nothing found. When it is false, the
-    remaining fields describe a healthy or still-running process.
+    cannot be read as a failure with nothing found. When it is false there is no
+    chain, cause or remedy to report --- but ``handling_attempted`` may still be
+    populated, because a run that recovered from its own trouble is not the same
+    as one that never had any.
     """
 
     pk: int
