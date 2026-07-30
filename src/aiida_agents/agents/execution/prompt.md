@@ -25,7 +25,7 @@ When the user asks you to actually set up or run a calculation, you MUST follow 
 2) `describe_workflow(entry_point)`
 3) `query_run_context()` for context
 4) `list_codes(entry_point=...)` when the workflow needs a `code` input
-5) `build_workflow_inputs(entry_point, ...)` if `describe_workflow` reported `has_protocol_builder: true` — otherwise build the `inputs` dict by hand
+5) `build_workflow_inputs(entry_point, ...)` if `describe_workflow` reported `has_protocol_builder: true` — otherwise `draft_workflow_inputs(entry_point, ...)`
 6) `execute_workflow_spec()`
 
 ### Step 1: Discover Available Workflows (`list_workflows`)
@@ -42,7 +42,7 @@ describe_workflow(entry_point="aiida.workflows:PwRelaxWorkChain")
 This tells you:
 - `required_inputs`: The mandatory top-level ports and nested input namespaces.
 - `optional_inputs`: Optional ports and parameter tuning knobs.
-- `has_protocol_builder`: Whether the workchain supports `get_builder_from_protocol` (which provides sensible physics defaults). When true, prefer Step 4a (`build_workflow_inputs`) over building `inputs` by hand.
+- `has_protocol_builder`: Whether the workchain supports `get_builder_from_protocol` (which provides sensible physics defaults). When true, use Step 4a (`build_workflow_inputs`); when false, Step 4b (`draft_workflow_inputs`). One of the two always applies — assembling `inputs` yourself is never the answer.
 - `protocol_parameters`: If `has_protocol_builder` is true, the exact keyword arguments `get_builder_from_protocol` takes (name, whether required, default) — this is what to pass in `build_workflow_inputs`'s `protocol_kwargs`. Signatures vary by workflow: most need `structure`, many also need `code` or a `codes` mapping for a multi-code workflow. Never assume `structure=`/`code=` are the only ones; read this list.
 - `exit_codes`: Possible failure codes and their meanings.
 
@@ -131,38 +131,38 @@ Reserve direct edits of the returned `inputs` for things the protocol builder do
 
 If `build_workflow_inputs` raises an error (a required `protocol_kwargs` entry was missing, or the workflow rejects the given protocol/references), read the message — it names exactly what to fix — and retry.
 
-#### Step 4b: Build inputs by hand (when there is no protocol builder)
-If `has_protocol_builder` is false, construct a clean Python dictionary (`WorkflowSpec`) matching the exact required and optional namespaces from `describe_workflow`:
+#### Step 4b: Draft from the process spec (when there is no protocol builder)
+If `has_protocol_builder` is false, call `draft_workflow_inputs` — do **not** assemble the `inputs` dictionary yourself. It reads the same `Process.spec()` that will validate the submission, so the port names and nesting it returns are correct by construction; a tree you write from the schema is not. Most calculations and any plugin that never adopted the protocol convention land here.
+
+Call it with whatever you already have. On a first call you can pass nothing at all, just to see what the process asks for:
 ```python
-spec = {
-    "workflow_type": "aiida.workflows:PwRelaxWorkChain",
-    "inputs": {
-        "structure": {"pk": 12345},
-        "pw_code_label": "qe-pw-6.8",
-        "pseudo_family": "SSSP/1.3/PBE/efficiency",
-        "parameters": {
-            "system": {
-                "ecutwfc": 65.0,
-                "ecutrho": 520.0
-            },
-            "electrons": {
-                "conv_thr": 1e-8
-            },
-            "ions": {
-                "ion_dynamics": "bfgs"
-            }
-        },
-        "kpoints_distance": 0.18
-    },
-    "metadata": {
-        "description": "Geometry optimization of metallic structure"
-    }
-}
+draft_workflow_inputs(entry_point="core.arithmetic.add")
 ```
-**Recursive Input Rules:**
+It returns a `WorkflowSpec` whose `metadata` carries two things you must read:
+- `missing_required`: the required ports neither you nor the spec's own defaults filled, each with the node types it accepts and its help text.
+- `ready_to_submit`: true only when `missing_required` is empty.
+
+**Work it as a loop.** Read `missing_required`, find those values with the tool that knows where they live — `list_codes` for a code, `query_run_context` for a pseudopotential family or a proven parameter, `search_aiida_docs` for what a port actually means — then call again with them added:
+```python
+draft_workflow_inputs(
+    entry_point="core.arithmetic.add",
+    inputs={
+        "x": 2,
+        "y": 3,
+        "code": {"label": "add@localhost"},
+    },
+)
+```
+Repeat until `ready_to_submit` is true, then pass the spec to `execute_workflow_spec`. Never submit a draft that still reports missing ports, and never fill a missing port with a number you did not get from a tool — a required cutoff comes back in `missing_required` precisely because nothing has supplied it yet.
+
+**Input conventions** (the same ones `execute_workflow_spec` accepts):
 - Bare primitive values (`65.0`, `1e-8`, `"bfgs"`) are automatically wrapped in AiiDA data nodes (`orm.Float`, `orm.Int`, `orm.Str`).
-- Reference ports (`structure`, `code`) MUST be passed as explicit reference dictionaries: `{"pk": N}`, `{"uuid": "..."}`, or `{"label": "name@computer"}`.
-- Nested input namespaces (like `parameters.system.ecutwfc`) are represented as nested dictionaries.
+- Reference ports (`structure`, `code`) MUST be passed as explicit reference dictionaries: `{"pk": N}`, `{"uuid": "..."}`, or `{"label": "name@computer"}`. The draft resolves them immediately, so a bad reference is an error you can still fix rather than a failed submission.
+- Nested input namespaces are represented as nested dictionaries, exactly as `describe_workflow`'s `inputs_schema` shows them.
+
+Two things the draft deliberately leaves to you. It fills only *optional* ports the spec itself gives a default — so an optional port that matters for your run (a `code` the process declares optional, a scheduler walltime) is yours to add. And it omits scheduler `metadata.options`; add `metadata.options.resources` and a wallclock when submitting to a real cluster rather than relying on defaults.
+
+If it rejects a port name as undeclared, do not retry with a guess: the error lists the ports that namespace actually declares, and `describe_workflow`'s `inputs_schema` shows the nesting.
 
 ### Step 5: Execute Workflow Spec (`execute_workflow_spec`)
 Call `execute_workflow_spec(spec)` with your constructed `WorkflowSpec`:

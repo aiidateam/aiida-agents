@@ -21,7 +21,8 @@ tweaking a handful of fields on the returned spec, not building it from zero.
 Not every workflow has a protocol builder (most calculations and many older
 workchains do not); ``describe_workflow``'s ``has_protocol_builder`` says so
 up front, and this tool raises a clear, actionable error if called on one that
-doesn't, telling the agent to build the spec directly instead.
+doesn't, pointing at ``draft_workflow_inputs`` --- which drafts the same spec
+shape from the process's own ``Process.spec()`` instead.
 """
 
 from __future__ import annotations
@@ -30,13 +31,14 @@ import inspect
 import logging
 import typing as t
 
-from aiida import orm
-from aiida.common.exceptions import MissingEntryPointError
-from aiida.engine.processes.builder import ProcessBuilderNamespace
-from aiida.orm.nodes.data.base import BaseType
-from aiida.plugins.entry_point import load_entry_point
 from pydantic import Field
 
+from aiida_agents.tools.execution._spec import (
+    is_reference,
+    load_process_class,
+    resolve_reference,
+    to_spec_value,
+)
 from aiida_agents.tools.execution.schemas import WorkflowSpec
 
 logger = logging.getLogger(__name__)
@@ -48,53 +50,6 @@ __all__ = ["build_workflow_inputs"]
 _ALWAYS_ACCEPTED = frozenset({"protocol", "overrides"})
 
 
-def _load_process_class(entry_point: str) -> type:
-    """Load a process class by entry point, checking both process groups."""
-    for group in ("aiida.workflows", "aiida.calculations"):
-        try:
-            return t.cast("type", load_entry_point(group, entry_point))
-        except MissingEntryPointError:
-            continue
-    msg = f"Entry point not found: {entry_point!r}"
-    raise ValueError(msg)
-
-
-def _is_reference(value: t.Any) -> bool:
-    """True for a bare ``{"pk"|"uuid"|"label"}`` node-reference dict."""
-    return isinstance(value, dict) and bool({"pk", "uuid", "label"} & value.keys())
-
-
-def _resolve_reference(ref: dict[str, t.Any], context: str) -> orm.Node:
-    """Resolve a ``{"pk"|"uuid"|"label"}`` reference to an existing node.
-
-    Same reference convention as ``execute_workflow_spec``'s inputs, so a
-    structure or code the model already has a handle on plugs in unchanged.
-    """
-    if "pk" in ref:
-        try:
-            return orm.load_node(ref["pk"])
-        except Exception as exc:
-            raise ValueError(
-                f"No node found with pk={ref['pk']} for {context!r}."
-            ) from exc
-    if "uuid" in ref:
-        try:
-            return orm.load_node(ref["uuid"])
-        except Exception as exc:
-            raise ValueError(
-                f"No node found with uuid={ref['uuid']!r} for {context!r}."
-            ) from exc
-    if "label" in ref:
-        try:
-            return orm.load_code(ref["label"])
-        except Exception as exc:
-            raise ValueError(
-                f"No Code found with label={ref['label']!r} for {context!r}."
-            ) from exc
-    msg = f"Reference {ref!r} for {context!r} must contain 'pk', 'uuid', or 'label'."
-    raise ValueError(msg)
-
-
 def _resolve_protocol_kwargs(kwargs: dict[str, t.Any]) -> dict[str, t.Any]:
     """Resolve any reference-shaped values, recursing into nested dicts.
 
@@ -104,41 +59,13 @@ def _resolve_protocol_kwargs(kwargs: dict[str, t.Any]) -> dict[str, t.Any]:
     """
     resolved: dict[str, t.Any] = {}
     for name, value in kwargs.items():
-        if _is_reference(value):
-            resolved[name] = _resolve_reference(value, name)
+        if is_reference(value):
+            resolved[name] = resolve_reference(value, name)
         elif isinstance(value, dict):
             resolved[name] = _resolve_protocol_kwargs(value)
         else:
             resolved[name] = value
     return resolved
-
-
-def _unwrap(value: t.Any) -> t.Any:
-    """Serialise one populated builder value back to the WorkflowSpec convention.
-
-    Mirrors ``execute_workflow_spec``'s input convention exactly, so the
-    returned spec plugs straight back in: ``Dict``/``List`` unwrap to their
-    plain contents, primitive-backed nodes (``BaseType``: Int/Float/Str/Bool)
-    to their bare ``.value``, and any other *stored* node (Code, StructureData,
-    ...) to a ``{"pk": ...}`` reference. A protocol builder can also leave an
-    *unstored* non-primitive node in place (e.g. a freshly built ``KpointsData``
-    mesh with no pk yet); ``submit_workflow`` already accepts a pre-built AiiDA
-    node as-is, so that is passed straight through rather than forced into a
-    reference it cannot have yet.
-    """
-    if isinstance(value, ProcessBuilderNamespace):
-        return {k: _unwrap(v) for k, v in dict(value).items() if v is not None}
-    if isinstance(value, dict):
-        return {k: _unwrap(v) for k, v in value.items() if v is not None}
-    if isinstance(value, orm.Dict):
-        return value.get_dict()  # type: ignore[no-untyped-call]
-    if isinstance(value, orm.List):
-        return value.get_list()  # type: ignore[no-untyped-call]
-    if isinstance(value, BaseType):
-        return value.value
-    if isinstance(value, orm.Node):
-        return {"pk": value.pk} if value.is_stored else value
-    return value
 
 
 def build_workflow_inputs(
@@ -207,12 +134,15 @@ def build_workflow_inputs(
         protocol,
         protocol_kwargs,
     )
-    process_class = _load_process_class(entry_point)
+    process_class = load_process_class(entry_point)
     builder_from_protocol = getattr(process_class, "get_builder_from_protocol", None)
     if builder_from_protocol is None:
         msg = (
-            f"{entry_point!r} has no get_builder_from_protocol -- build its inputs "
-            "directly instead (see describe_workflow's required_inputs/optional_inputs)."
+            f"{entry_point!r} has no get_builder_from_protocol -- call "
+            f"draft_workflow_inputs({entry_point!r}) instead. It drafts the same "
+            "spec shape from the process's own input ports, filling every default "
+            "the spec declares and naming the required ports you still have to "
+            "supply. Do not assemble the inputs by hand."
         )
         raise ValueError(msg)
 
@@ -255,7 +185,7 @@ def build_workflow_inputs(
         msg = f"{entry_point}.get_builder_from_protocol({call_kwargs!r}) failed: {exc}"
         raise ValueError(msg) from exc
 
-    populated = _unwrap(builder._inputs(prune=True))  # noqa: SLF001 - AiiDA's own public-in-practice accessor
+    populated = to_spec_value(builder._inputs(prune=True))  # noqa: SLF001 - AiiDA's own public-in-practice accessor
     return {
         "workflow_type": entry_point,
         "inputs": populated,

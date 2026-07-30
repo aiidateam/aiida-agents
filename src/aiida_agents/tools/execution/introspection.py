@@ -16,6 +16,8 @@ from aiida.plugins.entry_point import get_entry_points, load_entry_point
 from plumpy.ports import PortNamespace
 from pydantic import Field
 
+from aiida_agents.tools.execution._spec import valid_type_names
+
 logger = logging.getLogger(__name__)
 
 __all__ = ["list_workflows", "describe_workflow"]
@@ -81,17 +83,7 @@ def _inspect_port_namespace(
                 "ports": _inspect_port_namespace(port, prefix=f"{full_name}."),
             }
         else:
-            vt = getattr(port, "valid_type", None)
-            if isinstance(vt, (tuple, list)):
-                vt_names = [
-                    t.__name__ if hasattr(t, "__name__") else str(t)
-                    for t in vt
-                    if t is not type(None)
-                ]
-            elif vt is not None and vt is not type(None):
-                vt_names = [vt.__name__ if hasattr(vt, "__name__") else str(vt)]
-            else:
-                vt_names = ["Any"]
+            vt_names = valid_type_names(port)
 
             has_def = port.has_default() if hasattr(port, "has_default") else False
             def_val = None

@@ -88,7 +88,7 @@ The language layer is thin on purpose. Everything a wrong answer could damage is
 
 **Analysis agent** (`agents/analysis/`) — read-only exploration: querying nodes, following provenance, reading process reports and the files a calculation brought back, summarising past runs, searching the docs.
 
-**Execution agent** (`agents/execution/`) — discovering installed workflows, inspecting their input schemas, building inputs from a workflow's own protocol builder, importing a structure, and submitting. Its two write tools are approval-gated.
+**Execution agent** (`agents/execution/`) — discovering installed workflows, inspecting their input schemas, building inputs from a workflow's own protocol builder (or, for a process that has none, drafting them from its declared ports), importing a structure, and submitting. Its two write tools are approval-gated.
 
 **Tools** (`tools/`) — plain typed functions, grouped to mirror the agents. `tools/analysis/` and `tools/execution/` are owned by one agent each; anything both use lives at the top level. A tool's name, signature and docstring *are* its interface to the model.
 

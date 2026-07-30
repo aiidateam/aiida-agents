@@ -9,6 +9,10 @@ list_workflows, describe_workflow
 build_workflow_inputs
     Pre-populate a workflow's inputs from its own protocol builder
     (``get_builder_from_protocol``), when it has one.
+draft_workflow_inputs
+    Draft the same spec shape from a process's own input ports, for the
+    processes that have no protocol builder --- most calculations, and any
+    plugin that never adopted the convention.
 query_run_context
     Query the Analysis agent for historical context (past successful
     workflows, optimal parameters, structure classifications).
@@ -24,6 +28,7 @@ it after building and validating a spec.
 from __future__ import annotations
 
 from aiida_agents.tools.run_context import query_run_context
+from aiida_agents.tools.execution.drafting import draft_workflow_inputs
 from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
 from aiida_agents.tools.execution.protocol import build_workflow_inputs
 from aiida_agents.tools.execution.schemas import (
@@ -39,6 +44,7 @@ __all__ = [
     "WorkflowSpec",
     "build_workflow_inputs",
     "describe_workflow",
+    "draft_workflow_inputs",
     "execute_workflow_spec",
     "list_workflows",
     "query_run_context",

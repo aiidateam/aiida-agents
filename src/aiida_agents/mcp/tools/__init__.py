@@ -14,6 +14,7 @@ from aiida_agents.mcp._errors import to_mcp_tool_error
 from aiida_agents.tools import (
     build_workflow_inputs,
     describe_workflow,
+    draft_workflow_inputs,
     get_node_inputs,
     get_node_outputs,
     get_process_report,
@@ -60,5 +61,6 @@ def register_all(mcp: FastMCP) -> None:
     register_tool(mcp, list_workflows)
     register_tool(mcp, describe_workflow)
     register_tool(mcp, build_workflow_inputs)
+    register_tool(mcp, draft_workflow_inputs)
     register_tool(mcp, list_codes)
     register_tool(mcp, query_run_context)

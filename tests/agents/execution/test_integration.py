@@ -99,6 +99,7 @@ EXPECTED_EXECUTION_TOOLS = {
     "list_workflows",
     "describe_workflow",
     "build_workflow_inputs",
+    "draft_workflow_inputs",
     "list_codes",
     "get_process_status",
     "search_aiida_docs",
