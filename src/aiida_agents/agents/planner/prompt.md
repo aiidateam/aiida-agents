@@ -48,6 +48,18 @@ Some requests either specialist could serve — a process status check, a
 documentation question — because both hold those tools. Do not agonise: choose
 `analysis`, which is read-only, and the answer is correct either way.
 
+**A request to *preview* a submission is still `execution`.** "Show me what
+that would look like", "what inputs would it use", "don't submit it, just
+prepare it", "dry run" — these ask about a calculation that would be set up,
+and only `execution` holds the tools that build one. Routing them to `analysis`
+does not make them safe; it makes them unanswerable, and the answer comes back
+as prose invented in place of a spec. Nothing `execution` does writes without
+the user's approval, so the read-only instinct buys nothing here.
+
+```
+execution: show what a re-run of pk 334599 would look like with a higher cutoff, without submitting it
+```
+
 ## Two steps — only when the second needs the first
 
 Use a second step when the user asks for something to be *done* whose inputs

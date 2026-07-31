@@ -229,6 +229,14 @@ class TestPlanningPicksTheRightSpecialist:
             # Unambiguously execution: something is to be run or set up.
             ("relax the silicon structure at pk 512", "execution"),
             ("what workflows can I run?", "execution"),
+            # A preview is still execution's: only it holds the tools that
+            # build a spec. Routed to analysis, a real session answered in
+            # prose and invented a cost figure rather than saying it could not.
+            (
+                "show me what a re-run of pk 1234 would look like with a higher "
+                "cutoff, don't submit it",
+                "execution",
+            ),
             ("submit a band structure calculation", "execution"),
             # Asked in order to configure a run, and the historical-statistics
             # tool lives on execution.

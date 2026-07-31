@@ -58,6 +58,15 @@ _WITH_UNIT = re.compile(rf"(?P<num>{_NUMBER})\s*(?:{_UNITS})\b")
 #: claim is actually written.
 _PARAM_SENTENCE = re.compile(rf"(?:{_PARAMS})", re.IGNORECASE)
 
+#: A percentage, which needs its own pattern rather than a place in _UNITS:
+#: ``\b`` after a non-word character like ``%`` never matches, so "40% more"
+#: would slip straight through the units regex.
+#:
+#: Percentages are worth catching because they are how a fabricated claim
+#: usually arrives -- "~40% more resources", "converges 30% faster" reads as
+#: quantified and authoritative, and nothing in a profile ever produced it.
+_PERCENT = re.compile(rf"(?P<num>{_NUMBER})\s*(?:%|percent\b)")
+
 #: A unit written on its own, for removal before counting bare numbers.
 _UNIT_TOKEN = re.compile(rf"(?:{_UNITS})")
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n")
@@ -81,15 +90,22 @@ def _normalise(number: str) -> str:
         return number
 
 
+def _percentages_in(text: str) -> set[str]:
+    """Every number written as a percentage, normalised for comparison."""
+    return {_normalise(m.group("num")) for m in _PERCENT.finditer(text)}
+
+
 def quantities_in(text: str) -> set[str]:
     """Physical quantities asserted in ``text``, as normalised numbers.
 
-    A number counts when it carries a unit, or when it appears in a sentence
-    naming a simulation parameter. Bare numbers in ordinary prose ("step 2 of
-    3", "found 12 structures") do not: flagging those would bury the signal,
-    and a warning nobody believes protects nothing.
+    A number counts when it carries a unit, when it is written as a
+    percentage, or when it appears in a sentence naming a simulation
+    parameter. Bare numbers in ordinary prose ("step 2 of 3", "found 12
+    structures") do not: flagging those would bury the signal, and a warning
+    nobody believes protects nothing.
     """
     found = {_normalise(m.group("num")) for m in _WITH_UNIT.finditer(text)}
+    found |= _percentages_in(text)
 
     for sentence in _SENTENCE_SPLIT.split(text):
         if not _PARAM_SENTENCE.search(sentence):
@@ -118,7 +134,18 @@ def ungrounded_quantities(answer: str, evidence: str, prompt: str = "") -> set[s
         Normalised numeric literals with no source. Empty means every physics
         number in the answer is traceable to a tool or to the question.
     """
-    return quantities_in(answer) - _numbers_in(evidence) - _numbers_in(prompt)
+    grounded = _numbers_in(evidence) | _numbers_in(prompt)
+    missing = quantities_in(answer) - grounded
+
+    # A percentage is also grounded by its fraction. ``query_run_context``
+    # reports ``success_rate`` as 0.67, and an answer saying "67% succeeded" is
+    # repeating that correctly rather than inventing it -- flagging the
+    # conversion would train people to ignore the warning that matters.
+    for value in _percentages_in(answer) & missing:
+        if _normalise(repr(float(value) / 100)) in grounded:
+            missing.discard(value)
+
+    return missing
 
 
 def tool_output_text(messages: list[Any]) -> str:
