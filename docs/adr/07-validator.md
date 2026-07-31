@@ -1,8 +1,10 @@
 # ADR-07: Validator — deterministic schema and range checks before writes
 
-> Status: revised (2026-06). The standalone validator subpackage is removed;
-> schema validation is delegated to AiiDA's own `spec.inputs.validate()` (see
-> the Revision section). The range/physics tier remains deferred.
+> Status: revised twice. (2026-06) The standalone validator subpackage is
+> removed; schema validation is delegated to AiiDA's own
+> `spec.inputs.validate()`. (2026-07) The range/physics tier is built, but as
+> a warning at the approval prompt rather than the gate this ADR specified —
+> see the second Revision section.
 
 ## Context
 
@@ -132,3 +134,59 @@ input namespace (a real multi-step workflow) is passed through unresolved,
 which suits the flat-input demo processes targeted here (arithmetic add /
 multiply_add). Nested support can extend `_resolve_inputs` later without
 touching the seam or the HITL layer.
+
+## Revision (2026-07): the range tier is advisory, not a gate
+
+Tier 2 is now implemented, in `tools/execution/ranges.py`. It departs from what
+this ADR specified in one respect that matters, so the decision is recorded
+rather than left as a discrepancy between the document and the code.
+
+**This ADR said the range tier would block a submission. It warns instead.**
+
+The original framing carried over the cost-asymmetry argument that justifies
+the schema tier: a wrong submission wastes thousands of core-hours, so gate it
+hard. That argument holds for a *type-incorrect* input, which is wrong under
+every interpretation. It does not hold for a cutoff.
+
+A cutoff below the pseudopotential family's recommendation is under-converged
+for a production run and entirely reasonable for a smoke test, a convergence
+study, or a five-minute check that a workflow is wired correctly. There is no
+value at which "reject this" is right in general, so a gate would be wrong
+about as often as it was right — and a validator that refuses legitimate work
+teaches people to route around it, which costs more than the check earns.
+
+What was actually missing was never enforcement. It was the *fact* reaching the
+person approving, at the moment they approve. So:
+
+- `check_input_ranges` is a read tool the Execution agent can call before
+  proposing a submission, and the prompt tells it to whenever it has set a
+  cutoff itself;
+- the same check runs unconditionally in `_print_previews`, so a finding
+  appears at the approval prompt whether or not the model bothered to look.
+
+That pairing is the one the grounding check already uses (ADR-06's revision):
+the prompt asks the model to comply, and the code verifies independently,
+because an instruction has a measured failure rate and a post-hoc check does
+not depend on compliance.
+
+### What it compares against, and what it will not
+
+The recommendation comes from the pseudopotential family the spec itself names,
+through `aiida-pseudo`. This package ships no table of its own — the numbers
+belong to the family's authors, who converged them, and a finding cites the
+family and elements it came from. Where no family can be identified the check
+reports nothing rather than falling back on a general-purpose number.
+
+Cutoffs only. No installed package publishes a recommended k-point spacing per
+structure, so a bound on `kpoints_distance` would be a number this project
+invented and then presented with a validator's authority — the failure mode the
+grounding work exists to prevent. It is left unchecked, and the prompt says so,
+so that an empty result is not read as a clean bill of health.
+
+### Consequence
+
+The write path is now guarded at three levels, and only two of them can stop a
+submission: AiiDA's own spec validation (hard), the human approval gate (hard),
+and the range check (advisory, feeding the second). Nothing in the system
+refuses a physically unusual submission on its own authority, and that is
+deliberate.

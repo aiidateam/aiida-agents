@@ -39,7 +39,12 @@ A cycle that was still decreasing and simply ran out of iterations wants a
 larger `electron_maxstep`. One that oscillated or stalled does not -- more
 iterations of a cycle that is not settling changes nothing, and the answer lies
 with mixing or smearing instead. Say which of the two you observed, and quote
-the accuracy and threshold you were given rather than characterising them.\
+the accuracy and threshold you were given rather than characterising them.
+
+Check `ionic_steps` before you generalise. A relax runs one SCF cycle per ionic
+step, and `trend` describes only the last one. "The SCF oscillated" is wrong
+about a relaxation whose earlier cycles each converged cleanly -- look at
+`cycles` and say which step behaved how.\
 """
 
 

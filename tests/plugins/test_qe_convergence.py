@@ -106,6 +106,106 @@ INTERRUPTED = """
 """
 
 
+# A relax: three ionic steps, each with its own SCF cycle that converges
+# cleanly. Read as one series the restarts look like wild oscillation, which is
+# the mis-reading this shape exists to pin. Modelled on a real vc-relax whose
+# accuracy fell to 5.8e-10, jumped to 2.7e-04, then to 3.8e-01.
+RELAX_THREE_IONIC_STEPS = """
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.70
+     estimated scf accuracy    <       0.50 Ry
+     iteration #  2     ecut=    30.00 Ry     beta= 0.70
+     estimated scf accuracy    <       0.01 Ry
+     iteration #  3     ecut=    30.00 Ry     beta= 0.70
+     estimated scf accuracy    <       5.8E-10 Ry
+
+     convergence has been achieved in   3 iterations
+
+     ATOMIC_POSITIONS (crystal)
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.70
+     estimated scf accuracy    <       2.7E-04 Ry
+     iteration #  2     ecut=    30.00 Ry     beta= 0.70
+     estimated scf accuracy    <       9.0E-09 Ry
+
+     convergence has been achieved in   2 iterations
+
+     ATOMIC_POSITIONS (crystal)
+
+     Self-consistent Calculation
+
+     iteration #  1     ecut=    30.00 Ry     beta= 0.70
+     estimated scf accuracy    <       3.8E-01 Ry
+     iteration #  2     ecut=    30.00 Ry     beta= 0.70
+     estimated scf accuracy    <       4.0E-01 Ry
+     iteration #  3     ecut=    30.00 Ry     beta= 0.70
+     estimated scf accuracy    <       3.9E-01 Ry
+
+     convergence NOT achieved after   3 iterations: stopping
+"""
+
+
+class TestIonicSteps:
+    """A relax is several SCF cycles, not one badly behaved one."""
+
+    def test_each_ionic_step_is_counted(self) -> None:
+        parsed = parse_scf_trace(RELAX_THREE_IONIC_STEPS)
+
+        assert parsed["ionic_steps"] == 3
+        assert len(parsed["cycles"]) == 3
+
+    def test_a_clean_cycle_is_not_called_oscillating(self) -> None:
+        """The bug this fixes: restarts between steps read as one wild series.
+
+        Every cycle here descends monotonically. Concatenated, the jumps from
+        5.8e-10 to 2.7e-04 to 3.8e-01 are two large increases -- enough for the
+        old whole-file reading to report oscillation and send a reader after the
+        mixing scheme when the electronic minimisation was fine.
+        """
+        assert parse_scf_trace(RELAX_THREE_IONIC_STEPS)["cycles"][0]["trend"] == (
+            "decreasing"
+        )
+        assert parse_scf_trace(RELAX_THREE_IONIC_STEPS)["cycles"][1]["trend"] == (
+            "decreasing"
+        )
+
+    def test_the_top_level_shape_describes_the_final_cycle(self) -> None:
+        """The run ended on that cycle, and a remedy would act on it.
+
+        That cycle sat at 0.38, 0.40, 0.39 -- barely moving, nowhere near the
+        threshold. ``stalled`` is the signal that matters here: it is what
+        separates "needs more iterations" from "more iterations change
+        nothing".
+        """
+        parsed = parse_scf_trace(RELAX_THREE_IONIC_STEPS)
+
+        assert parsed["stalled"] is True
+        assert parsed["converged"] is False
+        assert parsed["final_accuracy_ry"] == pytest.approx(3.9e-01)
+
+    def test_the_verdict_is_the_last_cycles_not_the_first(self) -> None:
+        """Two cycles here achieved convergence; the run still failed."""
+        parsed = parse_scf_trace(RELAX_THREE_IONIC_STEPS)
+
+        assert parsed["cycles"][0]["converged"] is True
+        assert parsed["converged"] is False
+
+    def test_the_full_series_still_spans_every_cycle(self) -> None:
+        parsed = parse_scf_trace(RELAX_THREE_IONIC_STEPS)
+
+        assert len(parsed["scf_accuracy"]) == 8
+
+    def test_an_output_with_no_cycle_marker_is_read_as_one(self) -> None:
+        """A truncated job, or a pw.x whose header this pattern misses."""
+        parsed = parse_scf_trace(INTERRUPTED)
+
+        assert parsed["ionic_steps"] == 1
+        assert parsed["scf_accuracy"] == [0.70, 0.20]
+
+
 class TestVerdict:
     """Whether the cycle reached self-consistency."""
 

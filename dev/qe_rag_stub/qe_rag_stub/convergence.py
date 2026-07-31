@@ -44,6 +44,12 @@ _NOT_ACHIEVED = re.compile(
     r"convergence\s+NOT\s+achieved\s+after\s+(\d+)\s+iterations", re.IGNORECASE
 )
 
+# pw.x prints this once per SCF cycle. A single-point calculation has one; a
+# relax or vc-relax has one per ionic step, each starting its accuracy series
+# over from a large value. Splitting on it is what stops those restarts from
+# being read as one long, badly behaved cycle.
+_CYCLE_START = re.compile(r"^\s*Self-consistent Calculation\s*$", re.MULTILINE)
+
 # Below this ratio between the largest and smallest of the last few iterations,
 # the cycle is treated as having stopped making progress rather than as
 # converging slowly. Two is generous: a healthy SCF cycle drops by an order of
@@ -95,18 +101,8 @@ def _stalled(series: t.Sequence[float]) -> bool | None:
     return max(window) / min(window) < _STALL_RATIO
 
 
-def parse_scf_trace(text: str) -> dict[str, t.Any]:
-    """Extract the electronic convergence trace from pw.x stdout.
-
-    Args:
-        text: The contents of the calculation's output file.
-
-    Returns:
-        A mapping with ``converged`` (``None`` when the run neither reported
-        success nor gave up --- a job killed mid-cycle), ``iterations_run``,
-        the ``scf_accuracy`` series in Ry, its ``final_accuracy_ry``,
-        ``trend`` and ``stalled``.
-    """
+def _parse_cycle(text: str) -> dict[str, t.Any]:
+    """One SCF cycle: its accuracy series, verdict, and shape."""
     accuracies = [_to_float(match) for match in _ACCURACY.findall(text)]
     iterations = [int(match) for match in _ITERATION.findall(text)]
 
@@ -114,18 +110,12 @@ def parse_scf_trace(text: str) -> dict[str, t.Any]:
     not_achieved = _NOT_ACHIEVED.search(text)
     if achieved:
         converged: bool | None = True
-    elif not_achieved:
-        converged = False
-    else:
-        converged = None
-
-    # The reported count is authoritative where pw.x states one; the number of
-    # "iteration #" lines undercounts a restarted cycle and overcounts nothing.
-    if achieved:
         iterations_run = int(achieved.group(1))
     elif not_achieved:
+        converged = False
         iterations_run = int(not_achieved.group(1))
     else:
+        converged = None
         iterations_run = max(iterations) if iterations else 0
 
     return {
@@ -135,6 +125,58 @@ def parse_scf_trace(text: str) -> dict[str, t.Any]:
         "final_accuracy_ry": accuracies[-1] if accuracies else None,
         "trend": _trend(accuracies),
         "stalled": _stalled(accuracies),
+    }
+
+
+def parse_scf_trace(text: str) -> dict[str, t.Any]:
+    """Extract the electronic convergence trace from pw.x stdout.
+
+    A relax or vc-relax runs one SCF cycle *per ionic step*, and each starts
+    its accuracy over from a large value. Read as a single series those
+    restarts look exactly like a cycle that keeps blowing up, so the trace is
+    segmented per cycle first and the shape is computed within each.
+
+    That distinction decides the advice: a relax whose every cycle converged
+    cleanly, reported as "oscillating", sends a reader after the mixing scheme
+    when nothing was wrong with the electronic minimisation at all.
+
+    Args:
+        text: The contents of the calculation's output file.
+
+    Returns:
+        A mapping describing the **final** cycle --- ``converged``,
+        ``iterations_run``, ``trend``, ``stalled``, ``final_accuracy_ry`` ---
+        since that is the one the run ended on and the one any remedy would
+        act on. ``scf_accuracy`` is the whole run's series in order, across
+        every cycle; ``cycles`` holds the same breakdown per ionic step, and
+        ``ionic_steps`` counts them.
+    """
+    segments = _CYCLE_START.split(text)
+    # Text before the first marker is pw.x's header, not a cycle. A file with
+    # no marker at all (a truncated job, or an output this pattern does not
+    # match) falls back to being read as one cycle, as it was before.
+    bodies = segments[1:] if len(segments) > 1 else segments
+    cycles = [_parse_cycle(body) for body in bodies]
+    cycles = [cycle for cycle in cycles if cycle["scf_accuracy"]] or cycles[-1:]
+
+    if not cycles:
+        return {
+            "converged": None,
+            "iterations_run": 0,
+            "scf_accuracy": [],
+            "final_accuracy_ry": None,
+            "trend": _trend([]),
+            "stalled": None,
+            "ionic_steps": 0,
+            "cycles": [],
+        }
+
+    last = cycles[-1]
+    return {
+        **last,
+        "scf_accuracy": [value for cycle in cycles for value in cycle["scf_accuracy"]],
+        "ionic_steps": len(cycles),
+        "cycles": cycles,
     }
 
 
@@ -170,6 +212,13 @@ def read_scf_convergence(identifier: str) -> dict[str, t.Any]:
     the cycle those remedies would be applied to, which is what decides between
     them.
 
+    A relax or vc-relax runs one SCF cycle per ionic step. ``ionic_steps`` says
+    how many, ``cycles`` breaks the run down per step, and the top-level
+    ``trend`` / ``stalled`` / ``converged`` describe the **final** cycle --- the
+    one the run ended on. Check ``ionic_steps`` before generalising: "the SCF
+    oscillated" is a statement about one cycle, not about a relaxation whose
+    earlier cycles all converged.
+
     Read ``trend`` and ``stalled`` together with the numbers:
 
     - ``decreasing`` and not ``stalled`` --- the cycle was converging and ran
@@ -192,7 +241,8 @@ def read_scf_convergence(identifier: str) -> dict[str, t.Any]:
             ``retrieved_files_pk``.
 
     Returns:
-        The parsed trace, plus ``conv_thr_ry`` and ``electron_maxstep`` from the
+        The parsed trace (final cycle at the top level, per-cycle detail under
+        ``cycles``), plus ``conv_thr_ry`` and ``electron_maxstep`` from the
         calculation's own inputs so the accuracy can be read against what it was
         asked for.
 
