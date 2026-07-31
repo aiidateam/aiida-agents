@@ -146,3 +146,40 @@ Two caveats bound how much weight this evidence carries.
 The scenarios were written by inference from the tool surface and the domain, not gathered from the MSD group or from usage logs, so they should be reviewed by someone with the scientific context before being treated as requirements.
 And the exercise surfaced a capability gap that partly undercuts the coordinator's strongest scenario: nothing can read a calculation's own output files, so a diagnosis that feeds a resubmission cannot yet see why the calculation actually failed.
 That gap is worth closing first.
+
+## Revision (2026-07): the handoff is a typed message
+
+This ADR settled that a step's answer is handed to the next step "as explicit
+text, labelled with which specialist produced it". That is now a structured
+message rather than a formatted string, for a reason the original framing did
+not anticipate.
+
+Prose loses identifiers. A diagnosis says "the failure is in PwCalculation pk
+334407"; the next step needs *334407*, and with a text handoff the only route
+to it is a second model reading the sentence and pulling the number back out.
+That is a transcription step between two language models, sitting directly in
+front of a write — and a resubmission aimed at a mistyped pk is the expensive
+kind of wrong.
+
+`Handoff` (in `agents/handoff.py`) therefore carries two halves: the producing
+agent's findings verbatim, and the node references its *tools* returned,
+extracted from tool output rather than from the answer. A pk the agent wrote
+down may be a typo of one it was given; a pk taken from the tool return cannot
+be. The receiving agent is told to use those identifiers directly.
+
+Three things this deliberately is not:
+
+**Not a transport.** The proposal's "agent-to-agent communication protocol" is
+satisfied here as a defined message with a producer, a consumer and typed
+content — not as a channel between processes. Both specialists run in one
+interpreter against one profile, so a transport would add moving parts for no
+gain, and routing a specialist's output anywhere but the CLI would break the
+approval guarantee this ADR is built around.
+
+**Not a summary.** The findings are passed through unchanged. Compressing them
+would put a third party in the position of rewriting a conclusion it did not
+reach.
+
+**Not unbounded.** References are capped at twenty. A query matching hundreds
+of nodes would otherwise crowd out the findings they exist to support, and the
+next step can always query again.

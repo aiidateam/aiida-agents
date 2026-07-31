@@ -17,6 +17,7 @@ import rich_click as click
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents._logging import _configure_logging
+from aiida_agents.agents.handoff import node_references_from_messages
 from aiida_agents._settings import _PROVIDER_CHOICES, LoggingSettings
 from aiida_agents.cli._guards import _needs_recognized_settings
 from aiida_agents.cli.config import config
@@ -165,7 +166,11 @@ def ask_cmd(ctx: click.Context, question: str, raw: bool) -> None:
             )
         _print_reply(result.output, raw=raw)
         _warn_ungrounded(result.output, result.all_messages(), prompt)
-        previous = _StepResult(step.specialist, result.output)
+        previous = _StepResult(
+            step.specialist,
+            result.output,
+            node_references_from_messages(result.all_messages()),
+        )
 
 
 @cli.command()

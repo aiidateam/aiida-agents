@@ -54,7 +54,7 @@ The CLI runs each specialist itself. That is not incidental — see [Why the pla
 1. **Tools.** The specialist calls typed Python functions against the live profile. Read tools that fail return a recoverable retry to the model rather than aborting the run.
 1. **Retrieval.** For anything conceptual, the specialist searches the indexed AiiDA documentation and any installed plugin's contributed corpus.
 1. **Approval.** If a step proposes a write, the run pauses and returns the proposed call. The CLI shows it and asks. Nothing is written without a yes.
-1. **Hand forward.** A step's answer is passed to the next step as labelled text.
+1. **Hand forward.** A step's answer is passed to the next step as a typed handoff: its findings, plus the node references its tools returned.
 1. **Check.** Before the answer is shown, every physical quantity in it is checked against what the tools actually returned; anything unsupported is flagged.
 
 ## The two boundaries that matter
@@ -117,7 +117,7 @@ So the planner only names steps, and the CLI runs them. The approval path is unt
 
 Stating these saves the next reader from assuming they were overlooked.
 
-**No direct agent-to-agent channel.** Collaboration happens through the plan and a labelled context handoff, mediated by the CLI, for the reason above. A separate transport would buy nothing while both specialists run in one interpreter against one profile.
+**No direct agent-to-agent channel.** Collaboration happens through the plan and a typed handoff message, mediated by the CLI, for the reason above. The message carries the producing step's findings *and* the node references its tools returned, so the next step works from identifiers rather than re-reading a pk out of a sentence — see [`agents/handoff.py`](/src/aiida_agents/agents/handoff.py). What is absent is a *transport*: a channel between processes would buy nothing while both specialists run in one interpreter against one profile, and routing a specialist's output anywhere but the CLI would break the approval gate.
 
 **No physics-range validation.** Schema validation is delegated to AiiDA's own `spec.inputs.validate()`. A tier that checks whether a cutoff is *sensible* is deferred — see [ADR-07](/docs/adr/07-validator.md).
 

@@ -22,14 +22,21 @@ from typing_extensions import assert_never
 from aiida_agents._settings import ModelSettings, _Provider, _format_validation_error
 from aiida_agents.agents.planner import Specialist, Step
 from aiida_agents.cli.ollama import _ensure_ollama_model, _ollama_pull
+from aiida_agents.agents.handoff import Handoff, NodeReference
 from aiida_agents.cli.output import _trace_tool_calls, console
 
 
 class _StepResult(NamedTuple):
-    """What one executed step produced, for the next step to build on."""
+    """What one executed step produced, for the next step to build on.
+
+    ``node_references`` comes from the step's tool output, not its prose, so
+    the next step works from identifiers the tools returned rather than from a
+    number a second model read back out of a sentence.
+    """
 
     specialist: Specialist
     answer: str
+    node_references: tuple[NodeReference, ...] = ()
 
 
 logger = logging.getLogger(__name__)
@@ -338,27 +345,23 @@ def _as_specialist_literal(name: str) -> Specialist:
 #: have. Labelled with its source so the receiving agent can weigh it as a
 #: finding rather than as the user's own words -- and so a user reading the
 #: transcript can see exactly what was carried forward.
-_STEP_CONTEXT = """{task}
-
-Context from the previous step ({specialist} agent):
-\"\"\"
-{answer}
-\"\"\"
-
-Use that context as the findings it is. Do not restate values it does not
-contain, and if it does not give you what this step needs, say so rather than
-proceeding on an assumption."""
-
-
 def _step_prompt(step: Step, question: str, previous: _StepResult | None) -> str:
     """The prompt for one step: its task, plus what the last step found.
 
     A step with no task of its own runs the user's request verbatim -- the
     single-step case, where rephrasing could only lose detail.
+
+    With a previous step, the prompt is a rendered :class:`Handoff`: its prose
+    findings *and* the node references its tools produced. See
+    ``agents/handoff.py`` for why the second half exists.
     """
     task = step.task or question
     if previous is None:
         return task
-    return _STEP_CONTEXT.format(
-        task=task, specialist=previous.specialist, answer=previous.answer
-    )
+    return Handoff(
+        from_specialist=previous.specialist,
+        to_specialist=step.specialist,
+        task=task,
+        findings=previous.answer,
+        node_references=previous.node_references,
+    ).render()

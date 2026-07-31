@@ -18,6 +18,7 @@ from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents._settings import ModelSettings, ReplSettings
+from aiida_agents.agents.handoff import NodeReference, node_references_from_messages
 from aiida_agents.cli.agent import (
     _AGENT_CHOICES,
     _build_agent,
@@ -126,8 +127,10 @@ def _run_turn(
     question: str,
     history: list[ModelMessage],
     repl_cfg: ReplSettings,
-) -> tuple[list[ModelMessage], str | None]:  # pragma: no cover
-    """Run one query, render its reply, and return the history and the answer.
+) -> tuple[
+    list[ModelMessage], str | None, tuple[NodeReference, ...]
+]:  # pragma: no cover
+    """Run one query, render its reply, and return history, answer and references.
 
     Returns ``history`` unchanged if the run is interrupted (Ctrl-C) or errors,
     so a failed turn never corrupts the conversation.
@@ -149,10 +152,10 @@ def _run_turn(
             )
     except KeyboardInterrupt:
         click.echo("(interrupted)")
-        return history, None
+        return history, None, ()
     except Exception as exc:
         click.echo(f"❌ Error: {exc}")
-        return history, None
+        return history, None, ()
     elapsed = time.monotonic() - start
 
     # Render the run's tool-call trace now that the spinner has stopped: the
@@ -161,6 +164,10 @@ def _run_turn(
     _render_tool_calls(result.new_messages(), console)
 
     answer: str | None = None
+    # From this turn's messages only: the accumulated history carries pks from
+    # earlier questions, and handing those to a later step as "what this step
+    # found" would be false.
+    references = node_references_from_messages(result.new_messages())
     if isinstance(result.output, DeferredToolRequests):
         history = _handle_deferred(agent, result, history)
     else:
@@ -169,7 +176,7 @@ def _run_turn(
         history = result.all_messages()
         answer = result.output
     console.print(f"[dim]⏱ {_format_duration(elapsed)}[/]")
-    return history, answer
+    return history, answer, references
 
 
 def _parse_agent_switch(question: str, current: str) -> str | None:
@@ -270,7 +277,7 @@ def _run_repl(
             if len(steps) > 1:
                 click.echo(f"— step {index}/{len(steps)} ({active}) —")
 
-            histories[active], answer = _run_turn(
+            histories[active], answer, references = _run_turn(
                 agents[active],
                 _step_prompt(step, question, previous),
                 histories.get(active, []),
@@ -286,4 +293,4 @@ def _run_repl(
                         "Plan stopped: this step produced nothing to build on.\n"
                     )
                 break
-            previous = _StepResult(active, answer)
+            previous = _StepResult(active, answer, references)
