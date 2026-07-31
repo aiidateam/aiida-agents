@@ -88,7 +88,7 @@ The language layer is thin on purpose. Everything a wrong answer could damage is
 
 **Analysis agent** (`agents/analysis/`) — read-only exploration: querying nodes, following provenance, reading process reports and the files a calculation brought back, diagnosing a failure against the workflow's own exit codes and restart handlers, summarising past runs, searching the docs.
 
-**Execution agent** (`agents/execution/`) — discovering installed workflows, inspecting their input schemas, building inputs from a workflow's own protocol builder (or, for a process that has none, drafting them from its declared ports), importing a structure, and submitting. Its two write tools are approval-gated.
+**Execution agent** (`agents/execution/`) — discovering installed workflows, inspecting their input schemas, building inputs from a workflow's own protocol builder (or, for a process that has none, drafting them from its declared ports), checking the cutoffs against the pseudopotentials, importing a structure, submitting, waiting for a submission so the next one can run on its result, and rebuilding a past run's inputs to re-run it. Its three write tools are approval-gated — including the batch, which is one approval covering the whole set.
 
 **Tools** (`tools/`) — plain typed functions, grouped to mirror the agents. `tools/analysis/` and `tools/execution/` are owned by one agent each; anything both use lives at the top level. A tool's name, signature and docstring *are* its interface to the model.
 
@@ -96,7 +96,7 @@ The language layer is thin on purpose. Everything a wrong answer could damage is
 
 **MCP server** (`mcp/`) — exposes the read-only tools over the Model Context Protocol, so any MCP client reaches the same functions the agents do. The write tools are deliberately not registered: they go only through the approval-gated agents. See [ADR-02](/docs/adr/02-mcp-tools-wrap-aiida-restapi.md).
 
-**Grounding check** (`grounding.py`) — extracts every quantity carrying a unit or bound to a named simulation parameter from an answer, and reports any that appear in no tool output.
+**Grounding check** (`grounding.py`) — extracts every quantity carrying a unit, written as a percentage, or bound to a named simulation parameter from an answer, and reports any that appear in no tool output. A percentage is grounded by its fraction, so a `success_rate` of 0.67 supports "67%".
 
 **CLI** (`cli/`) — `chat` for a conversation, `ask` for one shot, plus `doctor`, `rag` and `config`. It owns the plan loop and the approval prompt.
 
@@ -119,11 +119,13 @@ Stating these saves the next reader from assuming they were overlooked.
 
 **No direct agent-to-agent channel.** Collaboration happens through the plan and a typed handoff message, mediated by the CLI, for the reason above. The message carries the producing step's findings *and* the node references its tools returned, so the next step works from identifiers rather than re-reading a pk out of a sentence — see [`agents/handoff.py`](/src/aiida_agents/agents/handoff.py). What is absent is a *transport*: a channel between processes would buy nothing while both specialists run in one interpreter against one profile, and routing a specialist's output anywhere but the CLI would break the approval gate.
 
-**No physics-range validation.** Schema validation is delegated to AiiDA's own `spec.inputs.validate()`. A tier that checks whether a cutoff is *sensible* is deferred — see [ADR-07](/docs/adr/07-validator.md).
+**No physics validation that blocks.** Cutoffs *are* checked against what the spec's pseudopotential family was converged for, but the finding is shown at the approval prompt rather than refusing the submission: a low cutoff is under-converged for production and perfectly reasonable for a smoke test, so a gate would be wrong about as often as it was right. Nothing in the system refuses a physically unusual submission on its own authority. See [ADR-07](/docs/adr/07-validator.md).
 
-**No batch writes.** Every write tool acts on one thing. "Resubmit all of these" has no path, and approval-for-a-set is an unanswered design question.
+**No recommended k-point spacing.** No installed package publishes one per structure, so `kpoints_distance` is left unchecked rather than measured against a number this project invented.
 
 **No third specialist.** Diagnosis is a tool on the Analysis agent rather than a Diagnostic agent of its own; two specialists have so far been enough.
+
+**No workflow construction.** Multi-step calculations are composed by running existing workflows in sequence and feeding one's output to the next. Nothing emits a new `WorkChain` class, and the provenance shape differs accordingly — the steps are linked by the data between them, not by a parent process. Where a plugin already ships a work chain for the whole sequence, that remains the better answer.
 
 ## Where the depth is
 
