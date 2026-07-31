@@ -41,7 +41,6 @@ Pinned to mdformat `0.7.22` because the plugins constrain mdformat `<1.0`.
 
 **Local dev workflow:** `uv` is the main, documented local workflow (`uv sync`, then `uv run pre-commit` / `pytest` / `mypy`), matching aiida-core.
 The template's Hatch envs and Hatch-based CI are kept template-shaped (untouched) so `copier update` stays clean; Hatch therefore remains fully usable locally (`hatch run …`, `hatch test`) for anyone who prefers it — it is simply not required.
-Practical commands live in `CONTRIBUTING.md`.
 Caveat: local `uv run pytest` is single-Python; the 3.10–3.14 matrix runs in CI.
 
 ## Consequences

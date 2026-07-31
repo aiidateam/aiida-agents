@@ -3,8 +3,7 @@
 # `aiida-agents`
 
 > ⚠️ **Alpha — no release yet.**
-> There is no published package, APIs change without notice, and nothing here has been used in anger.
-> Do not depend on it.
+
 
 A natural-language interface to [AiiDA](https://www.aiida.net).
 Ask in plain language what you want to know or run, and specialized agents call typed Python tools against a real AiiDA profile.
@@ -25,8 +24,6 @@ The work chain already tried its one applicable remedy —
 handle_vcrelax_converged_except_final_scf fired on iteration 1 — and still
 landed on this exit code, so simply restarting is unlikely to help.
 ```
-
-Started as a [Google Summer of Code 2026](https://summerofcode.withgoogle.com/) project under NumFOCUS / AiiDA.
 
 ## Demo
 
@@ -89,18 +86,3 @@ Other commands: `check` (provider reachability), `config` (effective settings), 
 - **[Architecture](/docs/architecture.md)** — how a request travels through the system, and why the pieces are arranged as they are.
 - **[Extending](/docs/extending.md)** — adding a tool, a documentation corpus, or a whole specialist; and how an AiiDA plugin contributes to the agents without either package depending on the other.
 - **[Architecture Decision Records](/docs/adr/README.md)** — the reasoning behind each decision, including the ones later revised.
-- **[Contributing](/CONTRIBUTING.md)** — the `uv`-based development workflow.
-
-## Known limits
-
-Worth knowing before you try to rely on any of it:
-
-- **No release.** Install from git, and expect the interface to move.
-- **It composes workflows, it does not write them.** A multi-step calculation is built by running existing workflows in sequence. Nothing emits a new `WorkChain`.
-- **Physics checks warn, they do not block.** A cutoff below the pseudopotential family's recommendation is reported at the approval prompt, not refused — a low cutoff is a legitimate smoke test.
-- **Quantum ESPRESSO is the only plugin exercised in depth.** Nothing in the tool layer is plugin-specific — `aiida-vasp`'s workflows are visible and drivable the moment it is installed — but only QE has been driven against real failures.
-- **The docs index is built locally** and takes a few minutes; without it the agents will say they cannot look something up rather than answering from memory.
-
-## License
-
-MIT. See [`LICENSE`](/LICENSE).
