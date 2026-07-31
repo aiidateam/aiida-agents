@@ -101,6 +101,8 @@ EXPECTED_EXECUTION_TOOLS = {
     "build_workflow_inputs",
     "draft_workflow_inputs",
     "check_input_ranges",
+    "build_resubmission_spec",
+    "execute_workflow_batch",
     "list_codes",
     "get_process_status",
     "wait_for_process",

@@ -47,6 +47,7 @@ from aiida_agents.tools.processes import (
     list_retrieved_files,
 )
 from aiida_agents.tools.execution import (
+    build_resubmission_spec,
     build_workflow_inputs,
     check_input_ranges,
     describe_workflow,
@@ -58,6 +59,7 @@ from aiida_agents.tools.execution import (
 from aiida_agents.tools.execution.codes import list_codes
 
 __all__ = [
+    "build_resubmission_spec",
     "build_workflow_inputs",
     "check_input_ranges",
     "describe_workflow",

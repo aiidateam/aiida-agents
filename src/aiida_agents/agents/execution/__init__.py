@@ -19,6 +19,10 @@ from aiida_agents.tools.execution.introspection import describe_workflow, list_w
 from aiida_agents.tools.execution.drafting import draft_workflow_inputs
 from aiida_agents.tools.execution.protocol import build_workflow_inputs
 from aiida_agents.tools.execution.ranges import check_input_ranges
+from aiida_agents.tools.execution.resubmission import (
+    build_resubmission_spec,
+    execute_workflow_batch,
+)
 from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
 from aiida_agents.tools.execution.structures import import_structure
 from aiida_agents.tools.execution.waiting import wait_for_process
@@ -33,6 +37,7 @@ _READ_TOOLS: list[Any] = [
     build_workflow_inputs,  # Pre-populate inputs from a protocol builder (read-only)
     draft_workflow_inputs,  # Draft inputs from the process spec, when it has no protocol builder (read-only)
     check_input_ranges,  # Compare a spec's cutoffs against its pseudopotentials (read-only)
+    build_resubmission_spec,  # Rebuild a past run's inputs so it can be re-run (read-only)
     list_codes,  # Discover the configured codes to submit against (read-only)
     get_process_status,  # Follow up on what was just submitted (read-only)
     wait_for_process,  # Wait for a submission to finish, to run the next one on its output (read-only)
@@ -118,5 +123,7 @@ def get_agent(
     # read off the user's disk still needs their explicit approval.
     agent.tool_plain(requires_approval=True)(execute_workflow_spec)
     agent.tool_plain(requires_approval=True)(import_structure)
+    # A batch is one call and therefore one approval, covering the whole set.
+    agent.tool_plain(requires_approval=True)(execute_workflow_batch)
 
     return agent

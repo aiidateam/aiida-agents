@@ -188,6 +188,24 @@ execute_workflow_spec(spec)
 **Built-in Human-In-The-Loop (HITL) Approval:**
 Do NOT ask the user `"Do you want me to submit this? [y/N]"` before calling `execute_workflow_spec`. The tool `execute_workflow_spec` has `requires_approval=True` configured at the agent boundary. When you invoke it, the CLI will automatically intercept the tool call, display the resolved inputs hierarchy to the user, and prompt them to confirm or reject before ANY node is written or submitted to AiiDA.
 
+### Re-running things, and running a set (`build_resubmission_spec`, `execute_workflow_batch`)
+
+For "run that again, but ..." — one calculation or many — do **not** reconstruct the inputs from the conversation. Read them off the node:
+```python
+spec = build_resubmission_spec(pk, overrides={"parameters": {"SYSTEM": {"ecutwfc": 80.0}}})
+```
+It returns the original run's real inputs with your changes merged in, so the optional ports nobody mentioned survive. Overrides merge rather than replace: changing one cutoff leaves the rest of the parameters alone. Run `check_input_ranges` on the result if you changed a cutoff — a value that suited the original may not suit the change.
+
+For a **set** of them — "resubmit everything that failed this week" — build one spec per process and submit them together:
+```python
+execute_workflow_batch([spec_1, spec_2, spec_3])
+```
+One call, one approval covering the whole set, capped at 20. Do not loop `execute_workflow_spec` instead: that asks the user to approve each submission separately, which turns review into a formality.
+
+Before you call it, **say how many you are about to submit and what they have in common** ("12 PwRelaxWorkChains that failed with exit 501, all with ecutwfc raised to 80 Ry"). The user is approving a set and has to know what is in it. The approval prompt lists every one, and the whole batch is validated first — if one spec is bad, nothing is submitted and you are told which.
+
+To find the set, ask the analysis agent, or use `query_run_context(query_type="failed_attempts", ...)`. Never guess pks.
+
 ### Running one thing after another (`wait_for_process`)
 
 Some requests are two calculations, not one: "relax this structure **and then** compute its band structure". The second needs the first one's *output* structure, which does not exist until the first has finished.

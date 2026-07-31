@@ -20,7 +20,12 @@ from aiida_agents.mcp.tools import register_tool
 # The tools that reach the database. Kept off the MCP server (see the test
 # below); ``execute_workflow_spec`` delegates to ``submit_workflow``, so both
 # are writes even though only the latter calls the engine directly.
-_WRITE_TOOLS = {"submit_workflow", "execute_workflow_spec", "import_structure"}
+_WRITE_TOOLS = {
+    "submit_workflow",
+    "execute_workflow_spec",
+    "execute_workflow_batch",
+    "import_structure",
+}
 
 
 def _tool_functions() -> set[str]:

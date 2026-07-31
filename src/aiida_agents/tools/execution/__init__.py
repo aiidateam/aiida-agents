@@ -38,6 +38,7 @@ from aiida_agents.tools.execution.drafting import draft_workflow_inputs
 from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
 from aiida_agents.tools.execution.protocol import build_workflow_inputs
 from aiida_agents.tools.execution.ranges import check_input_ranges
+from aiida_agents.tools.execution.resubmission import build_resubmission_spec
 from aiida_agents.tools.execution.schemas import (
     ValidationError,
     ValidationResult,
@@ -50,6 +51,7 @@ __all__ = [
     "ValidationError",
     "ValidationResult",
     "WorkflowSpec",
+    "build_resubmission_spec",
     "build_workflow_inputs",
     "check_input_ranges",
     "describe_workflow",

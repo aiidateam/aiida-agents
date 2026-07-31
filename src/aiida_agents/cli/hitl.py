@@ -42,6 +42,11 @@ _MAX_APPROVAL_ROUNDS = 10
 # entry point and inputs sit in the tool-call args (see ``_submission_args``).
 _SUBMIT_TOOLS = ("submit_workflow", "execute_workflow_spec")
 
+# The batch write tool. One tool call carries many submissions, so it is one
+# approval covering the whole set -- which only means anything if the prompt
+# enumerates what is in it and every spec has been validated first.
+_BATCH_TOOL = "execute_workflow_batch"
+
 
 def _submission_args(call: Any) -> tuple[str, dict[str, Any]]:
     """Extract ``(entry_point, inputs)`` from a submit tool call.
@@ -68,11 +73,16 @@ class _Preview(NamedTuple):
     what will actually be created. They are None for any other approval-gated
     tool, which is previewed with its raw args and executed by calling its own
     registered function (see ``_run_approvals``).
+
+    ``batch`` carries the same enrichment for every spec in a batch submission,
+    as ``(entry_point, resolved)`` pairs, so the prompt can enumerate the set
+    the user is being asked to approve as a whole.
     """
 
     call: Any
     process_class: Any
     resolved: dict[str, Any] | None
+    batch: list[tuple[str, dict[str, Any]]] | None = None
 
 
 def _tool_function(agent: Agent, name: str) -> Any:
@@ -113,6 +123,40 @@ def _triage_submissions(
     auto: dict[str, Any] = {}
     previews: list[_Preview] = []
     for call in pending.approvals:
+        if call.tool_name == _BATCH_TOOL:
+            specs = call.args_as_dict().get("specs")
+            if not isinstance(specs, list) or not specs:
+                auto[call.tool_call_id] = ToolDenied(
+                    "Batch rejected before reaching the user: 'specs' must be a "
+                    "non-empty list of WorkflowSpec dictionaries."
+                )
+                continue
+            resolved_batch: list[tuple[str, dict[str, Any]]] = []
+            failure: str | None = None
+            for index, spec in enumerate(specs, start=1):
+                entry_point = (
+                    spec.get("workflow_type") if isinstance(spec, dict) else None
+                )
+                inputs = spec.get("inputs") if isinstance(spec, dict) else None
+                try:
+                    _, resolved_inputs = _prepare_submission(
+                        entry_point or "", inputs or {}
+                    )
+                except SubmissionInputError as exc:
+                    # The whole batch is refused, not just this item: submitting
+                    # the rest would leave a partial set nobody approved.
+                    failure = f"spec {index} of {len(specs)} ({entry_point!r}): {exc}"
+                    break
+                resolved_batch.append((entry_point or "", resolved_inputs))
+            if failure is not None:
+                auto[call.tool_call_id] = ToolDenied(
+                    f"Batch rejected before reaching the user: {failure} "
+                    "Nothing was submitted. Correct that spec and call "
+                    f"{call.tool_name} again with the full list."
+                )
+                continue
+            previews.append(_Preview(call, None, None, resolved_batch))
+            continue
         if call.tool_name not in _SUBMIT_TOOLS:
             previews.append(_Preview(call, None, None))
             continue
@@ -162,8 +206,14 @@ def _print_previews(previews: list[_Preview]) -> None:
     from aiida_agents.tools.execution.submit import _format_resolved_inputs
 
     click.echo("\n⚠️  The agent wants to perform the following action(s):")
-    for call, _, resolved in previews:
+    for call, _, resolved, batch in previews:
         click.echo(f"   Tool  : {call.tool_name}")
+        if batch is not None:
+            click.echo(f"   Batch : {len(batch)} submissions, approved together")
+            for index, (entry_point, inputs) in enumerate(batch, start=1):
+                click.echo(f"   {index:>3}. {entry_point}")
+                click.echo(_format_resolved_inputs(inputs, prefix="        "))
+            continue
         if resolved is None:
             click.echo(f"   Inputs: {call.args_as_dict()}")
             continue
@@ -198,7 +248,7 @@ def _run_approvals(
     outcomes: dict[str, Any] = {
         call_id: {"rejected": denied.message} for call_id, denied in auto.items()
     }
-    for call, process_class, resolved in previews:
+    for call, process_class, resolved, _batch in previews:
         if process_class is not None and resolved is not None:
             # Not args_as_dict()["entry_point"]: execute_workflow_spec nests it
             # under validated_spec, so only _submission_args reads both shapes.

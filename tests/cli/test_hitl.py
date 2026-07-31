@@ -57,9 +57,14 @@ class TestSubmitWorkflowRequiresApproval:
         # structure import that writes a StructureData from a file on disk.
         assert set(function_toolset.tools) == {
             "execute_workflow_spec",
+            "execute_workflow_batch",
             "import_structure",
         }
-        for name in ("execute_workflow_spec", "import_structure"):
+        for name in (
+            "execute_workflow_spec",
+            "execute_workflow_batch",
+            "import_structure",
+        ):
             assert function_toolset.tools[name].requires_approval is True
 
     def test_analysis_agent_holds_no_write_tool(self) -> None:
@@ -193,7 +198,7 @@ class TestTriageSubmissions:
 
         assert auto == {}
         assert len(previews) == 1
-        preview_call, process_class, resolved = previews[0]
+        preview_call, process_class, resolved, _batch = previews[0]
         assert preview_call.tool_call_id == "c1"
         from aiida.plugins import WorkflowFactory
 
@@ -207,7 +212,9 @@ class TestTriageSubmissions:
         auto, previews = _triage_submissions(self._pending(call))
 
         assert auto == {}
-        assert previews == [(call, None, None)]
+        from aiida_agents.cli.hitl import _Preview
+
+        assert previews == [_Preview(call, None, None)]
 
     def test_invalid_execute_workflow_spec_is_denied_naming_its_tool(self) -> None:
         """The execution agent's write tool goes through the same triage: an
@@ -255,7 +262,7 @@ class TestTriageSubmissions:
 
         assert auto == {}
         assert len(previews) == 1
-        _, process_class, resolved = previews[0]
+        _, process_class, resolved, _batch = previews[0]
         from aiida.plugins import WorkflowFactory
 
         assert process_class is WorkflowFactory(MULTIPLY_ADD)
@@ -416,6 +423,7 @@ class TestImportStructureRunsOnApproval:
         # Triage leaves a non-submission unenriched: this is exactly the shape
         # that used to fall through to "not an executable submission".
         auto, previews = _triage_submissions(DeferredToolRequests(approvals=[call]))
+
         assert previews == [_Preview(call, None, None)]
 
         outcomes = _run_approvals(get_agent("execution"), previews, auto)
