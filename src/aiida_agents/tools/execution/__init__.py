@@ -21,6 +21,9 @@ query_run_context
     workflows, optimal parameters, structure classifications).
 execute_workflow_spec
     Validate a ``WorkflowSpec`` and submit it (HITL-gated, ADR-08).
+wait_for_process
+    Wait for a submitted process to finish and report its outputs, so one
+    submission can be run against another's result.
 
 The write tool ``submit_workflow`` stays an explicit ``tools.execution.submit``
 import, so the database-writing tool is not grabbed as casually as a read; the
@@ -41,6 +44,7 @@ from aiida_agents.tools.execution.schemas import (
     WorkflowSpec,
 )
 from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
+from aiida_agents.tools.execution.waiting import wait_for_process
 
 __all__ = [
     "ValidationError",
@@ -53,4 +57,5 @@ __all__ = [
     "execute_workflow_spec",
     "list_workflows",
     "query_run_context",
+    "wait_for_process",
 ]

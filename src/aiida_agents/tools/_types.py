@@ -22,6 +22,7 @@ __all__ = [
     "HandlerAttempt",
     "Identifier",
     "NodeLink",
+    "ProcessCompletion",
     "ProcessRecord",
     "ProcessReport",
     "ProcessStatus",
@@ -252,3 +253,26 @@ class FailureDiagnosis(TypedDict):
     handling_attempted: list[HandlerAttempt]
     known_remedies: list[RegisteredHandler]
     retrieved_files_pk: int | None
+
+
+class ProcessCompletion(TypedDict):
+    """Return shape of ``wait_for_process``.
+
+    ``terminated`` is the field to branch on. False means the wait ran out
+    before the process finished --- a fact about the wait, not about the
+    process, which is very likely still running perfectly well.
+
+    ``outputs`` is populated only once the process has terminated, since a
+    running process's outputs are incomplete and reading one as final is how a
+    chained submission ends up consuming a structure that is about to be
+    superseded.
+    """
+
+    pk: int
+    process_label: str
+    state: str | None
+    exit_status: int | None
+    exit_message: str | None
+    terminated: bool
+    waited_seconds: float
+    outputs: list[NodeLink]

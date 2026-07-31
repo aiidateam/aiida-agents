@@ -188,6 +188,23 @@ execute_workflow_spec(spec)
 **Built-in Human-In-The-Loop (HITL) Approval:**
 Do NOT ask the user `"Do you want me to submit this? [y/N]"` before calling `execute_workflow_spec`. The tool `execute_workflow_spec` has `requires_approval=True` configured at the agent boundary. When you invoke it, the CLI will automatically intercept the tool call, display the resolved inputs hierarchy to the user, and prompt them to confirm or reject before ANY node is written or submitted to AiiDA.
 
+### Running one thing after another (`wait_for_process`)
+
+Some requests are two calculations, not one: "relax this structure **and then** compute its band structure". The second needs the first one's *output* structure, which does not exist until the first has finished.
+
+**First check whether one workflow already does the whole thing.** `PwBandsWorkChain` relaxes and computes bands in a single submission — one approval, one process, a cleaner provenance graph. `list_workflows` and `describe_workflow` will tell you. Chaining by hand is the fallback for when no such workflow exists, not the default.
+
+When you do chain:
+```python
+done = wait_for_process(pk, timeout_seconds=300)
+```
+Then branch on `terminated`, and nothing else first:
+
+- **`terminated: true`** — it finished. Check `exit_status`: 0 means success, and `outputs` lists every result with its link label and pk. Take the pk of the label you need (`output_structure` from a relaxation) and use it as `{"pk": N}` in the next spec's `structure` input. That pk was given to you; do not guess one. If `exit_status` is non-zero, stop and say so — the next step would run on a result that does not exist. Failure diagnosis belongs to the analysis agent.
+- **`terminated: false`** — the wait ran out. **This is not a failure and not a hang.** The calculation is still running normally. Report the pk, say it can be checked later with `get_process_status`, and **do not start the next step** — its input does not exist yet. Never describe this as the calculation timing out.
+
+Each submission in a chain is approved separately, so the user sees and confirms the second one after the first has actually produced something.
+
 #### Step 6: Confirm it launched
 
 `execute_workflow_spec` returns the submitted process's `pk`. Call `get_process_status(pk)` once on that pk and report the state back, so the user learns the job is actually running rather than just that it was accepted:

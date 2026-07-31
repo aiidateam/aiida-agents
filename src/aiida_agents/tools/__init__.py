@@ -53,6 +53,7 @@ from aiida_agents.tools.execution import (
     draft_workflow_inputs,
     list_workflows,
     query_run_context,
+    wait_for_process,
 )
 from aiida_agents.tools.execution.codes import list_codes
 
@@ -74,4 +75,5 @@ __all__ = [
     "query_run_context",
     "query_nodes",
     "search_structures",
+    "wait_for_process",
 ]

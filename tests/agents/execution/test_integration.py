@@ -103,6 +103,7 @@ EXPECTED_EXECUTION_TOOLS = {
     "check_input_ranges",
     "list_codes",
     "get_process_status",
+    "wait_for_process",
     "search_aiida_docs",
     "execute_workflow_spec",
     "import_structure",
