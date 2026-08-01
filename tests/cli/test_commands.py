@@ -273,3 +273,66 @@ def test_ask_reports_a_provider_failure_cleanly(
     assert "malformed tool-call JSON" in result.output
     # Converted, not leaked as an uncaught traceback.
     assert not isinstance(result.exception, RuntimeError)
+
+
+class TestChatStartup:
+    """What `chat` builds before the REPL takes over.
+
+    Regression from end-to-end testing: `chat` eagerly built one agent from
+    ``--agent`` before starting the loop, which made the documented default
+    entry point -- plain `aiida-agents chat`, whose ``--agent`` is ``auto`` --
+    crash on startup, because "auto" is a routing decision and not an agent
+    ``_build_agent`` can build. Every user of the default hit it immediately.
+    """
+
+    @staticmethod
+    def _spy(monkeypatch: pytest.MonkeyPatch) -> dict[str, object]:
+        """Run `chat` without a terminal, recording what it built and passed."""
+        from aiida_agents.cli import commands
+
+        seen: dict[str, object] = {}
+
+        def _build(settings: object, profile: object, agent_type: str) -> object:
+            seen["built"] = agent_type
+            return f"agent:{agent_type}"
+
+        def _repl(agent: object, settings: object, **kwargs: object) -> None:
+            seen["agent"] = agent
+            seen["agent_type"] = kwargs.get("agent_type")
+
+        monkeypatch.setattr(commands, "_build_agent", _build)
+        monkeypatch.setattr(commands, "_run_repl", _repl)
+        return seen
+
+    def test_auto_builds_no_agent_up_front(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The crash itself: nothing may ask _build_agent for "auto"."""
+        seen = self._spy(monkeypatch)
+
+        result = CliRunner().invoke(cli, ["chat"])
+
+        assert result.exit_code == 0
+        assert "built" not in seen
+
+    def test_auto_hands_the_repl_no_agent(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The REPL routes each question and builds that specialist on first use."""
+        seen = self._spy(monkeypatch)
+
+        CliRunner().invoke(cli, ["chat"])
+
+        assert seen["agent"] is None
+        assert seen["agent_type"] == "auto"
+
+    def test_a_named_specialist_is_still_built_before_the_loop(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fixing auto must not cost `-a analysis` its startup failure."""
+        seen = self._spy(monkeypatch)
+
+        CliRunner().invoke(cli, ["-a", "analysis", "chat"])
+
+        assert seen["built"] == "analysis"
+        assert seen["agent"] == "agent:analysis"

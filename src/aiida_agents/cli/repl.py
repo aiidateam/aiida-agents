@@ -198,12 +198,16 @@ def _parse_agent_switch(question: str, current: str) -> str | None:
 
 
 def _run_repl(
-    agent: Agent,
+    agent: Agent | None,
     settings: ModelSettings,
     profile: str | None = None,
     agent_type: str = "analysis",
 ) -> None:  # pragma: no cover
     """Drive the interactive REPL: read a line, dispatch commands, run the turn.
+
+    ``agent`` is the pre-built specialist to start from, or ``None`` in auto
+    mode, where the specialist is not known until a question has been routed.
+    Either way the loop builds what it needs on first use.
 
     ``profile`` and ``agent_type`` are kept so ``/agent`` can rebuild the agent in
     place (same profile, different agent) and reset the conversation.
@@ -228,7 +232,7 @@ def _run_repl(
     # the other would reference tools it does not have. Carrying context *across*
     # specialists is the next increment (ADR-09); until then a routed switch
     # starts that specialist where it last left off, not mid-thread on another.
-    agents: dict[str, Agent] = {} if agent_type == "auto" else {agent_type: agent}
+    agents: dict[str, Agent] = {} if agent is None else {agent_type: agent}
     histories: dict[str, list[ModelMessage]] = {}
     while True:
         # Ctrl-C aborts the current line (like a shell); Ctrl-D at an empty

@@ -105,11 +105,19 @@ def cli(
 @cli.command()
 @click.pass_context
 @_needs_recognized_settings
-def chat(ctx: click.Context) -> None:  # pragma: no cover
+def chat(ctx: click.Context) -> None:
     """Start the interactive REPL (the default when no subcommand is given)."""
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     agent_type = ctx.obj["agent"]
-    agent = _build_agent(settings, ctx.obj["profile"], agent_type)
+    # "auto" names a routing decision, not an agent. Each question is resolved
+    # to a specialist by the REPL, which builds that specialist on first use, so
+    # there is nothing to build up front -- and asking _build_agent for an agent
+    # called "auto" is how the default entry point came to crash on startup.
+    agent = (
+        None
+        if agent_type == "auto"
+        else _build_agent(settings, ctx.obj["profile"], agent_type)
+    )
     _run_repl(agent, settings, profile=ctx.obj["profile"], agent_type=agent_type)
 
 
