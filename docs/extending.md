@@ -81,6 +81,7 @@ class Provider:
                 version="5.0.0",
                 docs_repo="https://github.com/aiidateam/aiida-quantumespresso",
                 docs_subdir="docs",
+                docs_url="https://aiida-quantumespresso.readthedocs.io/en/{version}/{page}.html",
             )
         ]
 
@@ -100,6 +101,8 @@ Three things worth knowing:
 **A prompt fragment says what only you know.** Your conventions, your physics, your units. Do not restate the agent's workflow: the core prompt wins on any conflict, and the fragment has a character budget.
 
 A corpus needs exactly one source — either `text_dir` (pre-rendered text you ship) or `docs_repo` (cloned and rendered with your own `docs` extra in an isolated build).
+
+**Give `docs_url` if your documentation is published.** It is a template taking `{version}` and `{page}`, and it is what lets an answer cite your docs with a link the reader can open rather than a path they have to go and find. `{version}` is filled from your `docs_ref`, so the page linked is the one the corpus was rendered from — a citation cannot quote one release and link another. Leave it unset and passages from your corpus are still retrieved and still attributed, just unlinked; a guessed URL would be worse than none.
 
 `dev/qe_rag_stub/` in this repository is a working example of all three hooks, written because aiida-quantumespresso does not ship this entry point yet. It contributes its documentation as a corpus, a `read_scf_convergence` tool that parses pw.x's own electronic-convergence trace, and a fragment saying when that tool applies. The tool is the reason the split matters: reading a Quantum ESPRESSO output format is exactly the knowledge that belongs to the plugin and not to `aiida-agents`, and a plugin for another code contributes its own equivalent without either package learning about the other.
 

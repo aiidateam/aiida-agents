@@ -202,3 +202,65 @@ class TestUnavailableIndexMessage:
             lambda settings=None: (_ for _ in ()).throw(RuntimeError("store gone")),
         )
         assert "do NOT answer this from memory" in _unavailable_message()
+
+
+class TestCitedLinks:
+    """The link the model is handed, and told to pass on.
+
+    Users say the hardest part of these docs is finding the right page, so a
+    passage the tool retrieved is only half an answer: the model needs the URL
+    of where it came from, in the excerpt, to put in front of the reader.
+    """
+
+    def test_the_url_is_shown_with_the_excerpt(self) -> None:
+        fake = [
+            {
+                "source": "howto/query",
+                "section": "Constructing a query",
+                "text": "Use the QueryBuilder.",
+                "url": (
+                    "https://aiida-core.readthedocs.io/en/v2.8.0/"
+                    "howto/query.html#constructing-a-query"
+                ),
+            }
+        ]
+        with patch("aiida_agents.rag.query_docs", return_value=fake):
+            result = search_aiida_docs("how do I query?")
+
+        assert "howto/query.html#constructing-a-query" in result
+
+    def test_the_url_sits_between_the_header_and_the_text(self) -> None:
+        """So it reads as this excerpt's source, not as part of the prose."""
+        fake = [
+            {
+                "source": "howto/query",
+                "section": "Q",
+                "text": "Body text.",
+                "url": "https://example.invalid/howto/query.html#q",
+            }
+        ]
+        with patch("aiida_agents.rag.query_docs", return_value=fake):
+            result = search_aiida_docs("q")
+
+        header_at = result.index("[howto/query")
+        url_at = result.index("https://example.invalid")
+        assert header_at < url_at < result.index("Body text.")
+
+    def test_an_unlinked_passage_is_still_returned(self) -> None:
+        """A corpus may publish nothing; that costs the link, not the answer."""
+        fake = [
+            {"source": "internal/notes", "section": "N", "text": "Body.", "url": ""}
+        ]
+        with patch("aiida_agents.rag.query_docs", return_value=fake):
+            result = search_aiida_docs("q")
+
+        assert "Body." in result
+        assert "http" not in result
+
+    def test_a_result_predating_the_url_key_still_formats(self) -> None:
+        """query_docs gained 'url' after this formatter shipped."""
+        fake = [{"source": "topics/a", "section": "A", "text": "Text A."}]
+        with patch("aiida_agents.rag.query_docs", return_value=fake):
+            result = search_aiida_docs("q")
+
+        assert "Text A." in result

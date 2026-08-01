@@ -34,6 +34,9 @@ class _VaspDocsStub:
                 docs_ref=f"v{_VASP_DOCS_VERSION}",
                 # Holds the ``source/`` sphinx root the indexer expects.
                 docs_subdir="docs",
+                # Published under the plugin's own RTD project name, which
+                # differs from the distribution name.
+                docs_url="https://aiida-vasp-plugin.readthedocs.io/en/{version}/{page}.html",
             )
         ]
 

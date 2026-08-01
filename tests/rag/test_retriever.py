@@ -6,7 +6,11 @@ from unittest.mock import MagicMock, patch
 
 from aiida_agents.plugins import LoadedPlugin, RagCorpus
 from aiida_agents.rag.retriever import docs_index_available, query_docs
-from aiida_agents.rag.store import _collection_name, _plugin_collection_name
+from aiida_agents.rag.store import (
+    _DOCS_TAG,
+    _collection_name,
+    _plugin_collection_name,
+)
 
 
 def _fake_embed(name: str = "fake/model") -> MagicMock:
@@ -71,6 +75,12 @@ class TestQueryDocs:
                 "source": "topics/foo",
                 "section": "Foo",
                 "corpus": "aiida-core",
+                # Built from the tag the corpus was rendered at, not "latest":
+                # the linked page and the quoted text are the same release.
+                "url": (
+                    f"https://aiida-core.readthedocs.io/en/{_DOCS_TAG}/"
+                    "topics/foo.html#foo"
+                ),
             }
         ]
 
@@ -131,12 +141,18 @@ class TestQueryDocs:
                 "source": "topics/qe",
                 "section": "QE",
                 "corpus": "qe",
+                # This corpus declares no docs_url, so there is nothing to link.
+                "url": "",
             },
             {
                 "text": "core hit",
                 "source": "topics/core",
                 "section": "Core",
                 "corpus": "aiida-core",
+                "url": (
+                    f"https://aiida-core.readthedocs.io/en/{_DOCS_TAG}/"
+                    "topics/core.html#core"
+                ),
             },
         ]
 
@@ -175,7 +191,13 @@ class TestQueryDocs:
             results = query_docs("anything")
 
         assert results == [
-            {"text": "qe hit", "source": "topics/qe", "section": "QE", "corpus": "qe"}
+            {
+                "text": "qe hit",
+                "source": "topics/qe",
+                "section": "QE",
+                "corpus": "qe",
+                "url": "",
+            }
         ]
 
 
@@ -220,3 +242,73 @@ class TestDocsIndexAvailable:
             patch("aiida_agents.rag.retriever.discover_plugins", return_value=plugins),
         ):
             assert docs_index_available() is True
+
+
+class TestCitedCorpora:
+    """Which corpora a hit can be linked back to.
+
+    The link is built from the corpus's declaration at query time rather than
+    stored per chunk, so a plugin that starts publishing its documentation gets
+    linked citations without anyone rebuilding an index.
+    """
+
+    @staticmethod
+    def _query_with(corpus: RagCorpus) -> list[dict[str, str]]:
+        embed = _fake_embed()
+        name = _plugin_collection_name(embed, corpus.name, corpus.version)
+
+        col = MagicMock()
+        col.name = name
+        client = MagicMock()
+        client.list_collections.return_value = [col]
+        collection = MagicMock()
+        collection.query.return_value = {
+            "documents": [["plugin hit"]],
+            "metadatas": [[{"source": "user_guide/pw", "section": "Inputs"}]],
+            "distances": [[0.2]],
+        }
+        client.get_collection.return_value = collection
+        plugins = (LoadedPlugin(name="qe-plugin", corpora=(corpus,)),)
+
+        with (
+            patch("aiida_agents.rag.retriever._get_client", return_value=client),
+            patch(
+                "aiida_agents.rag.retriever.get_embedding_function", return_value=embed
+            ),
+            patch("aiida_agents.rag.retriever.discover_plugins", return_value=plugins),
+        ):
+            return query_docs("inputs")
+
+    def test_a_published_corpus_is_linked_at_its_own_ref(self) -> None:
+        results = self._query_with(
+            RagCorpus(
+                name="qe",
+                version="5.0.0",
+                docs_repo="https://github.com/aiidateam/aiida-quantumespresso.git",
+                docs_ref="v5.0.0",
+                docs_url="https://aiida-qe.readthedocs.io/en/{version}/{page}.html",
+            )
+        )
+
+        assert results[0]["url"] == (
+            "https://aiida-qe.readthedocs.io/en/v5.0.0/user_guide/pw.html#inputs"
+        )
+
+    def test_a_corpus_with_no_ref_is_linked_at_latest(self) -> None:
+        """A text_dir corpus names no git ref; "latest" is the only honest guess."""
+        results = self._query_with(
+            RagCorpus(
+                name="qe",
+                version="5.0.0",
+                text_dir=None,
+                docs_url="https://aiida-qe.readthedocs.io/en/{version}/{page}.html",
+            )
+        )
+
+        assert "/en/latest/" in results[0]["url"]
+
+    def test_an_unpublished_corpus_yields_no_link(self) -> None:
+        results = self._query_with(RagCorpus(name="qe", version="5.0.0"))
+
+        assert results[0]["url"] == ""
+        assert results[0]["text"] == "plugin hit"

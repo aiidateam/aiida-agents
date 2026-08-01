@@ -110,7 +110,15 @@ def search_aiida_docs(query: str) -> str:
     Returns:
         Up to three documentation excerpts, each prefixed with its source file
         and section heading (and, for a plugin's own corpus, the plugin's
-        corpus name), separated by horizontal rules.
+        corpus name), then the URL of the page it came from, separated by
+        horizontal rules.
+
+        **Include that URL in your answer** whenever you use an excerpt --- as
+        a Markdown link on the concept it supports, not a bare list at the end.
+        Finding the right page is the hardest part of these docs for most
+        users, and the link is the part of the answer they can act on. Only
+        link a URL this tool returned: do not construct one yourself, and do
+        not cite a page you were not given.
     """
     results = query_docs(query, limit=3)
     if not results:
@@ -134,6 +142,7 @@ def search_aiida_docs(query: str) -> str:
         header = (
             f"[{location}]" if corpus == "aiida-core" else f"[{corpus}: {location}]"
         )
-        formatted.append(f"{header}\n{text}")
+        url = r.get("url", "")
+        formatted.append(f"{header}\n{url}\n{text}" if url else f"{header}\n{text}")
 
     return "\n\n---\n\n".join(formatted)

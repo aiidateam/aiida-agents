@@ -40,6 +40,14 @@ class RagCorpus:
     builds) is used as-is; otherwise ``docs_repo`` is cloned at ``docs_ref`` and
     rendered with the plugin's own ``docs`` extra in an isolated build
     environment.
+
+    ``docs_url`` is where the same documentation is published, as a template
+    taking ``{version}`` and ``{page}`` --- for a Read the Docs project that is
+    ``"https://<project>.readthedocs.io/en/{version}/{page}.html"``. Give it and
+    every passage retrieved from this corpus is cited with a link the user can
+    open; leave it unset and the passage is still returned, just unlinked. It is
+    optional because contributing documentation and hosting it are separate
+    things, and a guessed URL is worse than none.
     """
 
     name: str
@@ -48,6 +56,7 @@ class RagCorpus:
     docs_ref: str | None = None
     docs_subdir: str | None = None
     text_dir: Path | None = None
+    docs_url: str | None = None
 
     @property
     def has_source(self) -> bool:

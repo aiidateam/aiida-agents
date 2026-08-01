@@ -14,6 +14,7 @@ import logging
 from typing import Any
 
 from aiida_agents.plugins import discover_plugins
+from aiida_agents.rag.citations import CORE_DOCS_TEMPLATE, citation_url
 from aiida_agents.rag.store import (
     _DOCS_TAG,
     _collection_name,
@@ -153,8 +154,10 @@ def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
         limit: Number of results to return.
 
     Returns:
-        List of dicts with 'text', 'source', 'section', and 'corpus' keys,
-        ordered by relevance across all searched corpora.
+        List of dicts with 'text', 'source', 'section', 'corpus' and 'url'
+        keys, ordered by relevance across all searched corpora. 'url' is the
+        published page the passage came from, anchored at its section; it is
+        empty for a corpus that declares no ``docs_url``.
     """
     client = _get_client()
     embed_fn = get_embedding_function()
@@ -168,9 +171,17 @@ def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
     candidates = _query_one(
         client, existing, core_name, embed_fn, query_vector, limit, "aiida-core"
     )
+    # Where each corpus is published, and at which ref, so a hit can be cited
+    # with a link. Collected alongside the hits rather than stored per chunk:
+    # it is a property of the corpus, and keeping it out of the index means a
+    # plugin can start publishing its docs without anyone rebuilding one.
+    published: dict[str, tuple[str | None, str]] = {
+        "aiida-core": (CORE_DOCS_TEMPLATE, _DOCS_TAG)
+    }
     for plugin in discover_plugins():
         for corpus in plugin.corpora:
             name = _plugin_collection_name(embed_fn, corpus.name, corpus.version)
+            published[corpus.name] = (corpus.docs_url, corpus.docs_ref or "latest")
             candidates.extend(
                 _query_one(
                     client, existing, name, embed_fn, query_vector, limit, corpus.name
@@ -178,13 +189,18 @@ def query_docs(query: str, limit: int = 3) -> list[dict[str, str]]:
             )
 
     candidates.sort(key=lambda c: c["_distance"])
-    return [
-        {
-            "text": c["text"],
-            "source": c["source"],
-            "section": c["section"],
-            "corpus": c["corpus"],
-        }
-        for c in candidates[:limit]
-        if c["_distance"] <= _MAX_RELEVANT_DISTANCE
-    ]
+    results = []
+    for c in candidates[:limit]:
+        if c["_distance"] > _MAX_RELEVANT_DISTANCE:
+            continue
+        template, version = published.get(c["corpus"], (None, "latest"))
+        results.append(
+            {
+                "text": c["text"],
+                "source": c["source"],
+                "section": c["section"],
+                "corpus": c["corpus"],
+                "url": citation_url(template, c["source"], c["section"], version) or "",
+            }
+        )
+    return results

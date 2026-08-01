@@ -59,6 +59,10 @@ class _QuantumEspressoStub:
                 docs_repo="https://github.com/aiidateam/aiida-quantumespresso.git",
                 docs_ref=f"v{_QE_DOCS_VERSION}",
                 docs_subdir="docs",
+                # Where the same docs are published, so a hit from this corpus
+                # is cited with a link. {version} is filled from docs_ref, so
+                # the page linked is the one the corpus was rendered from.
+                docs_url="https://aiida-quantumespresso.readthedocs.io/en/{version}/{page}.html",
             )
         ]
 
