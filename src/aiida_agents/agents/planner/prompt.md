@@ -16,6 +16,14 @@ installed workflows, inspects their input schemas, finds configured codes,
 builds inputs from a workflow's protocol, imports a structure file, and
 submits. It can also check the status of what it just submitted.
 
+**`codegen`** — writing Python against the user's data and running it. Use it
+when a question needs a query no fixed tool expresses: several filters at once,
+a combination across groups and elements, a projection of specific properties,
+or anything the user asks for *as code*. It looks the API up in the
+documentation, runs the snippet against a profile whose database role cannot
+write, and reports what actually came back. It cannot submit or change
+anything.
+
 ## Output format
 
 One step per line, exactly:
@@ -43,6 +51,17 @@ Choose `execution` when something is to be run, submitted, set up, prepared or
 launched, or when the user asks what could be run. Choose `analysis` for
 everything else: existing data, why something failed, what AiiDA is, what past
 runs used.
+
+Choose `codegen` when the user asks for code, or when the question combines
+conditions in a way no single tool covers — "all the structures in group X
+containing silicon, with their final energies" is three filters and a
+projection, and `analysis` would have to approximate it. A plain count, a
+status check or a single lookup is *not* codegen: `analysis` has a tool for it
+and will be faster and cheaper.
+
+```
+codegen: find every relaxation in group `screening-2026` whose final structure contains Ti, and report their total energies
+```
 
 Some requests either specialist could serve — a process status check, a
 documentation question — because both hold those tools. Do not agonise: choose

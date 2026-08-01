@@ -27,6 +27,15 @@ _WRITE_TOOLS = {
     "import_structure",
 }
 
+# Read-only, and still not exported. ``run_aiida_code`` executes arbitrary
+# Python; it is safe in the agents because it runs against a profile whose
+# database role cannot write, and that guarantee rests entirely on
+# ``AIIDA_AGENTS_SANDBOX_PROFILE`` naming a profile someone verified with
+# ``aiida-agents sandbox check``. An MCP client cannot verify that and we
+# cannot see whether it holds, so the honest export is none: a client that
+# wants to run code can run it itself, with its own consent.
+_UNEXPORTED_READ_TOOLS = {"run_aiida_code"}
+
 
 def _tool_functions() -> set[str]:
     """Public tool functions defined across every ``aiida_agents.tools`` module.
@@ -56,8 +65,12 @@ def test_server_registers_read_tools_only() -> None:
     The write tools are surface-agnostic like the others (they live under
     ``aiida_agents.tools.execution``, so they *are* discovered), but they reach
     the database, so they must go only through the HITL-gated agents (ADR-08),
-    never the unauthenticated MCP server. The server therefore registers every
-    discovered tool *except* the writes.
+    never the unauthenticated MCP server.
+
+    ``_UNEXPORTED_READ_TOOLS`` is the third case: read-only, but withheld for
+    the reason recorded beside it. The server registers every discovered tool
+    except those two sets, so adding a tool to either is a deliberate edit
+    rather than something that can happen by forgetting.
     """
     from aiida_agents.tools.execution import submit  # kept separate, not re-exported
 
@@ -68,7 +81,8 @@ def test_server_registers_read_tools_only() -> None:
     assert _WRITE_TOOLS <= discovered
     # ...but never exposed on the server.
     assert not (_WRITE_TOOLS & registered)
-    assert registered == discovered - _WRITE_TOOLS  # exactly the read tools
+    assert not (_UNEXPORTED_READ_TOOLS & registered)
+    assert registered == discovered - _WRITE_TOOLS - _UNEXPORTED_READ_TOOLS
 
 
 def test_register_tool_surfaces_tool_error() -> None:

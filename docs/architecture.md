@@ -88,6 +88,8 @@ The language layer is thin on purpose. Everything a wrong answer could damage is
 
 **Analysis agent** (`agents/analysis/`) — read-only exploration: querying nodes, following provenance, reading process reports and the files a calculation brought back, diagnosing a failure against the workflow's own exit codes and restart handlers, summarising past runs, searching the docs.
 
+**Codegen agent** (`agents/codegen/`) — writing Python against the user's data, running it, and reporting what it returned. For questions no fixed tool expresses: several filters at once, a projection of specific properties, or anything asked for *as code*. It looks the API up before writing, runs the snippet against a profile whose database role cannot write, and iterates on its own tracebacks. It holds no write tool, so it is not approval-gated — the containment is at the database, and the user judges output rather than unexecuted Python. See [ADR-11](/docs/adr/11-code-execution.md).
+
 **Execution agent** (`agents/execution/`) — discovering installed workflows, inspecting their input schemas, building inputs from a workflow's own protocol builder (or, for a process that has none, drafting them from its declared ports), checking the cutoffs against the pseudopotentials, importing a structure, submitting, waiting for a submission so the next one can run on its result, and rebuilding a past run's inputs to re-run it. Its three write tools are approval-gated — including the batch, which is one approval covering the whole set.
 
 **Tools** (`tools/`) — plain typed functions, grouped to mirror the agents. `tools/analysis/` and `tools/execution/` are owned by one agent each; anything both use lives at the top level. A tool's name, signature and docstring *are* its interface to the model.
@@ -123,7 +125,7 @@ Stating these saves the next reader from assuming they were overlooked.
 
 **No recommended k-point spacing.** No installed package publishes one per structure, so `kpoints_distance` is left unchecked rather than measured against a number this project invented.
 
-**No third specialist.** Diagnosis is a tool on the Analysis agent rather than a Diagnostic agent of its own; two specialists have so far been enough.
+**No Diagnostic specialist.** Diagnosis is a tool on the Analysis agent rather than an agent of its own: it needs no tool surface Analysis lacks and no prompt Analysis contradicts. The Codegen agent, added later, was the first case that met both — it executes code, and its working loop (write, run, read the traceback, try again) is a different job from explaining what is in a database.
 
 **No workflow construction.** Multi-step calculations are composed by running existing workflows in sequence and feeding one's output to the next. Nothing emits a new `WorkChain` class, and the provenance shape differs accordingly — the steps are linked by the data between them, not by a parent process. Where a plugin already ships a work chain for the whole sequence, that remains the better answer.
 
@@ -139,6 +141,8 @@ Stating these saves the next reader from assuming they were overlooked.
 | Evaluation harness | [06](/docs/adr/06-eval-harness.md) |
 | Validator | [07](/docs/adr/07-validator.md) |
 | Human-in-the-loop before writes | [08](/docs/adr/08-human-in-the-loop-before-writes.md) |
-| Planner over two specialists | [09](/docs/adr/09-agent-orchestration.md) |
+| Planner over specialists | [09](/docs/adr/09-agent-orchestration.md) |
+| Plugin extensibility | [10](/docs/adr/10-plugin-extensibility.md) |
+| Executing generated code | [11](/docs/adr/11-code-execution.md) |
 
 To add something of your own, see [Extending](/docs/extending.md).

@@ -48,10 +48,10 @@ logger = logging.getLogger(__name__)
 # explicitly overrides the router.
 # The tuple is the single source for the ``--agent`` choice and the REPL's
 # ``/agent`` switch, so the two never drift apart.
-_AGENT_CHOICES = ("auto", "analysis", "execution")
+_AGENT_CHOICES = ("auto", "analysis", "execution", "codegen")
 #: The specialists a request can actually be run by -- ``auto`` is a decision,
 #: not an agent, so it is never passed to ``get_agent``.
-_SPECIALISTS = ("analysis", "execution")
+_SPECIALISTS = ("analysis", "execution", "codegen")
 
 # Colored status glyphs so ``check`` marks success/failure the same green/red as
 # ``doctor`` (which renders its rows through rich). ``click.echo`` strips the

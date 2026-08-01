@@ -42,10 +42,10 @@ logger = logging.getLogger(__name__)
 __all__ = ["MAX_STEPS", "Specialist", "Step", "get_planner", "plan"]
 
 #: The specialists a step can be assigned to.
-Specialist = Literal["analysis", "execution"]
+Specialist = Literal["analysis", "execution", "codegen"]
 
 #: Same names as values, for matching a reply against.
-_SPECIALISTS: tuple[Specialist, ...] = ("analysis", "execution")
+_SPECIALISTS: tuple[Specialist, ...] = ("analysis", "execution", "codegen")
 
 #: Longest plan accepted. Beyond a few steps a plan is speculation about what
 #: earlier steps will find, and the planner has seen none of them. A request

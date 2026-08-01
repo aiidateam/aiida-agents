@@ -183,3 +183,11 @@ reach.
 **Not unbounded.** References are capped at twenty. A query matching hundreds
 of nodes would otherwise crowd out the findings they exist to support, and the
 next step can always query again.
+
+## Revision: a third specialist (ADR-11)
+
+"Cap at two specialists" above was a statement about what had been needed, not a limit. [ADR-11](/docs/adr/11-code-execution.md) adds a third, Codegen, and it is worth being explicit that this does not disturb anything structural here.
+
+The planner still emits `specialist: task` lines and holds no tools; the CLI still runs each step itself; specialists still never call each other; approval is still enforced by `requires_approval` on the tool. What changed is only the size of the set the planner chooses from — and the bar for joining it, which Codegen is the first case to clear: its own tool surface *and* its own prompt. Diagnosis was considered for the same promotion and stayed a tool, because it needed neither.
+
+`MAX_STEPS` is unchanged. A third specialist widens the choice per step; it does not lengthen a plan.

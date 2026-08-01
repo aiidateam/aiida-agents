@@ -27,6 +27,7 @@ Numbering follows build/dependency order, not chronology: **01–06** are the pa
 | [08](/docs/adr/08-human-in-the-loop-before-writes.md) | Enforced human-in-the-loop confirmation before any write/submit                                |
 | [09](/docs/adr/09-agent-orchestration.md)             | Agent orchestration: a planner over two specialists; specialists are never wrapped             |
 | [10](/docs/adr/10-plugin-extensibility.md)            | Plugin extensibility through one `aiida_agents.plugins` entry point                            |
+| [11](/docs/adr/11-code-execution.md)                  | Executing generated code against a write-refusing database role                                |
 | 11                                                    | Agent-run provenance: persist agent decisions/traces in AiiDA's provenance graph (exploratory) |
 
 ADR-01 is in effect; ADR-02 and ADR-03 are seeds with direction confirmed (2026-05-22).

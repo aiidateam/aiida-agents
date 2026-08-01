@@ -190,6 +190,20 @@ class AgentSettings(_Base):
     negative is rejected."""
 
 
+class SandboxSettings(_Base):
+    """Where and how generated code is executed (``AIIDA_AGENTS_*``)."""
+
+    sandbox_profile: str = "agents-sandbox"
+    """AiiDA profile generated code runs against. Must be one whose database
+    role cannot write --- ``aiida-agents sandbox init`` creates one, and
+    ``sandbox check`` proves it. Nothing downstream can tell a read-only
+    profile from a writable one, so this setting is the whole safety boundary."""
+
+    sandbox_timeout: float = Field(default=30.0, gt=0)
+    """Seconds a snippet may run before it is killed. A query over a large
+    provenance graph is slow; an accidental ``while True`` is forever."""
+
+
 class ReplSettings(_Base):
     """Interactive REPL configuration (``AIIDA_AGENTS_*``)."""
 
