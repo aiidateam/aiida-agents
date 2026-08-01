@@ -25,6 +25,7 @@ from aiida_agents.cli.doctor import doctor
 from aiida_agents.cli.mcp import mcp
 from aiida_agents.cli.output import (
     _warn_ungrounded,
+    _print_sources,
     _format_duration,
     _print_reply,
     _render_tool_calls,
@@ -173,6 +174,7 @@ def ask_cmd(ctx: click.Context, question: str, raw: bool) -> None:
                 f"[dim]— step {index}/{len(steps)} ({step.specialist}) —[/dim]"
             )
         _print_reply(result.output, raw=raw)
+        _print_sources(result.all_messages())
         _warn_ungrounded(result.output, result.all_messages(), prompt)
         previous = _StepResult(
             step.specialist,

@@ -155,3 +155,82 @@ def test_print_reply_raw_flag_forces_source_on_a_terminal(
     output._print_reply("# Title", raw=True)
 
     assert "# Title" in capsys.readouterr().out
+
+
+class TestSourcesFooter:
+    """The documentation links a run consulted, printed by the CLI.
+
+    Live testing found the gap this closes: `search_aiida_docs` returned a
+    correctly pinned readthedocs URL, the prompt asked the model to cite it,
+    and the reply contained no link at all. Retrieval knows which pages it
+    returned; that is not a judgement call, so the CLI prints them rather than
+    depending on the model to repeat them.
+    """
+
+    @staticmethod
+    def _messages(*tool_outputs: str) -> list[object]:
+        from pydantic_ai.messages import ModelRequest, ToolReturnPart
+
+        return [
+            ModelRequest(
+                parts=[
+                    ToolReturnPart(tool_name="search_aiida_docs", content=out)
+                    for out in tool_outputs
+                ]
+            )
+        ]
+
+    def test_a_retrieved_url_is_printed(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from aiida_agents.cli.output import _print_sources
+
+        _print_sources(
+            self._messages(
+                "[howto/query § S]\nhttps://aiida-core.readthedocs.io/en/v2.8.0/"
+                "howto/query.html#s\nsome text"
+            )  # type: ignore[arg-type]
+        )
+
+        assert "howto/query.html#s" in capsys.readouterr().out
+
+    def test_nothing_is_printed_when_no_tool_returned_a_url(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """A database question consults no docs; an empty heading would mislead."""
+        from aiida_agents.cli.output import _print_sources
+
+        _print_sources(self._messages("{'pk': 334407}"))  # type: ignore[arg-type]
+
+        assert capsys.readouterr().out == ""
+
+    def test_the_same_page_twice_is_listed_once(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        """Two excerpts from one page are one source."""
+        from aiida_agents.cli.output import _print_sources
+
+        url = "https://aiida-core.readthedocs.io/en/v2.8.0/howto/query.html"
+        _print_sources(self._messages(f"a {url}", f"b {url}"))  # type: ignore[arg-type]
+
+        assert capsys.readouterr().out.count(url) == 1
+
+    def test_the_list_is_capped(self, capsys: pytest.CaptureFixture[str]) -> None:
+        """A long list reads as a bibliography rather than a pointer."""
+        from aiida_agents.cli.output import _MAX_SOURCES, _print_sources
+
+        urls = " ".join(f"https://example.invalid/p{n}.html" for n in range(10))
+        _print_sources(self._messages(urls))  # type: ignore[arg-type]
+
+        assert capsys.readouterr().out.count("https://") == _MAX_SOURCES
+
+    def test_trailing_punctuation_is_not_part_of_the_link(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from aiida_agents.cli.output import _print_sources
+
+        _print_sources(self._messages("see https://example.invalid/a.html, and then"))  # type: ignore[arg-type]
+
+        out = capsys.readouterr().out
+        assert "a.html" in out
+        assert "a.html," not in out

@@ -32,6 +32,7 @@ from aiida_agents.cli.output import (
     _format_duration,
     _print_agent,
     _warn_ungrounded,
+    _print_sources,
     _render_tool_calls,
     console,
 )
@@ -172,6 +173,7 @@ def _run_turn(
         history = _handle_deferred(agent, result, history)
     else:
         _print_agent(result.output)
+        _print_sources(result.all_messages())
         _warn_ungrounded(result.output, result.all_messages(), question)
         history = result.all_messages()
         answer = result.output

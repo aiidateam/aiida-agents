@@ -7,6 +7,8 @@ consistently without importing each other.
 
 from __future__ import annotations
 
+import re
+
 import logging
 from collections.abc import Iterator
 
@@ -131,6 +133,47 @@ def _format_duration(seconds: float) -> str:
         return f"{seconds:.1f}s"
     minutes, secs = divmod(int(seconds), 60)
     return f"{minutes}m {secs}s"
+
+
+#: A URL in a tool return. Only the documentation tools emit these, and they
+#: emit them one per line under each excerpt's header, so a plain scan finds
+#: exactly the pages the run consulted.
+_URL = re.compile(r"https?://\S+")
+
+#: Most sources to list. Retrieval returns at most four excerpts, and a longer
+#: list would read as a bibliography rather than a pointer.
+_MAX_SOURCES = 4
+
+
+def _print_sources(messages: list[ModelMessage]) -> None:
+    """List the documentation pages this run actually retrieved.
+
+    The tools already return a link with every excerpt, and the prompt asks the
+    model to cite it. Live testing showed it frequently does not: the URL was
+    in the tool output and absent from the reply, which leaves the user exactly
+    where they started --- looking for the right page, which is the hardest
+    part of these docs.
+
+    So the links are printed by the CLI rather than left to the model. This is
+    the same division the rest of the system holds to: retrieval knows which
+    pages it returned, that is not a judgement call, and a fact code holds
+    exactly should not be routed through a model that may drop it. An inline
+    citation, when the model does write one, is a bonus on top of this.
+    """
+    from aiida_agents.grounding import tool_output_text
+
+    seen: list[str] = []
+    for url in _URL.findall(tool_output_text(messages)):
+        cleaned = url.rstrip(").,;")
+        if cleaned not in seen:
+            seen.append(cleaned)
+
+    if not seen:
+        return
+
+    console.print("\n[dim]Sources:[/dim]")
+    for url in seen[:_MAX_SOURCES]:
+        console.print(f"  [dim]{escape(url)}[/dim]")
 
 
 def _warn_ungrounded(text: str, messages: list[ModelMessage], question: str) -> None:
