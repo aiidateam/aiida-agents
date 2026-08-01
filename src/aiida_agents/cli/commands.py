@@ -31,6 +31,7 @@ from aiida_agents.cli.output import (
     console,
 )
 from aiida_agents.cli.rag import rag
+from aiida_agents.cli.sandbox import sandbox
 from aiida_agents.cli.repl import _run_repl
 from aiida_agents.cli.agent import (
     _resolve_plan,
@@ -221,6 +222,7 @@ def warm(ctx: click.Context) -> None:
 
 # Register the commands and groups that live in their own modules onto the root.
 cli.add_command(config)
+cli.add_command(sandbox)
 cli.add_command(rag)
 cli.add_command(mcp)
 cli.add_command(doctor)

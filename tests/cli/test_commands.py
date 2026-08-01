@@ -336,3 +336,64 @@ class TestChatStartup:
 
         assert seen["built"] == "analysis"
         assert seen["agent"] == "agent:analysis"
+
+
+class TestSandboxCommands:
+    """The `sandbox` group: set up the read-only profile, and verify it."""
+
+    def test_the_group_is_registered(self) -> None:
+        result = CliRunner().invoke(cli, ["--help"])
+
+        assert "sandbox" in result.output
+
+    def test_init_refuses_a_non_postgres_profile(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """There is no role to restrict, so pretending to help would mislead."""
+        from aiida_agents.cli import sandbox as sandbox_cli
+
+        class _Profile:
+            name = "sqlite-profile"
+            storage_config: dict[str, str] = {}
+
+        class _Config:
+            def get_profile(self, _name: object) -> _Profile:
+                return _Profile()
+
+        monkeypatch.setattr("aiida.manage.configuration.get_config", lambda: _Config())
+        monkeypatch.setattr(sandbox_cli, "secrets", __import__("secrets"))
+
+        result = CliRunner().invoke(cli, ["sandbox", "init"])
+
+        assert result.exit_code != 0
+        assert "PostgreSQL" in result.output
+
+    def test_check_exits_nonzero_when_a_profile_can_write(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A writable profile must fail the command, not merely be mentioned."""
+        from aiida_agents.sandbox.setup import ReadOnlyCheck
+
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.setup.verify_read_only",
+            lambda profile, timeout=60.0: ReadOnlyCheck(False, "role CAN insert"),
+        )
+
+        result = CliRunner().invoke(cli, ["sandbox", "check"])
+
+        assert result.exit_code == 1
+        assert "CAN insert" in result.output
+
+    def test_check_passes_a_read_only_profile(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from aiida_agents.sandbox.setup import ReadOnlyCheck
+
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.setup.verify_read_only",
+            lambda profile, timeout=60.0: ReadOnlyCheck(True, "cannot insert"),
+        )
+
+        result = CliRunner().invoke(cli, ["sandbox", "check"])
+
+        assert result.exit_code == 0
