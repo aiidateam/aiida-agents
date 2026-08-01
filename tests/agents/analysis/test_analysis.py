@@ -39,6 +39,7 @@ EXPECTED_TOOLS = {
     "get_node_outputs",
     "search_structures",
     "search_aiida_docs",
+    "search_aiida_code",
 }
 
 

@@ -150,15 +150,37 @@ def _warn_ungrounded(text: str, messages: list[ModelMessage], question: str) -> 
     ``aiida_agents.grounding``) but a false positive must cost a line of output,
     never a withheld answer.
     """
-    from aiida_agents.grounding import tool_output_text, ungrounded_quantities
-
-    invented = ungrounded_quantities(text, tool_output_text(messages), question)
-    if not invented:
-        return
-
-    values = ", ".join(sorted(invented))
-    console.print(
-        f"[yellow]⚠ Not found in any tool output: {values}. "
-        "Verify before using these values.[/yellow]"
+    from aiida_agents.grounding import (
+        syntax_errors,
+        tool_output_text,
+        ungrounded_quantities,
+        ungrounded_symbols,
     )
-    logger.warning("ungrounded quantities in reply: %s", values)
+
+    evidence = tool_output_text(messages)
+
+    invented = ungrounded_quantities(text, evidence, question)
+    if invented:
+        values = ", ".join(sorted(invented))
+        console.print(
+            f"[yellow]⚠ Not found in any tool output: {values}. "
+            "Verify before using these values.[/yellow]"
+        )
+        logger.warning("ungrounded quantities in reply: %s", values)
+
+    # The same question asked of generated code. Separate messages because the
+    # actions differ: an unsourced number wants checking, a name that exists in
+    # no example wants not being run.
+    unknown = ungrounded_symbols(text, evidence)
+    if unknown:
+        names = ", ".join(sorted(unknown))
+        console.print(
+            f"[yellow]⚠ Imported from AiiDA but in no documentation this run "
+            f"retrieved: {names}. Check these exist before running the "
+            "code.[/yellow]"
+        )
+        logger.warning("ungrounded symbols in reply: %s", names)
+
+    for problem in syntax_errors(text):
+        console.print(f"[yellow]⚠ The Python above does not parse: {problem}[/yellow]")
+        logger.warning("syntax error in generated code: %s", problem)

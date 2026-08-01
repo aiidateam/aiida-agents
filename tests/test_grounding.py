@@ -10,6 +10,9 @@ from __future__ import annotations
 import pytest
 
 from aiida_agents.grounding import (
+    python_blocks,
+    syntax_errors,
+    ungrounded_symbols,
     quantities_in,
     tool_output_text,
     ungrounded_quantities,
@@ -145,3 +148,101 @@ class TestPercentages:
 
     def test_ordinary_prose_numbers_are_still_ignored(self) -> None:
         assert ungrounded_quantities("found 12 structures in step 2 of 3", "") == set()
+
+
+class TestPythonBlocks:
+    """Which parts of an answer are offered as code."""
+
+    def test_a_labelled_fence_is_found(self) -> None:
+        assert python_blocks("```python\nx = 1\n```") == ["x = 1\n"]
+
+    def test_an_unlabelled_fence_counts_too(self) -> None:
+        """Models routinely omit the language; the user pastes it regardless."""
+        assert python_blocks("```\nx = 1\n```") == ["x = 1\n"]
+
+    def test_prose_with_no_fence_yields_nothing(self) -> None:
+        assert python_blocks("Use the QueryBuilder to do this.") == []
+
+    def test_several_blocks_are_all_returned(self) -> None:
+        answer = "First:\n```python\na = 1\n```\nThen:\n```python\nb = 2\n```"
+
+        assert len(python_blocks(answer)) == 2
+
+
+class TestSyntaxErrors:
+    """Code that cannot run at all."""
+
+    def test_valid_code_reports_nothing(self) -> None:
+        assert syntax_errors("```python\nqb = QueryBuilder()\n```") == []
+
+    def test_an_unclosed_paren_is_reported(self) -> None:
+        problems = syntax_errors("```python\nqb = QueryBuilder(\n```")
+
+        assert len(problems) == 1
+        assert "never closed" in problems[0]
+
+    def test_the_line_number_is_given(self) -> None:
+        """So a long snippet's problem can be found without re-reading it."""
+        problems = syntax_errors("```python\na = 1\nb = (\n```")
+
+        assert "line 2" in problems[0]
+
+    def test_a_shell_transcript_is_not_parsed_as_python(self) -> None:
+        """A block of verdi commands is not meant to be a module."""
+        assert syntax_errors("```\nverdi process list -a\n```") == []
+
+    def test_a_repl_transcript_is_not_parsed_as_python(self) -> None:
+        assert syntax_errors("```\n>>> node.pk\n334407\n```") == []
+
+    def test_an_empty_block_is_not_an_error(self) -> None:
+        assert syntax_errors("```python\n```") == []
+
+
+class TestUngroundedSymbols:
+    """AiiDA names in generated code that no tool output mentions."""
+
+    def test_an_invented_import_is_flagged(self) -> None:
+        answer = "```python\nfrom aiida.orm import MagicNode\n```"
+
+        assert ungrounded_symbols(answer, "QueryBuilder and CalcJobNode") == {
+            "MagicNode"
+        }
+
+    def test_a_retrieved_import_is_not_flagged(self) -> None:
+        answer = "```python\nfrom aiida.orm import QueryBuilder\n```"
+
+        assert ungrounded_symbols(answer, "use the QueryBuilder like so") == set()
+
+    def test_several_names_on_one_import_are_checked_separately(self) -> None:
+        answer = "```python\nfrom aiida.orm import QueryBuilder, Invented\n```"
+
+        assert ungrounded_symbols(answer, "QueryBuilder") == {"Invented"}
+
+    def test_a_non_aiida_import_is_ignored(self) -> None:
+        """numpy is not ours to vouch for, and flagging it would be noise."""
+        answer = "```python\nimport numpy\nfrom pathlib import Path\n```"
+
+        assert ungrounded_symbols(answer, "") == set()
+
+    def test_a_submodule_import_is_still_checked(self) -> None:
+        answer = "```python\nfrom aiida.orm.nodes.data import Invented\n```"
+
+        assert ungrounded_symbols(answer, "") == {"Invented"}
+
+    def test_method_calls_are_deliberately_not_checked(self) -> None:
+        """`.append` belongs to lists too; flagging it would drown the signal."""
+        answer = "```python\nqb.append(CalcJobNode)\nqb.made_this_up()\n```"
+
+        assert ungrounded_symbols(answer, "") == set()
+
+    def test_unparseable_code_yields_no_symbol_findings(self) -> None:
+        """syntax_errors reports that; reporting it twice helps nobody."""
+        answer = "```python\nfrom aiida.orm import (\n```"
+
+        assert ungrounded_symbols(answer, "") == set()
+
+    def test_prose_naming_a_class_is_not_a_finding(self) -> None:
+        """Only code is checked. Discussing a class is not claiming it exists."""
+        answer = "You could imagine a MadeUpNode for this."
+
+        assert ungrounded_symbols(answer, "") == set()

@@ -38,7 +38,7 @@ from aiida_agents.tools import (
     query_run_context,
     search_structures,
 )
-from aiida_agents.rag import search_aiida_docs
+from aiida_agents.rag import search_aiida_code, search_aiida_docs
 
 # Every read tool is exposed through RetryOnToolError (see get_agent), so a
 # tool that raises -- e.g. on a hallucinated or wrong-type identifier -- comes
@@ -59,6 +59,7 @@ _READ_TOOLS: list[Any] = [
     search_structures,
     query_run_context,
     search_aiida_docs,
+    search_aiida_code,
 ]
 
 _SYSTEM_PROMPT = (
