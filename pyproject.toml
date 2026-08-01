@@ -87,6 +87,12 @@ tests = [
   # against, rather than mocking away the one part worth doubting. A test
   # dependency only, so the package itself stays code-agnostic.
   "aiida-pseudo~=1.8",
+  # Scores the answer-quality eval tier (Dataset/Case/LLMJudge). An extra
+  # rather than a dev-group entry because the `tests` extra is what CI's
+  # hatch-test and pre-commit environments install; in the dev group the
+  # answer-quality module would fail to import there, and the mypy hook with
+  # it.
+  "pydantic-evals>=0.1",
 ]
 lint = [
   "mypy",
