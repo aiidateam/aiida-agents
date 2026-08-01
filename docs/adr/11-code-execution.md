@@ -1,7 +1,3 @@
----
-title: "ADR-11: Executing generated code"
----
-
 # ADR-11: Executing generated code
 
 ## Status
