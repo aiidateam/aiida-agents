@@ -18,6 +18,7 @@ from aiida_agents.tools import (
     describe_workflow,
     diagnose_process_failure,
     draft_workflow_inputs,
+    get_daemon_status,
     get_node_inputs,
     get_node_outputs,
     get_process_report,
@@ -55,6 +56,7 @@ def register_all(mcp: FastMCP) -> None:
     register_tool(mcp, get_process_status)
     register_tool(mcp, get_process_report)
     register_tool(mcp, diagnose_process_failure)
+    register_tool(mcp, get_daemon_status)
     register_tool(mcp, list_processes)
     register_tool(mcp, list_retrieved_files)
     register_tool(mcp, get_retrieved_file)

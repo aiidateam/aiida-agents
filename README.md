@@ -39,6 +39,8 @@ Where things stood at the beginning of July 2026 (the interface has grown since)
 
 **Explain a failure.** Walk from a work chain's exit code down to the calculation that actually broke, read what that exit code means from the process class itself, and report which of the workflow's own restart handlers already fired — so a remedy that has been tried twice is not recommended a third time. With `aiida-quantumespresso` installed, it also reads pw.x's SCF trace to tell a cycle that ran out of iterations from one that never settled.
 
+**Explain a job that never started.** A failure has an exit code to explain; a process waiting on a stopped daemon has nothing wrong with it at all, and every status tool will call it "waiting" indefinitely. The agents check the daemon when a process is not progressing, and say which of the two it is — a job still running normally, or a queue nothing is draining.
+
 **Set a calculation up and run it.** Discover installed workflows, inspect their input schemas, build inputs from a workflow's protocol builder — or, for the many processes that have none, draft them from the declared ports. Cutoffs are checked against what the spec's pseudopotential family was converged for.
 
 **Run things in sequence, or in bulk.** Wait for a submission and feed its output to the next one; or rebuild a past run's inputs, change one parameter, and resubmit a whole set under a single approval.

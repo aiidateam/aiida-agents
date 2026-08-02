@@ -17,6 +17,7 @@ from typing_extensions import TypedDict
 
 __all__ = [
     "CodeRecord",
+    "DaemonStatus",
     "FailedStep",
     "FailureDiagnosis",
     "HandlerAttempt",
@@ -93,6 +94,23 @@ class ProcessRecord(TypedDict):
     process_type: str
     state: str | None
     exit_status: int | None
+
+
+class DaemonStatus(TypedDict):
+    """Return shape of ``get_daemon_status``.
+
+    ``pending`` counts processes the daemon still owes work to. Read it
+    together with ``running``: a stopped daemon and a non-zero ``pending`` is
+    the state where nothing will ever progress on its own.
+    """
+
+    running: bool
+    workers: int | None
+    profile: str
+    process_control: str | None
+    pending: int
+    oldest_pending_pk: int | None
+    diagnosis: str
 
 
 class ProcessReport(TypedDict):

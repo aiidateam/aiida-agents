@@ -106,6 +106,7 @@ EXPECTED_EXECUTION_TOOLS = {
     "list_codes",
     "get_process_status",
     "wait_for_process",
+    "get_daemon_status",
     "search_aiida_docs",
     "execute_workflow_spec",
     "import_structure",

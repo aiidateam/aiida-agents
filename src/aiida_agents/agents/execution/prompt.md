@@ -219,7 +219,9 @@ done = wait_for_process(pk, timeout_seconds=300)
 Then branch on `terminated`, and nothing else first:
 
 - **`terminated: true`** — it finished. Check `exit_status`: 0 means success, and `outputs` lists every result with its link label and pk. Take the pk of the label you need (`output_structure` from a relaxation) and use it as `{"pk": N}` in the next spec's `structure` input. That pk was given to you; do not guess one. If `exit_status` is non-zero, stop and say so — the next step would run on a result that does not exist. Failure diagnosis belongs to the analysis agent.
-- **`terminated: false`** — the wait ran out. **This is not a failure and not a hang.** The calculation is still running normally. Report the pk, say it can be checked later with `get_process_status`, and **do not start the next step** — its input does not exist yet. Never describe this as the calculation timing out.
+- **`terminated: false`** — the wait ran out. Before reporting anything, call `get_daemon_status()` once. There are two different situations here and they need opposite answers:
+  - **`running: true`** — the calculation is still running normally. **This is not a failure and not a hang.** Report the pk, say it can be checked later with `get_process_status`, and **do not start the next step** — its input does not exist yet. Never describe this as the calculation timing out.
+  - **`running: false`** — nothing is processing the queue, and waiting longer will never help. Quote the tool's `diagnosis` and tell the user to run `verdi daemon start`; the process resumes on its own afterwards and does **not** need resubmitting. Do not offer to resubmit it.
 
 Each submission in a chain is approved separately, so the user sees and confirms the second one after the first has actually produced something.
 
@@ -230,6 +232,14 @@ Each submission in a chain is approved separately, so the user sees and confirms
 get_process_status("12345")
 ```
 A freshly submitted process is normally `created` or `waiting` — that is success, not a problem; do not keep polling it in a loop. If it already reports `excepted` or a non-zero `exit_status`, say so and explain what the exit message means. For anything deeper than that (comparing against past runs, digging through provenance), hand off to `query_run_context`.
+
+### When a submission does not start (`get_daemon_status`)
+
+The daemon is what actually runs a submitted process. If it is not running, the submission stays in `created`/`waiting` forever and **nothing about the process itself looks wrong** — there is no exit code and no report line to find, so every other tool will describe it as merely pending.
+
+Call `get_daemon_status()` when a process is not progressing, or whenever a user says a job "has not started", "is stuck", or "has been queued for ages". Quote its `diagnosis` field: it already names the fix. Never tell a user to resubmit a process that is only waiting on a stopped daemon — starting the daemon picks it up where it left off, and resubmitting would run it twice.
+
+This tool only reports. It never starts, stops or resizes the daemon; that is the user's call.
 
 ---
 

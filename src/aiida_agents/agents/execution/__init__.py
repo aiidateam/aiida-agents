@@ -27,6 +27,7 @@ from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
 from aiida_agents.tools.execution.structures import import_structure
 from aiida_agents.tools.execution.waiting import wait_for_process
 from aiida_agents.tools.processes import get_process_status
+from aiida_agents.tools.daemon import get_daemon_status
 from aiida_agents.rag import search_aiida_docs
 
 # Read-only tools: wrapped by RetryOnToolError so tool failures become ModelRetry
@@ -41,6 +42,7 @@ _READ_TOOLS: list[Any] = [
     list_codes,  # Discover the configured codes to submit against (read-only)
     get_process_status,  # Follow up on what was just submitted (read-only)
     wait_for_process,  # Wait for a submission to finish, to run the next one on its output (read-only)
+    get_daemon_status,  # Why a submission is not progressing: a stopped daemon (read-only)
     search_aiida_docs,  # Look up how a workflow/input actually works (read-only)
 ]
 

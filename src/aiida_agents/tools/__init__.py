@@ -16,6 +16,12 @@ get_process_status, get_process_report, list_processes
     Process inspection, shared by both agents (``tools/processes.py``): the
     Analysis agent reports on runs and explains failures, the Execution agent
     follows up on what it just submitted.
+get_daemon_status
+    Whether the daemon is running and what is waiting on it
+    (``tools/daemon.py``), shared for the same reason: it explains a process
+    that is not progressing, which is both a diagnosis and the answer to "my
+    submission has not started". Read-only -- it never starts or stops the
+    daemon.
 query_nodes, get_node_inputs, get_node_outputs, search_structures,
 diagnose_process_failure
     Analysis agent's read-only AiiDA query and diagnosis tools
@@ -57,6 +63,7 @@ from aiida_agents.tools.execution import (
     wait_for_process,
 )
 from aiida_agents.tools.execution.codes import list_codes
+from aiida_agents.tools.daemon import get_daemon_status
 
 __all__ = [
     "build_resubmission_spec",
@@ -65,6 +72,7 @@ __all__ = [
     "describe_workflow",
     "diagnose_process_failure",
     "draft_workflow_inputs",
+    "get_daemon_status",
     "get_node_inputs",
     "get_node_outputs",
     "get_process_report",

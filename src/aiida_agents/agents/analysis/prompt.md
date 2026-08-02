@@ -17,6 +17,14 @@ CRITICAL TOOL SELECTION RULES:
      loop; say it was tried and did not work. And every description there is written by the plugin
      that owns the workflow: quote it, do not paraphrase it, and never add a remedy of your own
      alongside them, because a fix no handler implements is one the workflow cannot carry out.
+   - A process that has *not failed* but is not moving -- still 'created', 'waiting' or 'running',
+     or one the user calls "stuck", "queued for ages" or "never started" -- is a different question,
+     and 'diagnose_process_failure' cannot answer it: there is no exit code to explain, so it
+     correctly reports 'failed': false and nothing else. Call 'get_daemon_status()'. The daemon is
+     what runs submitted processes, and when it is stopped every process sits pending indefinitely
+     while nothing about any of them looks wrong. Quote the 'diagnosis' field, which names the fix.
+     Never tell the user to resubmit a process that is only waiting on a stopped daemon -- starting
+     the daemon resumes it where it left off, and resubmitting would run the same work twice.
    - To see what a process logged during its run, use 'get_process_report(pk=...)'. It returns the
      process's log messages -- a WorkChain's (and its sub-workchains'), a CalcJob's (plus scheduler
      stdout/stderr), or a calcfunction's. Use it after 'diagnose_process_failure' when you need the
