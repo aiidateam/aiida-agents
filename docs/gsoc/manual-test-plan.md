@@ -14,8 +14,6 @@ except the QE-specific phases).
 > answer that is right *without a tool call behind it* is a lucky guess, and
 > the next one will be wrong.
 
----
-
 ## Phase 0: setup and sanity
 
 ```bash
@@ -37,7 +35,6 @@ aiida-agents rag build       # clones and renders the AiiDA docs; several minute
 aiida-agents rag status
 aiida-agents rag search "how do I restart a failed workchain"
 ```
-
 ---
 
 ## Phase 1: the read path
