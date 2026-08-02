@@ -1,6 +1,6 @@
 # ADR-04: Package-by-feature agents subpackage; single Analysis Agent first
 
-> Status: accepted — Analysis Agent implemented as of Weeks 3–4 (June 2026).
+> Status: accepted. Analysis Agent implemented as of Weeks 3–4 (June 2026).
 > Execution Agent added and the tool layer re-grouped per agent (see the
 > Revision section). Orchestrator deferred to Weeks 7–8.
 
@@ -13,7 +13,7 @@ unmanageable as the tool surface grows.
 
 Breaking work into specialised agents is the standard pattern. The question is
 what the package structure, agent boundaries, and inter-agent protocol should
-be — and critically, when to introduce that complexity.
+be, and critically, when to introduce that complexity.
 
 ## Decision
 
@@ -35,7 +35,7 @@ src/aiida_agents/agents/
     _models.py           # shared get_model() factory (all agents share one model)
     analysis/
         __init__.py      # Analysis agent: get_agent(), _TOOLS, system prompt
-        prompt.md        # agent's system prompt — co-located, plain Markdown
+        prompt.md        # agent's system prompt: co-located, plain Markdown
     validator/           # ADR-07: deterministic validation before any write
         __init__.py
         _schema.py
@@ -62,16 +62,16 @@ The Analysis Agent exposes seven tools:
 > for the current per-agent layout (`tools/analysis/…`), and note that
 > `submit_workflow` has since moved off this agent entirely.
 
-| Tool                 | Source                | Type                             |
-| -------------------- | --------------------- | -------------------------------- |
-| `get_process_status` | `tools/processes.py`  | Read                             |
-| `list_processes`     | `tools/processes.py`  | Read                             |
-| `query_nodes`        | `tools/nodes.py`      | Read                             |
-| `get_node_inputs`    | `tools/nodes.py`      | Read                             |
-| `get_node_outputs`   | `tools/nodes.py`      | Read                             |
-| `search_structures`  | `tools/structures.py` | Read                             |
-| `search_aiida_docs`  | `rag/__init__.py`     | Read (RAG)                       |
-| `submit_workflow`    | `tools/submit.py`     | Write — `requires_approval=True` |
+| Tool                 | Source                | Type                            |
+| -------------------- | --------------------- | ------------------------------- |
+| `get_process_status` | `tools/processes.py`  | Read                            |
+| `list_processes`     | `tools/processes.py`  | Read                            |
+| `query_nodes`        | `tools/nodes.py`      | Read                            |
+| `get_node_inputs`    | `tools/nodes.py`      | Read                            |
+| `get_node_outputs`   | `tools/nodes.py`      | Read                            |
+| `search_structures`  | `tools/structures.py` | Read                            |
+| `search_aiida_docs`  | `rag/__init__.py`     | Read (RAG)                      |
+| `submit_workflow`    | `tools/submit.py`     | Write: `requires_approval=True` |
 
 A write tool is registered with Pydantic AI's native `requires_approval=True`,
 which pauses the agent run and returns a `DeferredToolRequests` object for the
@@ -82,7 +82,7 @@ CLI to handle (ADR-08).
 > **Superseded by [ADR-09](/docs/adr/09-agent-orchestration.md).** The table below
 > planned three specialists behind an Orchestrator whose tools are the specialist
 > `run()` calls. Two specialists were built, with diagnosis folded into the
-> Analysis agent, and the orchestration layer is a *planner* with no tools —
+> Analysis agent, and the orchestration layer is a *planner* with no tools:
 > wrapping the specialists in tools would have broken the human-in-the-loop
 > guarantee. ADR-09 gives the reasoning.
 
@@ -101,7 +101,7 @@ Orchestrator will be a `pydantic_ai.Agent` whose only tools are the specialist
 
 ## Consequences
 
-- The read/write split maps cleanly onto agent boundaries — the write tool
+- The read/write split maps cleanly onto agent boundaries: the write tool
   is gated by `requires_approval` regardless of which agent holds it.
 - Adding a new agent means adding a new sibling subpackage; no changes to
   existing agents.
@@ -135,7 +135,7 @@ flat `tools/` directory no longer said who owned what: `tools/workflows/` and
 `query_builder.py`, and `structures.py` were all Analysis's, with nothing in
 the layout saying so.
 
-`tools/` now mirrors `agents/` — each agent's tools live in `tools/<agent>/`,
+`tools/` now mirrors `agents/`: each agent's tools live in `tools/<agent>/`,
 and only genuinely shared infrastructure stays at the top level:
 
 ```

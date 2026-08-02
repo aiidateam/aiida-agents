@@ -1,16 +1,16 @@
-# ADR-07: Validator — deterministic schema and range checks before writes
+# ADR-07: Validator, with deterministic schema and range checks before writes
 
 > Status: revised twice. (2026-06) The standalone validator subpackage is
 > removed; schema validation is delegated to AiiDA's own
 > `spec.inputs.validate()`. (2026-07) The range/physics tier is built, but as
-> a warning at the approval prompt rather than the gate this ADR specified —
+> a warning at the approval prompt rather than the gate this ADR specified:
 > see the second Revision section.
 
 ## Context
 
 The agent can now submit AiiDA workflows via `submit_workflow` (ADR-08).
 Before any submission reaches the database, the inputs must be validated
-deterministically — without involving the LLM, which can produce inputs that
+deterministically: without involving the LLM, which can produce inputs that
 look plausible but are type-incorrect or physically nonsensical.
 
 A wrong submission on an HPC cluster wastes thousands of core-hours and
@@ -27,26 +27,26 @@ Build a deterministic Validator as a subpackage
 (`agents/validator/`) with two tiers, executed in order before
 `submit_workflow` calls `aiida.engine.submit`.
 
-### Tier 1 — Schema validation (`_schema.py`)
+### Tier 1: Schema validation (`_schema.py`)
 
 Checks inputs against the process class's own `spec().inputs`:
 
 - Required ports must be present.
 - Provided values must be instances of the port's `valid_type`.
-- Metadata ports (scheduler options) are skipped — AiiDA validates those
+- Metadata ports (scheduler options) are skipped: AiiDA validates those
   at submit time.
 
 The process class is loaded by entry point string (`"core.arithmetic.add"`,
 `"core.arithmetic.multiply_add"`, etc.) by trying `aiida.calculations` then
 `aiida.workflows`. No workflow-specific knowledge is hardcoded; the spec is
-the source of truth. This makes the validator generic — it works for any
+the source of truth. This makes the validator generic: it works for any
 AiiDA process without modification.
 
 Port attributes are read directly (`port.required`, `port.valid_type`,
 `port.is_metadata`) rather than via `port.serialize()`, which requires a
 value argument and is not appropriate for this use.
 
-### Tier 2 — Range and physics checks (`_ranges.py`)
+### Tier 2: Range and physics checks (`_ranges.py`)
 
 Placeholder for Weeks 7–8. Will enforce sensible value ranges and physics
 constraints (positive k-point meshes, non-negative energies, reasonable
@@ -67,7 +67,7 @@ so the agent can surface all failures at once rather than one at a time.
 ### Integration with submit_workflow
 
 `submit_workflow` calls `validate()` before `aiida.engine.submit`. If
-validation raises, a `ToolError` is raised instead — the submission never
+validation raises, a `ToolError` is raised instead: the submission never
 reaches the database. This is enforced in tests:
 `test_no_submit_without_valid_inputs` monkeypatches `aiida.engine.submit`
 and asserts it is never called when validation fails.
@@ -75,7 +75,7 @@ and asserts it is never called when validation fails.
 ## Consequences
 
 - Type and presence errors are caught before any database write.
-- The validator is generic — no per-workflow hardcoding required.
+- The validator is generic: no per-workflow hardcoding required.
 - Adding range checks in Weeks 7–8 requires only adding rules to
   `_ranges.py`; no changes to the public API or `submit_workflow`.
 - The schema tier depends on AiiDA's port spec being accurate, which it
@@ -152,7 +152,7 @@ A cutoff below the pseudopotential family's recommendation is under-converged
 for a production run and entirely reasonable for a smoke test, a convergence
 study, or a five-minute check that a workflow is wired correctly. There is no
 value at which "reject this" is right in general, so a gate would be wrong
-about as often as it was right — and a validator that refuses legitimate work
+about as often as it was right, and a validator that refuses legitimate work
 teaches people to route around it, which costs more than the check earns.
 
 What was actually missing was never enforcement. It was the *fact* reaching the
@@ -172,14 +172,14 @@ not depend on compliance.
 ### What it compares against, and what it will not
 
 The recommendation comes from the pseudopotential family the spec itself names,
-through `aiida-pseudo`. This package ships no table of its own — the numbers
+through `aiida-pseudo`. This package ships no table of its own: the numbers
 belong to the family's authors, who converged them, and a finding cites the
 family and elements it came from. Where no family can be identified the check
 reports nothing rather than falling back on a general-purpose number.
 
 Cutoffs only. No installed package publishes a recommended k-point spacing per
 structure, so a bound on `kpoints_distance` would be a number this project
-invented and then presented with a validator's authority — the failure mode the
+invented and then presented with a validator's authority: the failure mode the
 grounding work exists to prevent. It is left unchecked, and the prompt says so,
 so that an empty result is not read as a clean bill of health.
 

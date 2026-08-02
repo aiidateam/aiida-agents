@@ -1,11 +1,11 @@
 # ADR-03: Adopt Pydantic AI as the provider-agnostic LLM library
 
-> Status: accepted — Pydantic AI adopted and implemented as of Weeks 1–2 (May 2026).
+> Status: accepted. Pydantic AI adopted and implemented as of Weeks 1–2 (May 2026).
 
 ## Context
 
 Agents need to turn natural language into tool calls, and the project targets
-both local and cloud models — local is a hard gate given HPC cluster constraints.
+both local and cloud models: local is a hard gate given HPC cluster constraints.
 
 A unified way to talk to OpenAI, Anthropic, and local Ollama models is required.
 Ollama is not that layer: it is a local-model runner with an OpenAI-compatible
@@ -22,11 +22,11 @@ avoiding unnecessary SDK bloat.
 
 ### Why Pydantic AI over the alternatives
 
-- **LiteLLM** — swaps the model call but provides no agent or tool structure.
+- **LiteLLM**: swaps the model call but provides no agent or tool structure.
   We need both; LiteLLM alone is half a solution.
-- **`llm` (Simon Willison)** — simple and pluggable but no typed tool schema,
+- **`llm` (Simon Willison)**: simple and pluggable but no typed tool schema,
   no structured output, no native HITL support. Too minimal for this use case.
-- **Pydantic AI** — typed agents, structured tool calls, native
+- **Pydantic AI**: typed agents, structured tool calls, native
   `requires_approval` HITL support (ADR-08), and fits the project's
   Pydantic-heavy stack. The team behind it actively maintains it.
 
@@ -54,11 +54,11 @@ caching, so direct `anthropic` / `openai` are kept alongside it.
 
 Two tracks run in parallel:
 
-- **Local models via Ollama** — offline-capable, runs on HPC clusters with no
-  outbound internet. Default dev model is `qwen3.5:2b` (placeholder only —
+- **Local models via Ollama**: offline-capable, runs on HPC clusters with no
+  outbound internet. Default dev model is `qwen3.5:2b` (placeholder only:
   too small for reliable tool calling). For real use, `qwen3.6:27b` or
   `gemma3:12b` are recommended.
-- **Cloud models** — capable out of the box, no extra infra. Useful for
+- **Cloud models**: capable out of the box, no extra infra. Useful for
   evaluating answer quality against local models.
 
 The provider abstraction means switching between tracks is a `.env` change,
@@ -69,7 +69,7 @@ not a code change.
 The model is constructed in a `get_model()` factory called from `get_agent()`,
 which is called from `cli.main()`; configuration (including the provider SDK
 keys) is read there by `ModelSettings`, which pydantic-settings populates from
-the environment and `.env`. Importing the agents package is inert — no
+the environment and `.env`. Importing the agents package is inert: no
 filesystem access, no environment mutation, no model construction at import time.
 
 ## Consequences

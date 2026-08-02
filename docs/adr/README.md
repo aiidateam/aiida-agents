@@ -7,7 +7,7 @@ To change a decision, add a new ADR that supersedes it and note that in the log 
 ADRs cover **tooling and architecture only**; project/program planning lives in [`docs/gsoc/`](/docs/gsoc/).
 
 New ADR: create `NN-short-title.md` (increment `NN`) with `Context`, `Decision`, `Consequences`, and `Alternatives considered`.
-No formal status/author/date header — we keep it lightweight (two main maintainers).
+No formal status/author/date header: we keep it lightweight (two main maintainers).
 Use [`01-package-scaffolding.md`](/docs/adr/01-package-scaffolding.md) as the worked example.
 Diagrams are embedded as [Mermaid](https://mermaid.js.org/) fenced blocks (and exported UML where a static image is clearer); MyST renders both in the docs site.
 
@@ -20,7 +20,7 @@ Numbering follows build/dependency order, not chronology: **01–06** are the pa
 | [01](/docs/adr/01-package-scaffolding.md)             | Standalone `aiida-agents` package, scaffolded from `python-copier`                             |
 | [02](/docs/adr/02-mcp-tools-wrap-aiida-restapi.md)    | MCP tool layer wraps `aiida-restapi` (not hand-rolled)                                         |
 | [03](/docs/adr/03-llm-library.md)                     | Adopt an existing provider-agnostic LLM library (don't hand-roll); local + cloud               |
-| [04](/docs/adr/04-multi-agent-architecture.md)        | Read-only provenance-exploration agent first — the first milestone                             |
+| [04](/docs/adr/04-multi-agent-architecture.md)        | Read-only provenance-exploration agent first: the first milestone                              |
 | [05](/docs/adr/05-rag-over-aiida-docs.md)             | RAG over AiiDA docs: local embeddings, minimal first (hybrid/cross-encoder deferred)           |
 | [06](/docs/adr/06-eval-harness.md)                    | Agent-behaviour evaluation harness, deterministic in CI plus an opt-in real-model tier         |
 | [07](/docs/adr/07-validator.md)                       | Validator: schema validation delegated to AiiDA; the range/physics tier deferred               |

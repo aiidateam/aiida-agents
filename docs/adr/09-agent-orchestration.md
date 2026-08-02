@@ -1,4 +1,4 @@
-# ADR-09: Agent orchestration — a planner over two specialists
+# ADR-09: Agent orchestration: a planner over two specialists
 
 ## Context
 
@@ -7,7 +7,7 @@ Two agents now exist as sibling subpackages: Analysis (read-only provenance expl
 
 Three things about the current state matter for this decision.
 
-**Routing already exists — a human does it.**
+**Routing already exists: a human does it.**
 The CLI selects the agent with `--agent` / `-a`, and `/agent` switches mid-session.
 Every request is already routed; the open question is only whether a model can make that choice instead of the user.
 
@@ -15,16 +15,16 @@ Every request is already routed; the open question is only whether a model can m
 `tools/execution/analysis_queries.py` exposed `query_analysis_agent`, whose docstring said the Execution agent used it "to ask Analysis Agent about past successful runs".
 It did not: it runs `QueryBuilder` queries directly, in this process.
 (It has since been renamed to `query_run_context`, as this ADR decides below.)
-ADR-04 left "A2A vs. plain function calls" to be "decided empirically", and there has been no empirical input — only an artifact whose name implies the question was already settled.
+ADR-04 left "A2A vs. plain function calls" to be "decided empirically", and there has been no empirical input: only an artifact whose name implies the question was already settled.
 
 **The constraint that motivated splitting has weakened.**
 ADR-04 and the timeline assumed local models, where a narrow tool surface and a short prompt were necessary.
-Both maintainers have since tested local models and found them unreliable for this workload — hallucinated APIs, answers well below cloud quality — and cloud models are now sanctioned.
+Both maintainers have since tested local models and found them unreliable for this workload (hallucinated APIs, answers well below cloud quality) and cloud models are now sanctioned.
 That removes the context-window argument for splitting agents.
 
 What survives is the argument that actually matters: the **read/write risk boundary**.
 Analysis is read-only; Execution holds the approval-gated writes.
-That split is worth keeping, but note it is enforced by `requires_approval` on the tool, not by the agent boundary — ADR-04 says so itself.
+That split is worth keeping, but note it is enforced by `requires_approval` on the tool, not by the agent boundary: ADR-04 says so itself.
 An orchestrator adds nothing to that safety property.
 
 So the orchestrator has to justify itself on capability, not on safety and not on context budget.
@@ -33,19 +33,19 @@ So the orchestrator has to justify itself on capability, not on safety and not o
 
 Build a **planner**: one component that decides which specialist does what, and in what order.
 
-Routing and multi-step coordination were scheduled as two increments, and shipped as one component, because routing a request to a single specialist is the degenerate case of planning — a plan of length one.
+Routing and multi-step coordination were scheduled as two increments, and shipped as one component, because routing a request to a single specialist is the degenerate case of planning: a plan of length one.
 A separate router would have had to be replaced rather than extended, and a simple request would have paid for two model calls instead of one.
 
-An earlier draft of this ADR argued the reverse — that routing merely automates a CLI flag, and only multi-step coordination justified the layer.
+An earlier draft of this ADR argued the reverse: that routing merely automates a CLI flag, and only multi-step coordination justified the layer.
 The scenarios exercise ([`docs/gsoc/agent-scenarios.md`](/docs/gsoc/agent-scenarios.md)) does not support that.
 Of twelve plausible requests, eight are served by a single specialist and two are served equally well by either, so cross-agent coordination is not load-bearing for the common case.
 Routing, by contrast, is needed by all twelve: today every request requires the user to know the agent taxonomy and pass `-a`, and there is no request for which asking them to choose improves the answer.
 
 Routing also turns out to be lower-risk than assumed.
-The two most ambiguous request classes — status checks and documentation questions — are ones *both* agents can serve, so mis-routing there costs nothing.
+The two most ambiguous request classes (status checks and documentation questions) are ones *both* agents can serve, so mis-routing there costs nothing.
 
 Multi-step planning is worth having on narrower grounds than the first draft claimed: one scenario needs it (diagnose a failure, then resubmit with the fix), and that scenario is plausibly the most valuable thing the system could do.
-A second candidate — using historical parameters to inform a new submission — turned out to be already served inside Execution by `query_run_context`, which is evidence that some cross-agent needs are better met by a plain tool than by delegation.
+A second candidate (using historical parameters to inform a new submission) turned out to be already served inside Execution by `query_run_context`, which is evidence that some cross-agent needs are better met by a plain tool than by delegation.
 
 The planner never calls a specialist; the CLI does, one step at a time.
 That is what keeps the approval path intact.
@@ -78,7 +78,7 @@ Concretely:
 - The planner is a `pydantic_ai.Agent` with **no tools at all**, which is a departure from ADR-04's sketch of an orchestrator whose tools are the specialist calls.
   Wrapping the specialists in tools would break the human-in-the-loop guarantee: HITL works because a specialist's run returns `DeferredToolRequests` as its *output* and the CLI intercepts it, then resumes that same agent with the approved results.
   A specialist running inside another agent's tool call would hand that request back as a tool *result* the CLI never sees, and the approval loop would resume the wrong agent.
-  So the planner only names steps, and the CLI runs each specialist at the top level exactly as it does for a single-agent turn — the approval path is untouched by construction rather than by care.
+  So the planner only names steps, and the CLI runs each specialist at the top level exactly as it does for a single-agent turn: the approval path is untouched by construction rather than by care.
 - A step's answer is handed to the next step as **explicit text**, labelled with which specialist produced it, not as replayed message history: the specialists hold different tools, so one agent's history references tools the other does not have.
 - **Three steps at most.** Beyond that a plan is speculation about what earlier steps will find, and the planner has seen none of them.
 - A plan that cannot be parsed is rejected **whole** and falls back to a single read-only step. Running the usable half of a rejected plan would be a different plan, whose remaining steps act on a premise nobody established.
@@ -86,7 +86,7 @@ Concretely:
 - **Specialists do not call each other.**
   All agent-to-agent traffic goes through the coordinator, so there is one routing path rather than two places for the same bug to live.
   This settles ADR-04's open A2A question in favour of plain in-process function calls: a separate agent-to-agent protocol buys nothing while both specialists run in the same interpreter against the same profile.
-- `query_analysis_agent` is renamed `query_run_context` — a query about what this profile already contains — so the naming stops implying a delegation that does not happen.
+- `query_analysis_agent` is renamed `query_run_context` (a query about what this profile already contains) so the naming stops implying a delegation that does not happen.
 - Cap at two specialists.
   Diagnosis stays a tool on Analysis (`get_process_report`) rather than becoming a third agent; the timeline already pairs them as "explore/diagnostic".
 
@@ -119,7 +119,7 @@ The coordinator is a language layer over a system whose safety-critical behaviou
 ## Alternatives considered
 
 - **A router that picks one agent per turn, and nothing more.**
-  Not rejected — adopted as the first increment, on the scenarios evidence that routing is what pays off across every request.
+  Not rejected: adopted as the first increment, on the scenarios evidence that routing is what pays off across every request.
   It is the degenerate case of the coordinator (a one-step plan), so the second increment extends it rather than replacing it.
   Stopping permanently at a router is a legitimate outcome if the multi-step case does not prove out in use.
 - **No orchestrator; keep `--agent`.**
@@ -139,7 +139,7 @@ The coordinator is a language layer over a system whose safety-critical behaviou
 This decision was made falsifiable and then tested, before any code was written.
 
 [`docs/gsoc/agent-scenarios.md`](/docs/gsoc/agent-scenarios.md) lists twelve plausible requests and checks each against the tools the two agents hold.
-It partly falsified the first draft of this ADR — the multi-step justification is narrower than claimed, and one motivating example was already solved — which is why the Decision above leads with routing.
+It partly falsified the first draft of this ADR (the multi-step justification is narrower than claimed, and one motivating example was already solved) which is why the Decision above leads with routing.
 The structural decisions were unaffected: one routing path, specialists that do not call each other, approval enforced by `requires_approval` and propagated through the coordinator, two specialists rather than three.
 
 Two caveats bound how much weight this evidence carries.
@@ -158,7 +158,7 @@ Prose loses identifiers. A diagnosis says "the failure is in PwCalculation pk
 334407"; the next step needs *334407*, and with a text handoff the only route
 to it is a second model reading the sentence and pulling the number back out.
 That is a transcription step between two language models, sitting directly in
-front of a write — and a resubmission aimed at a mistyped pk is the expensive
+front of a write, and a resubmission aimed at a mistyped pk is the expensive
 kind of wrong.
 
 `Handoff` (in `agents/handoff.py`) therefore carries two halves: the producing
@@ -171,7 +171,7 @@ Three things this deliberately is not:
 
 **Not a transport.** The proposal's "agent-to-agent communication protocol" is
 satisfied here as a defined message with a producer, a consumer and typed
-content — not as a channel between processes. Both specialists run in one
+content: not as a channel between processes. Both specialists run in one
 interpreter against one profile, so a transport would add moving parts for no
 gain, and routing a specialist's output anywhere but the CLI would break the
 approval guarantee this ADR is built around.
@@ -188,6 +188,6 @@ next step can always query again.
 
 "Cap at two specialists" above was a statement about what had been needed, not a limit. [ADR-11](/docs/adr/11-code-execution.md) adds a third, Codegen, and it is worth being explicit that this does not disturb anything structural here.
 
-The planner still emits `specialist: task` lines and holds no tools; the CLI still runs each step itself; specialists still never call each other; approval is still enforced by `requires_approval` on the tool. What changed is only the size of the set the planner chooses from — and the bar for joining it, which Codegen is the first case to clear: its own tool surface *and* its own prompt. Diagnosis was considered for the same promotion and stayed a tool, because it needed neither.
+The planner still emits `specialist: task` lines and holds no tools; the CLI still runs each step itself; specialists still never call each other; approval is still enforced by `requires_approval` on the tool. What changed is only the size of the set the planner chooses from, and the bar for joining it, which Codegen is the first case to clear: its own tool surface *and* its own prompt. Diagnosis was considered for the same promotion and stayed a tool, because it needed neither.
 
 `MAX_STEPS` is unchanged. A third specialist widens the choice per step; it does not lengthen a plan.
