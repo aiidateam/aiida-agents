@@ -347,3 +347,57 @@ class TestScopeInTheDataset:
         row = case_from_topic(topic, BASE).as_row()  # type: ignore[union-attr]
 
         assert "sftp" in row["metadata"]["scope_signals"]
+
+
+class TestTagShapes:
+    """Discourse does not agree with itself about what a tag is.
+
+    Most installs return a list of strings; the live AiiDA forum returned
+    objects, which reached a ``str.join`` and killed a scrape after it had
+    already fetched sixty threads. A tag is a hint for the scope classifier and
+    is never worth failing a run over, so every unexpected shape degrades to
+    "no tags" rather than an exception.
+    """
+
+    def test_string_tags_are_kept(self) -> None:
+        case = case_from_topic(_topic(tags=["querybuilder", "provenance"]), BASE)
+
+        assert case is not None
+        assert case.tags == ("querybuilder", "provenance")
+
+    def test_object_tags_are_reduced_to_their_names(self) -> None:
+        """The shape the live forum actually returned."""
+        topic = _topic()
+        topic["tags"] = [{"name": "scheduler", "id": 12}, {"name": "slurm"}]
+
+        case = case_from_topic(topic, BASE)
+
+        assert case is not None
+        assert case.tags == ("scheduler", "slurm")
+
+    def test_a_mixed_list_keeps_what_it_can(self) -> None:
+        topic = _topic()
+        topic["tags"] = ["query", {"name": "provenance"}, 42, None]
+
+        case = case_from_topic(topic, BASE)
+
+        assert case is not None
+        assert case.tags == ("query", "provenance")
+
+    def test_a_nonsense_tags_field_is_not_fatal(self) -> None:
+        topic = _topic()
+        topic["tags"] = "not-a-list"
+
+        case = case_from_topic(topic, BASE)
+
+        assert case is not None
+        assert case.tags == ()
+
+    def test_object_tags_reach_the_scope_classifier(self) -> None:
+        """The end the crash was at: tags must be usable, not merely survivable."""
+        topic = _topic(title="Something is odd")
+        topic["tags"] = [{"name": "scheduler"}]
+
+        row = case_from_topic(topic, BASE).as_row()  # type: ignore[union-attr]
+
+        assert row["metadata"]["scope"] == "out_of_scope"

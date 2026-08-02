@@ -157,7 +157,11 @@ def classify_scope(
     Returns:
         A :class:`ScopeVerdict`. ``UNCLEAR`` when neither set of signals fired.
     """
-    haystack = " ".join([title, question, " ".join(tags)]).lower()
+    # ``str`` on each tag rather than assuming one: the caller normalises
+    # them, but a classifier is not worth crashing a scrape over if a new
+    # Discourse shape slips through.
+    flat_tags = " ".join(str(tag) for tag in tags)
+    haystack = " ".join([title, question, flat_tags]).lower()
 
     out_of_scope = _matches(haystack, _OUT_OF_SCOPE_SIGNALS)
     if out_of_scope:

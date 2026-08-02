@@ -117,6 +117,29 @@ class DiscourseCase:
         }
 
 
+def _tag_names(raw: t.Any) -> tuple[str, ...]:
+    """The thread's tags as plain strings.
+
+    Discourse returns tags as a list of strings on most installs and as a list
+    of objects on some --- the live forum did the second, which is how a
+    ``dict`` reached a ``str.join`` and killed a scrape that had already
+    fetched sixty threads. Take the name either way and drop anything
+    unrecognisable: a tag is a hint for the scope classifier, never something
+    worth failing a whole run over.
+    """
+    if not isinstance(raw, list):
+        return ()
+    names: list[str] = []
+    for tag in raw:
+        if isinstance(tag, str):
+            names.append(tag)
+        elif isinstance(tag, dict):
+            name = tag.get("name") or tag.get("text") or tag.get("id")
+            if isinstance(name, str):
+                names.append(name)
+    return tuple(names)
+
+
 def _posts(topic: dict[str, t.Any]) -> list[dict[str, t.Any]]:
     stream = topic.get("post_stream") or {}
     posts = stream.get("posts")
@@ -200,7 +223,7 @@ def case_from_topic(topic: dict[str, t.Any], base_url: str) -> DiscourseCase | N
         question=question,
         answer=answer,
         url=f"{base_url.rstrip('/')}/t/{topic.get('slug', 't')}/{topic_id}",
-        tags=tuple(tags) if isinstance(tags, list) else (),
+        tags=_tag_names(tags),
     )
 
 

@@ -148,3 +148,19 @@ class TestTheAnswerIsNeverRead:
         import inspect
 
         assert "answer" not in inspect.signature(classify_scope).parameters
+
+
+class TestUnexpectedTagShapes:
+    """Defence in depth behind ``discourse._tag_names``.
+
+    The caller normalises tags, but a classifier is not worth crashing a
+    sixty-thread scrape over if a new Discourse shape ever slips past it.
+    """
+
+    def test_an_object_tag_does_not_raise(self) -> None:
+        assert classify_scope("x", "y", [{"name": "scheduler"}]) is not None  # type: ignore[list-item]
+
+    def test_an_object_tag_is_still_matched(self) -> None:
+        verdict = classify_scope("x", "y", [{"name": "scheduler"}])  # type: ignore[list-item]
+
+        assert verdict.scope == OUT_OF_SCOPE
