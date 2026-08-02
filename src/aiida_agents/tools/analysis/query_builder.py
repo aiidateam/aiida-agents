@@ -55,7 +55,7 @@ from aiida import orm
 from aiida.common.exceptions import MultipleObjectsError, NotExistent
 from aiida.orm.implementation.querybuilder import EntityRelationships
 from aiida.plugins.entry_point import get_entry_point_names, load_entry_point
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from .._types import QueryResult
 
@@ -196,6 +196,13 @@ def _suggest(name: str, valid: t.Iterable[str]) -> str:
 class FieldFilter(BaseModel):
     """A single comparison, e.g. ``spacegroup_number >= 195``."""
 
+    # A filter that does not parse must fail loudly. Under the default
+    # (``extra="ignore"``) an unknown key is dropped, so ``{"field": "x",
+    # "op": ">", "value": 1}`` silently becomes ``x == 1`` -- a *different*
+    # question, answered confidently. Forbidding extras turns that into a
+    # validation error the agent surfaces as a retry.
+    model_config = ConfigDict(extra="forbid")
+
     field: str = Field(
         description=(
             "Field to filter on. Extras keys (e.g. 'spacegroup_number') are given "
@@ -214,6 +221,16 @@ class FieldFilter(BaseModel):
 class FilterGroup(BaseModel):
     """Conditions combined with AND/OR, nestable to any depth."""
 
+    # Every field here has a default, so without ``extra="forbid"`` this model
+    # validates *any* mapping -- an unrecognised filter shape such as
+    # ``{"exit_status": 410}`` becomes an empty group rather than an error.
+    # An empty group lowers to ``{"and": []}``, which constrains nothing, so the
+    # query silently returns the whole unfiltered table and the agent reports
+    # that count as the answer. Same reasoning as ``_validate_group_labels``:
+    # a filter that did not apply must not be indistinguishable from one that
+    # matched everything.
+    model_config = ConfigDict(extra="forbid")
+
     logic: t.Literal["AND", "OR"] = "AND"
     conditions: list[FieldFilter | FilterGroup] = Field(
         default_factory=list,
@@ -222,6 +239,19 @@ class FilterGroup(BaseModel):
             "Nesting expresses e.g. '(A AND B) OR C'."
         ),
     )
+
+    @model_validator(mode="after")
+    def _reject_empty(self) -> FilterGroup:
+        """A group with no conditions filters nothing; say so instead of matching all."""
+        if not self.conditions:
+            msg = (
+                "A filter group needs at least one condition. Give a comparison as "
+                '{"field": ..., "operator": ..., "value": ...} -- e.g. '
+                '{"field": "attributes.exit_status", "operator": "!==", "value": 0}. '
+                "To query without filtering, omit `filters` entirely."
+            )
+            raise ValueError(msg)
+        return self
 
 
 FilterGroup.model_rebuild()
