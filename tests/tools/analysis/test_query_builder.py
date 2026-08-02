@@ -358,6 +358,68 @@ def test_unknown_entity_suggests_a_close_match() -> None:
         query_nodes(spec)
 
 
+class TestUnregisteredPluginClasses:
+    """A class from a plugin nobody installed is not a typo.
+
+    From the first live test of this tool: asked for `PwCalculation` on a
+    profile where aiida-quantumespresso was not registered, the error offered
+    "did you mean calcjobnode?" -- difflib rates them as close -- so the model
+    tried that, failed differently, rephrased, and exhausted its retry budget.
+    The whole run died on "exceeded max retries count of 3".
+
+    Retrying is the right advice for a typo and the wrong advice here, so the
+    two cases have to be told apart before any suggestion is offered.
+    """
+
+    # Deliberately invented names rather than real ones like ``PwCalculation``:
+    # whether QE is installed varies by environment (``uv sync --group qe``), and
+    # a test that passes only where a plugin is *absent* is a test that reports
+    # the environment rather than the code.
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "FictionalCodeCalculation",
+            "ImaginaryRelaxWorkChain",
+            "NotARealCalcJob",
+            "SomePluginWorkflow",
+        ],
+    )
+    def test_a_plugin_class_is_reported_as_a_missing_plugin(self, name: str) -> None:
+        spec = QuerySpec.model_validate({"entity_type": name})
+
+        with pytest.raises(QueryValidationError, match="plugin providing it"):
+            query_nodes(spec)
+
+    def test_the_model_is_told_not_to_retry(self) -> None:
+        """The retry loop is the actual damage; the wording has to stop it."""
+        spec = QuerySpec.model_validate({"entity_type": "FictionalCodeCalculation"})
+
+        with pytest.raises(QueryValidationError, match="Do NOT retry"):
+            query_nodes(spec)
+
+    def test_it_offers_the_generic_types_instead(self) -> None:
+        """A dead end with no alternative is still a dead end."""
+        spec = QuerySpec.model_validate({"entity_type": "FictionalCodeCalculation"})
+
+        with pytest.raises(QueryValidationError, match="calcjob"):
+            query_nodes(spec)
+
+    def test_no_misleading_near_match_is_offered(self) -> None:
+        """ "Did you mean calcjobnode?" is what sent the model round the loop."""
+        spec = QuerySpec.model_validate({"entity_type": "FictionalCodeCalculation"})
+
+        with pytest.raises(QueryValidationError) as caught:
+            query_nodes(spec)
+        assert "Did you mean" not in str(caught.value)
+
+    def test_an_ordinary_typo_still_gets_its_suggestion(self) -> None:
+        """The plugin branch must not have swallowed the useful case."""
+        spec = QuerySpec.model_validate({"entity_type": "StructureDat"})
+
+        with pytest.raises(QueryValidationError, match="Did you mean"):
+            query_nodes(spec)
+
+
 @pytest.mark.parametrize("limit", [0, -1, MAX_LIMIT + 1])
 def test_limit_is_bounded(limit: int) -> None:
     """A limit outside 1..MAX_LIMIT is rejected by the schema."""

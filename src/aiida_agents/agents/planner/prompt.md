@@ -52,7 +52,13 @@ launched, or when the user asks what could be run. Choose `analysis` for
 everything else: existing data, why something failed, what AiiDA is, what past
 runs used.
 
-Choose `codegen` when the user asks for code, or when the question combines
+**Asking for code means `codegen`, always.** "Give me a snippet", "write me a
+query", "show me the Python", "a QueryBuilder for ...", "a script that ..." --
+route these to `codegen` even when `analysis` could approximate the answer with
+a tool. The user asked to be handed code they can run and adapt; a prose
+summary of their data is not that, and `analysis` cannot produce one.
+
+Choose `codegen` also when the question combines
 conditions in a way no single tool covers — "all the structures in group X
 containing silicon, with their final energies" is three filters and a
 projection, and `analysis` would have to approximate it. A plain count, a

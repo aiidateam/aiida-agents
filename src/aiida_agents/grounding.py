@@ -182,20 +182,41 @@ def tool_output_text(messages: list[Any]) -> str:
 # `append` would train people to ignore the one that matters.
 # ---------------------------------------------------------------------------
 
-#: A fenced block the answer presents as Python.
+#: A fenced block that could be Python: labelled as such, or unlabelled. A
+#: fence labelled with another language is not matched at all.
 _PY_BLOCK = re.compile(
-    r"```(?:python|py|pycon)?\s*\n(?P<code>.*?)```", re.DOTALL | re.IGNORECASE
+    r"```(?P<lang>python|py|pycon)?[ \t]*\n(?P<code>.*?)```",
+    re.DOTALL | re.IGNORECASE,
 )
 
 
 def python_blocks(answer: str) -> list[str]:
-    """Every fenced code block in ``answer`` that is offered as Python.
+    """Every fenced block in ``answer`` that could be Python.
 
-    An unlabelled fence counts: models routinely omit the language, and a
+    Includes unlabelled fences: models routinely omit the language, and a
     snippet the user will paste into ``verdi shell`` is Python whether or not
-    it said so.
+    it said so. Safe for the symbol check, where a block that is not Python
+    simply parses to nothing and contributes no imports.
     """
     return [m.group("code") for m in _PY_BLOCK.finditer(answer)]
+
+
+def labelled_python_blocks(answer: str) -> list[str]:
+    """Only the fences that explicitly say they are Python.
+
+    The stricter list, and the one :func:`syntax_errors` uses. Live testing
+    showed why: an answer that illustrates a point with an unlabelled block of
+    ``verdi`` commands, YAML or pseudocode produced "the Python above does not
+    parse" every time, because none of it is Python and none of it was ever
+    meant to be.
+
+    That is the failure this module exists to avoid --- a warning that fires on
+    correct output teaches people to ignore it, and then it is not protecting
+    the case it was built for. Losing the check on unlabelled blocks is the
+    cheaper mistake: the Codegen agent is told to fence its snippets as
+    ``python``, so the blocks that matter carry the label.
+    """
+    return [m.group("code") for m in _PY_BLOCK.finditer(answer) if m.group("lang")]
 
 
 def syntax_errors(answer: str) -> list[str]:
@@ -206,13 +227,15 @@ def syntax_errors(answer: str) -> list[str]:
     symbol check because it catches the failure that wastes the most of a
     user's time for the least excuse.
 
-    Console transcripts are skipped --- a block of ``verdi`` commands or
-    ``>>>`` prompts is not meant to parse as a module.
+    Only blocks *labelled* as Python are checked --- see
+    :func:`labelled_python_blocks`. Console transcripts are skipped on top of
+    that, since a ``python``-labelled block of ``>>>`` prompts is a session
+    rather than a module.
     """
     import ast
 
     problems = []
-    for block in python_blocks(answer):
+    for block in labelled_python_blocks(answer):
         stripped = block.strip()
         if not stripped or stripped.startswith((">>>", "$", "verdi ")):
             continue

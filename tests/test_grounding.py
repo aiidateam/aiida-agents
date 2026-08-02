@@ -10,6 +10,7 @@ from __future__ import annotations
 import pytest
 
 from aiida_agents.grounding import (
+    labelled_python_blocks,
     python_blocks,
     syntax_errors,
     ungrounded_symbols,
@@ -246,3 +247,42 @@ class TestUngroundedSymbols:
         answer = "You could imagine a MadeUpNode for this."
 
         assert ungrounded_symbols(answer, "") == set()
+
+
+class TestSyntaxCheckingIsQuiet:
+    """Only blocks that say they are Python get syntax-checked.
+
+    Found in live testing: an analysis answer that illustrated a point with an
+    unlabelled block of `verdi` commands produced "the Python above does not
+    parse" every time. A warning that fires on correct output teaches people to
+    ignore it, which is the exact failure this module is built to avoid.
+    """
+
+    @pytest.mark.parametrize(
+        "block",
+        [
+            "pip install aiida-core",
+            "key: value\n  nested: 1",
+            "for each structure in group:\n    submit relax(structure)",
+            "SELECT * FROM db_dbnode;",
+        ],
+    )
+    def test_an_unlabelled_non_python_block_is_not_flagged(self, block: str) -> None:
+        assert syntax_errors(f"```\n{block}\n```") == []
+
+    def test_a_labelled_python_block_is_still_checked(self) -> None:
+        """The check must not have been quietened into uselessness."""
+        assert syntax_errors("```python\nqb = QueryBuilder(\n```")
+
+    def test_a_labelled_python_block_that_parses_is_clean(self) -> None:
+        assert syntax_errors("```python\nqb = QueryBuilder()\n```") == []
+
+    def test_symbols_are_still_checked_in_unlabelled_blocks(self) -> None:
+        """A non-Python block parses to nothing, so it cannot false-positive."""
+        answer = "```\nfrom aiida.orm import MadeUpNode\n```"
+
+        assert ungrounded_symbols(answer, "") == {"MadeUpNode"}
+
+    def test_a_block_labelled_another_language_is_ignored_entirely(self) -> None:
+        assert syntax_errors("```bash\npip install x\n```") == []
+        assert labelled_python_blocks("```bash\nx = (\n```") == []

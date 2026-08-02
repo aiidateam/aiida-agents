@@ -415,6 +415,52 @@ def _orm_base(entity_type: str) -> str:
     return "node"
 
 
+def _looks_like_a_plugin_class(name: str) -> bool:
+    """Whether ``name`` reads as a class an AiiDA plugin would provide.
+
+    ``PwCalculation``, ``PwBaseWorkChain``, ``VaspRelaxWorkChain`` --- CamelCase
+    and named after a process kind. A model asks for these constantly, and when
+    the plugin is not installed the honest answer is "that code is not here",
+    not "try spelling it differently".
+    """
+    if not name[:1].isupper() or name.islower() or name.isupper():
+        return False
+    return name.endswith(
+        ("Calculation", "CalcJob", "WorkChain", "Workflow", "Calc", "Chain")
+    )
+
+
+def _unknown_entity_message(name: str, tag: str, index: dict[str, EntityAlias]) -> str:
+    """Why an entity type could not be resolved, and whether retrying can help.
+
+    The distinction matters more than the wording. A typo is worth another
+    attempt; a class belonging to a plugin nobody installed is not, and a model
+    told only "unknown entity_type" will rephrase the same request until it
+    exhausts its retry budget and kills the run. That happened on the first
+    real test of this tool, against ``PwCalculation`` on a profile where
+    ``aiida-quantumespresso`` was not registered.
+    """
+    base = f"Unknown entity_type {name!r} for tag {tag!r}."
+
+    # The plugin case is checked *before* offering a near match, because the
+    # near match is what does the damage. ``difflib`` rates 'calcjobnode' as
+    # close to 'pwcalculation', so the model was told to try that, tried it,
+    # failed differently, and burned its retry budget guessing. A name that
+    # reads as a plugin class is absent because the plugin is absent, and no
+    # neighbouring name will do instead.
+    if _looks_like_a_plugin_class(name):
+        return (
+            f"{base} That name is not registered in this AiiDA installation, "
+            "which normally means the plugin providing it is not installed. "
+            "Do NOT retry with a different spelling or a related class name --- "
+            "it will not be there either. Tell the user the plugin appears to "
+            "be missing, and offer to query the generic types instead "
+            "('calcjob', 'workchain', 'process', 'data')."
+        )
+
+    return f"{base}{_suggest(name, index)}"
+
+
 def _validate_spec(spec: QuerySpec) -> None:
     """Check a spec against aiida-core's own metadata, before any query runs.
 
@@ -437,11 +483,9 @@ def _validate_spec(spec: QuerySpec) -> None:
 
     for position, item in enumerate(spec.path):
         if item.entity_type.lower() not in index and not item.entity_type.endswith("."):
-            msg = (
-                f"Unknown entity_type {item.entity_type!r} for tag {item.tag!r}."
-                + _suggest(item.entity_type, index)
+            raise QueryValidationError(
+                _unknown_entity_message(item.entity_type, item.tag, index)
             )
-            raise QueryValidationError(msg)
 
         if position == 0 and item.joining_keyword is not None:
             msg = (
