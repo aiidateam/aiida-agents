@@ -93,7 +93,16 @@ class DiscourseCase:
     tags: tuple[str, ...] = ()
 
     def as_row(self) -> dict[str, t.Any]:
-        """The case in the shape ``pydantic_evals.Dataset`` loads from YAML."""
+        """The case in the shape ``pydantic_evals.Dataset`` loads from YAML.
+
+        The scope label is computed here rather than at scoring time so it is
+        written into the dataset and can be audited, corrected by hand, or
+        disagreed with --- a heuristic label that only existed in memory would
+        be impossible to check.
+        """
+        from tests.evals.scope import classify_scope
+
+        verdict = classify_scope(self.title, self.question, self.tags)
         return {
             "name": f"discourse-{self.topic_id}",
             "inputs": self.question,
@@ -102,6 +111,8 @@ class DiscourseCase:
                 "url": self.url,
                 "title": self.title,
                 "tags": list(self.tags),
+                "scope": verdict.scope,
+                "scope_signals": list(verdict.signals),
             },
         }
 

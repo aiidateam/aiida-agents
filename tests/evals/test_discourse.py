@@ -318,3 +318,32 @@ class TestDatasetRoundTrip:
         write_dataset(cases_from_topics([_topic()], BASE), out)
 
         assert out.exists()
+
+
+class TestScopeInTheDataset:
+    """The scope label is written into the case, not computed at scoring time.
+
+    Stored so it can be audited, corrected by hand, or disagreed with. A
+    heuristic label that only existed in memory would be impossible to check
+    against the thread it came from.
+    """
+
+    def test_a_case_carries_its_scope(self) -> None:
+        row = case_from_topic(_topic(), BASE).as_row()  # type: ignore[union-attr]
+
+        assert row["metadata"]["scope"] in {"in_scope", "out_of_scope", "unclear"}
+
+    def test_an_infrastructure_thread_is_labelled_out_of_scope(self) -> None:
+        row = case_from_topic(
+            _topic(title="How to use scp/rsync instead of sftp for transport"),
+            BASE,
+        ).as_row()  # type: ignore[union-attr]
+
+        assert row["metadata"]["scope"] == "out_of_scope"
+
+    def test_the_signals_that_decided_it_are_recorded(self) -> None:
+        """So a label someone disputes can be checked without re-reading the thread."""
+        topic = _topic(title="sftp transport trouble on my cluster")
+        row = case_from_topic(topic, BASE).as_row()  # type: ignore[union-attr]
+
+        assert "sftp" in row["metadata"]["scope_signals"]
