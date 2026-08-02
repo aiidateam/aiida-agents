@@ -30,6 +30,7 @@ EXPECTED_TOOLS = {
     "get_process_status",
     "get_process_report",
     "diagnose_process_failure",
+    "get_daemon_status",
     "query_run_context",
     "list_retrieved_files",
     "get_retrieved_file",

@@ -86,7 +86,7 @@ The language layer is thin on purpose. Everything a wrong answer could damage is
 
 **Planner** (`agents/planner/`) — no tools, one cheap call. Emits `specialist: task` lines, parsed strictly. A plan that cannot be parsed is rejected whole and falls back to a single read-only step. Capped at three steps. See [ADR-09](/docs/adr/09-agent-orchestration.md).
 
-**Analysis agent** (`agents/analysis/`) — read-only exploration: querying nodes, following provenance, reading process reports and the files a calculation brought back, diagnosing a failure against the workflow's own exit codes and restart handlers, summarising past runs, searching the docs.
+**Analysis agent** (`agents/analysis/`) — read-only exploration: querying nodes, following provenance, reading process reports and the files a calculation brought back, diagnosing a failure against the workflow's own exit codes and restart handlers, reporting whether the daemon is running when a process is not progressing at all, summarising past runs, searching the docs.
 
 **Codegen agent** (`agents/codegen/`) — writing Python against the user's data, running it, and reporting what it returned. For questions no fixed tool expresses: several filters at once, a projection of specific properties, or anything asked for *as code*. It looks the API up before writing, runs the snippet against a profile whose database role cannot write, and iterates on its own tracebacks. It holds no write tool, so it is not approval-gated — the containment is at the database, and the user judges output rather than unexecuted Python. See [ADR-11](/docs/adr/11-code-execution.md).
 
