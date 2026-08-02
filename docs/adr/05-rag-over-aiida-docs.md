@@ -1,4 +1,4 @@
-# ADR-05: RAG over AiiDA docs — local embeddings, offline-first
+# ADR-05: RAG over AiiDA docs, with local embeddings and offline-first
 
 > Status: accepted (core approach). Implementation is landing in [#5](https://github.com/aiidateam/aiida-agents/pull/5); the index is built on demand via the CLI (`aiida-agents rag init`), with curation and version-keying still to implement (see *Build and versioning* and *Consequences*).
 
@@ -39,7 +39,7 @@ understand. Retrieval quality was poor.
 
 The correct approach, confirmed with the project mentor, is to run
 `sphinx-build -b text` on the `docs/source/` directory. This produces clean
-`.txt` files — plain prose with `Note:`/`Warning:` labels preserved, all
+`.txt` files: plain prose with `Note:`/`Warning:` labels preserved, all
 directives resolved, all includes expanded. The text corpus is version-matched
 to `aiida-core v2.8.0` (pinned via `--branch v2.8.0` sparse clone).
 
@@ -52,10 +52,10 @@ not re-cloning and re-building Sphinx.
 
 **What is excluded:**
 
-- AiiDA tutorials repo — version drift and materials-science specificity;
+- AiiDA tutorials repo: version drift and materials-science specificity;
   to be archived in favour of new tutorial modules.
-- Plugin documentation — deferred to plugin-specific agents.
-- API reference and Python source stubs — NL-trained embeddings match
+- Plugin documentation: deferred to plugin-specific agents.
+- API reference and Python source stubs: NL-trained embeddings match
   English questions against bare signatures poorly. API/source knowledge
   is better served by a read-only MCP introspection tool using `inspect`
   and `stubgen` (future work, noted in ADR-04).
@@ -75,7 +75,7 @@ split at natural boundaries (paragraph → line → sentence) up to
 Each chunk is prefixed with a breadcrumb:
 
 ```
-KpointsData — AiiDA Topics > Data Types
+KpointsData: AiiDA Topics > Data Types
 <body text>
 ```
 
@@ -91,7 +91,7 @@ The corpus produced 1,111 chunks from the v2.8 docs at an average of
 **Primary: `mxbai-embed-large` via Ollama (local, 1024-dim).**
 
 `nomic-embed-text` was the original choice. In practice it produced
-near-random retrieval for AiiDA-specific terminology — `nomic` scored 0.67
+near-random retrieval for AiiDA-specific terminology: `nomic` scored 0.67
 for "KpointsData" while unrelated results scored 0.77. The root cause was
 missing task prefixes (`search_document:` / `search_query:`), but even after
 fixing the prefixes, domain-specific retrieval remained weak.
@@ -109,7 +109,7 @@ unreachable.
 The backend is selected at runtime from `AIIDA_AGENTS_EMBED_BACKEND`
 (`ollama` / `sentence-transformers`), defaulting to `ollama`.
 
-**Implementation note — Ollama API migration:**
+**Implementation note: Ollama API migration:**
 
 The original implementation called the deprecated `/api/embeddings` endpoint
 with a `"prompt"` field. Ollama ≥ 0.4.0 broke this with HTTP 500 errors. The
@@ -163,14 +163,14 @@ first-run build friction becomes a real problem.
 
 ### Retriever integration
 
-The RAG retriever is exposed as `search_aiida_docs(query)` — a plain Python
+The RAG retriever is exposed as `search_aiida_docs(query)`: a plain Python
 function registered directly in the Analysis agent's `tools=[]` list (ADR-04).
 It lives in `aiida_agents/rag/__init__.py` alongside `index_docs()` and
 `query_docs()`, keeping the RAG package's public API cohesive.
 
 At query time, the question is embedded with the mxbai query prefix via
-`embed_query()` and passed directly to `collection.query(query_embeddings=...)`
-— bypassing ChromaDB's default `query_texts` path which would call `__call__`
+`embed_query()` and passed directly to `collection.query(query_embeddings=...)`,
+bypassing ChromaDB's default `query_texts` path which would call `__call__`
 (the document prefix) instead of `embed_query` (the query prefix).
 
 ## Consequences

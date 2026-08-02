@@ -3,12 +3,12 @@
 ## Context
 
 The agents are useful in proportion to how much they know about the codes a user actually runs.
-That knowledge lives in AiiDA plugins — `aiida-quantumespresso` knows its own conventions, ships its own documentation, and could offer tools no general agent could write.
+That knowledge lives in AiiDA plugins: `aiida-quantumespresso` knows its own conventions, ships its own documentation, and could offer tools no general agent could write.
 
 Three things a plugin might contribute: tools, a documentation corpus for retrieval, and domain guidance for the system prompt.
 
 The constraint that shapes the answer is dependency direction.
-`aiida-agents` must not depend on any plugin — installing it should not drag in one plugin's stack.
+`aiida-agents` must not depend on any plugin: installing it should not drag in one plugin's stack.
 And a plugin should not have to depend on pydantic-ai or chromadb to describe what it offers; a plugin author writing a provider should not be installing an agent framework to do it.
 
 This ADR was written after two agents and the RAG pipeline existed, deliberately.
@@ -48,13 +48,13 @@ A plugin cannot introduce an ungated write, however it is written.
 ### Failure is isolated per hook
 
 Every hook is read defensively. A provider that omits a hook, or whose hook raises, is skipped **for that hook alone**.
-A broken plugin degrades to the agent running without its contribution — never to an agent that will not start.
+A broken plugin degrades to the agent running without its contribution: never to an agent that will not start.
 
 The same isolation applies to corpora: one corpus failing to build does not stop the others.
 
 ### The prompt fragment is bounded
 
-A fragment says what only the plugin knows — its conventions, its units, its physics.
+A fragment says what only the plugin knows: its conventions, its units, its physics.
 It is budgeted by character count, and the core prompt wins on any conflict.
 A plugin cannot rewrite the agent's behaviour by contributing a longer fragment.
 
@@ -68,7 +68,7 @@ A version bump resolves to a different collection and rebuilds, so an index can 
 - A plugin can extend the agents without this package knowing it exists, and without depending on the agent stack.
 - The write-gating guarantee holds across contributed tools, because it is applied at registration rather than requested by the contributor.
 - Discovery cost is paid at agent construction: every installed provider is read once when an agent is built.
-- A plugin's contributions are only as good as its docstrings — a contributed tool the model cannot understand from its signature and docstring is one it will not use correctly.
+- A plugin's contributions are only as good as its docstrings: a contributed tool the model cannot understand from its signature and docstring is one it will not use correctly.
 - Three hooks is a small surface. Anything a plugin wants to contribute that is not a tool, a corpus, or prompt text needs this ADR revisited.
 
 ## Alternatives considered
@@ -80,9 +80,9 @@ A version bump resolves to a different collection and rebuilds, so an index can 
 - **Reading configuration files rather than entry points.**
   Rejected: entry points are how AiiDA already discovers plugin contributions, and they resolve through the same environment the profile does.
 - **Designing the extension point before the agents existed.**
-  Rejected on principle — concretion before abstraction. The hooks here are the three things a plugin turned out to have, not the three that seemed likely.
+  Rejected on principle: concretion before abstraction. The hooks here are the three things a plugin turned out to have, not the three that seemed likely.
 
 ## Status
 
 Implemented in `src/aiida_agents/plugins/`.
-`dev/qe_rag_stub/` is a working example, written because `aiida-quantumespresso` does not ship this entry point yet — it registers that plugin's documentation as a corpus so cross-corpus retrieval and attribution can be exercised end to end.
+`dev/qe_rag_stub/` is a working example, written because `aiida-quantumespresso` does not ship this entry point yet: it registers that plugin's documentation as a corpus so cross-corpus retrieval and attribution can be exercised end to end.

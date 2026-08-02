@@ -2,7 +2,7 @@
 
 # `aiida-agents`
 
-> ⚠️ **Alpha — no release yet.**
+> ⚠️ **Alpha. No release yet.**
 
 
 A natural-language interface to [AiiDA](https://www.aiida.net).
@@ -20,8 +20,8 @@ sub-process failed. The actual failure is PwCalculation 334407, also exit 501:
 "The ionic minimization cycle converged but the thresholds are exceeded in the
 final SCF."
 
-The work chain already tried its one applicable remedy —
-handle_vcrelax_converged_except_final_scf fired on iteration 1 — and still
+The work chain already tried its one applicable remedy:
+handle_vcrelax_converged_except_final_scf fired on iteration 1. It still
 landed on this exit code, so simply restarting is unlikely to help.
 ```
 
@@ -37,17 +37,17 @@ Where things stood at the beginning of July 2026 (the interface has grown since)
 
 **Explore what you already have.** Count and rank nodes, follow provenance, search structures by formula, summarise what past runs of a workflow actually used.
 
-**Explain a failure.** Walk from a work chain's exit code down to the calculation that actually broke, read what that exit code means from the process class itself, and report which of the workflow's own restart handlers already fired — so a remedy that has been tried twice is not recommended a third time. With `aiida-quantumespresso` installed, it also reads pw.x's SCF trace to tell a cycle that ran out of iterations from one that never settled.
+**Explain a failure.** Walk from a work chain's exit code down to the calculation that actually broke, read what that exit code means from the process class itself, and report which of the workflow's own restart handlers already fired, so a remedy that has been tried twice is not recommended a third time. With `aiida-quantumespresso` installed, it also reads pw.x's SCF trace to tell a cycle that ran out of iterations from one that never settled.
 
-**Explain a job that never started.** A failure has an exit code to explain; a process waiting on a stopped daemon has nothing wrong with it at all, and every status tool will call it "waiting" indefinitely. The agents check the daemon when a process is not progressing, and say which of the two it is — a job still running normally, or a queue nothing is draining.
+**Explain a job that never started.** A failure has an exit code to explain; a process waiting on a stopped daemon has nothing wrong with it at all, and every status tool will call it "waiting" indefinitely. The agents check the daemon when a process is not progressing, and say which of the two it is: a job still running normally, or a queue nothing is draining.
 
-**Set a calculation up and run it.** Discover installed workflows, inspect their input schemas, build inputs from a workflow's protocol builder — or, for the many processes that have none, draft them from the declared ports. Cutoffs are checked against what the spec's pseudopotential family was converged for.
+**Set a calculation up and run it.** Discover installed workflows, inspect their input schemas, build inputs from a workflow's protocol builder, or draft them from the declared ports for the many processes that have none. Cutoffs are checked against what the spec's pseudopotential family was converged for.
 
 **Run things in sequence, or in bulk.** Wait for a submission and feed its output to the next one; or rebuild a past run's inputs, change one parameter, and resubmit a whole set under a single approval.
 
 **Nothing is written without your say-so.** Every tool that touches the database is approval-gated: the CLI shows you the resolved inputs and waits. That guarantee lives on the tool, not in a prompt.
 
-**Nothing is quoted that no tool produced.** Every reply is checked for physical quantities — cutoffs, spacings, percentages — that appear in no tool output, and anything unsupported is flagged. This runs on every answer, because an instruction not to invent numbers has a measured failure rate.
+**Nothing is quoted that no tool produced.** Every reply is checked for physical quantities (cutoffs, spacings, percentages) that appear in no tool output, and anything unsupported is flagged. This runs on every answer, because an instruction not to invent numbers has a measured failure rate.
 
 ## Quickstart
 
@@ -57,7 +57,7 @@ Needs Python ≥ 3.10, a working AiiDA profile, and a model provider.
 pip install "aiida-agents[rag] @ git+https://github.com/aiidateam/aiida-agents.git"
 ```
 
-Point it at a model — a cloud provider, or Ollama for a local one:
+Point it at a model, either a cloud provider or Ollama for a local one:
 
 ```bash
 export AIIDA_AGENTS_PROVIDER=openai        # or anthropic, openrouter, ollama
@@ -85,6 +85,6 @@ Other commands: `check` (provider reachability), `config` (effective settings), 
 
 ## Where to look
 
-- **[Architecture](/docs/architecture.md)** — how a request travels through the system, and why the pieces are arranged as they are.
-- **[Extending](/docs/extending.md)** — adding a tool, a documentation corpus, or a whole specialist; and how an AiiDA plugin contributes to the agents without either package depending on the other.
-- **[Architecture Decision Records](/docs/adr/README.md)** — the reasoning behind each decision, including the ones later revised.
+- **[Architecture](/docs/architecture.md)**: how a request travels through the system, and why the pieces are arranged as they are.
+- **[Extending](/docs/extending.md)**: adding a tool, a documentation corpus, or a whole specialist; and how an AiiDA plugin contributes to the agents without either package depending on the other.
+- **[Architecture Decision Records](/docs/adr/README.md)**: the reasoning behind each decision, including the ones later revised.

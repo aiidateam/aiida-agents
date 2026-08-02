@@ -1,6 +1,6 @@
 # ADR-06: Agent-behaviour evaluation harness
 
-> Status: accepted — initial harness implemented in Weeks 3–4 (June 2026).
+> Status: accepted. Initial harness implemented in Weeks 3–4 (June 2026).
 
 ## Context
 
@@ -9,8 +9,8 @@ can confirm that a tool returns the right data given a PK; it cannot confirm
 that the agent calls the right tool for a given natural language query, or that
 it chains tools correctly for multi-step diagnostics.
 
-We need a way to verify agent behaviour — tool selection and response quality
-— against real AiiDA fixture nodes, without requiring a live LLM in CI.
+We need a way to verify agent behaviour: tool selection and response quality
+against real AiiDA fixture nodes, without requiring a live LLM in CI.
 
 ## Decision
 
@@ -20,18 +20,18 @@ and asserts on tool selection and output structure.
 
 ### What the harness tests
 
-**Structural tests** (in `tests/agents/analysis/test_analysis.py`) — verified
+**Structural tests** (in `tests/agents/analysis/test_analysis.py`): verified
 without any LLM call or DB fixture:
 
 - `get_agent()` returns an agent with exactly the expected tool set
 
 Provider selection lives in `tests/agents/test_models.py`: `get_model()` builds
-the right class per `AIIDA_AGENTS_PROVIDER`, and bad config fails fast — an
+the right class per `AIIDA_AGENTS_PROVIDER`, and bad config fails fast: an
 unsupported provider raises `ValidationError` at settings load, while a missing
 `AIIDA_AGENTS_BASE_URL` for `openai-compatible` raises `ValueError` in
 `get_model()`.
 
-**Tool-execution tests** (same module) — use
+**Tool-execution tests** (same module): use
 `pydantic_ai.models.function.FunctionModel` to script tool calls deterministically,
 exercising real tool logic against real AiiDA fixture nodes without a live LLM:
 
@@ -40,7 +40,7 @@ exercising real tool logic against real AiiDA fixture nodes without a live LLM:
 - Fixture PKs are never hardcoded; they come from session-scoped AiiDA fixtures
   (`add_calc`, `multiply_add_workchain`, `silicon_structure`)
 
-**What the harness does not test** — tool selection quality (does the model
+**What the harness does not test**: tool selection quality (does the model
 pick `list_processes` for "show recent calcs"?) depends on the model and
 belongs in a separate, opt-in evaluation suite run against a real model.
 Mocking `agent.run` to assert on canned tool names is explicitly rejected
@@ -51,7 +51,7 @@ That opt-in suite now exists; see the Revision section.
 ### Test infrastructure
 
 AiiDA fixtures in `tests/conftest.py` run real calculations in-process
-against a temporary `core.sqlite_dos` profile — no daemon, no broker, no
+against a temporary `core.sqlite_dos` profile: no daemon, no broker, no
 external services. Each fixture is session-scoped so the calculations run
 once per test session, not per test.
 
@@ -83,8 +83,8 @@ no Ollama instance or API keys.
 
 The suite this ADR deferred is now `tests/evals/`, in two tiers.
 
-**`test_harness.py` runs in CI.** It records a run into a `RunTrace` — the tool
-calls in order, what each returned, and the final text — and asserts on it. Three
+**`test_harness.py` runs in CI.** It records a run into a `RunTrace`: the tool
+calls in order, what each returned, and the final text, and asserts on it. Three
 checks, each corresponding to a failure that reached users:
 
 - did it consult the documentation before answering a knowledge question,
@@ -92,8 +92,8 @@ checks, each corresponding to a failure that reached users:
 - is an answer built on retrieved docs actually cited.
 
 Critically, this tier tests **the assertions themselves**. It scripts a
-fabricating agent with `FunctionModel` — one that searches, gets a real excerpt,
-then states a value appearing nowhere in it — and requires each check to catch
+fabricating agent with `FunctionModel`: one that searches, gets a real excerpt,
+then states a value appearing nowhere in it, and requires each check to catch
 that, then requires correct behaviour to pass. An eval that quietly degrades into
 always-passing is worse than none, because it certifies nothing while looking
 green.
@@ -107,7 +107,7 @@ Two things this ADR did not anticipate:
 
 **The quantity check moved into the package.** `aiida_agents.grounding` runs on
 every CLI reply, not only in tests, because prompt rules asking a model not to
-fabricate were measured failing — one explicit instruction was ignored in five
+fabricate were measured failing: one explicit instruction was ignored in five
 runs out of five. The test tier imports the same function, so the check guarding
 a shipped answer and the check guarding the suite cannot drift apart.
 

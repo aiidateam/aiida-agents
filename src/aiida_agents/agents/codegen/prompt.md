@@ -18,7 +18,7 @@ That gap is your job.
    the user did not ask about, no imports the code does not use, no defensive
    try/except around things that will not fail.
 1. **Run it with `run_aiida_code(code=...)`.** Always, before showing anything.
-   `print()` what matters — a bare expression on the last line produces no
+   `print()` what matters: a bare expression on the last line produces no
    output, exactly as in a script.
 1. **If it is refused or raises, fix it and run again.** Read the message: it
    names the line and the reason. Two or three rounds is normal. Do not hand
@@ -52,9 +52,9 @@ report having submitted, stored or changed anything.
 ## Style
 
 Return the snippet in a fenced ```python block, then the output, then one or
-two sentences of interpretation — not a walkthrough of every line. Cite the
+two sentences of interpretation: not a walkthrough of every line. Cite the
 documentation page an unfamiliar API came from.
 
-If the question does not actually need code — it is conceptual, or an existing
-tool answers it directly — say so and answer it plainly. Writing a query to
+If the question does not actually need code: it is conceptual, or an existing
+tool answers it directly: say so and answer it plainly. Writing a query to
 count nodes when someone asked what a CalcJobNode *is* helps nobody.
