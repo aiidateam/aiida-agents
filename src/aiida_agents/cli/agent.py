@@ -20,7 +20,7 @@ from pydantic_ai.messages import ModelMessage
 from typing_extensions import assert_never
 
 from aiida_agents._settings import ModelSettings, _Provider, _format_validation_error
-from aiida_agents.agents.planner import Specialist, Step
+from aiida_agents.agents.planner import Specialist, Step, _as_specialist
 from aiida_agents.cli.ollama import _ensure_ollama_model, _ollama_pull
 from aiida_agents.agents.handoff import Handoff, NodeReference
 from aiida_agents.cli.output import _trace_tool_calls, console
@@ -321,7 +321,7 @@ def _resolve_plan(
     from aiida_agents.agents.planner import Step, plan
 
     if agent_type != "auto":
-        return [Step(_as_specialist_literal(agent_type), "")]
+        return [Step(_as_specialist(agent_type), "")]
 
     steps = plan(question, settings)
     if len(steps) == 1:
@@ -331,11 +331,6 @@ def _resolve_plan(
         for index, step in enumerate(steps, start=1):
             console.print(f"[dim]   {index}. {step.specialist}: {step.task}[/dim]")
     return steps
-
-
-def _as_specialist_literal(name: str) -> Specialist:
-    """Narrow a ``--agent`` value the Click choice has already constrained."""
-    return "execution" if name == "execution" else "analysis"
 
 
 #: How an earlier step's answer is handed to the next one.

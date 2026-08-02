@@ -10,7 +10,8 @@ from click.testing import CliRunner
 
 from aiida_agents._settings import _Provider
 from aiida_agents.cli import cli
-from aiida_agents.cli.agent import _resolve_model_settings
+from aiida_agents.agents.planner import _SPECIALISTS, Specialist, Step
+from aiida_agents.cli.agent import _AGENT_CHOICES, _resolve_model_settings
 
 
 @pytest.mark.parametrize(
@@ -254,3 +255,33 @@ def test_check_reachable_availability_policy(
 
     captured = capsys.readouterr()
     assert expected in captured.out + captured.err
+
+
+@pytest.mark.parametrize("name", _SPECIALISTS)
+def test_naming_a_specialist_runs_that_specialist(name: Specialist) -> None:
+    """``--agent <name>`` bypasses the planner and reaches the agent it names.
+
+    Worth pinning per specialist rather than once: the narrowing this goes
+    through used to collapse every name except ``execution`` to ``analysis``,
+    so ``--agent codegen`` ran the Analysis agent and answered as if nothing
+    were wrong. Parametrising over ``_SPECIALISTS`` means the next specialist
+    added is covered without anyone remembering to add a case.
+    """
+    from aiida_agents._settings import ModelSettings
+    from aiida_agents.cli.agent import _resolve_plan
+
+    # The settings are never used on this path -- naming a specialist skips the
+    # planner, so no model call happens -- but the signature wants them.
+    settings = ModelSettings(provider="ollama", model="m")
+
+    assert _resolve_plan(name, "a question", settings) == [Step(name, "")]
+
+
+def test_every_agent_choice_is_either_a_specialist_or_auto() -> None:
+    """``--agent`` cannot offer a name no specialist answers to.
+
+    ``_build_agent`` rejects anything outside ``_SPECIALISTS``, so a choice
+    that is neither a specialist nor ``auto`` would be an option the CLI
+    advertises and then refuses.
+    """
+    assert set(_AGENT_CHOICES) - {"auto"} == set(_SPECIALISTS)

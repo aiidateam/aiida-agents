@@ -1,8 +1,8 @@
 """The ``aiida-agents doctor`` command and the health checks behind it.
 
-Each subsystem (AiiDA profile, model reachability, RAG index, docs toolchain)
-is probed in its own ``try`` so one failure never aborts the rest of the
-report. Only ``doctor`` runs these checks (``check``/``warm`` probe the model
+Each subsystem (AiiDA profile, model reachability, RAG index, codegen sandbox,
+docs toolchain) is probed in its own ``try`` so one failure never aborts the
+rest of the report. Only ``doctor`` runs these checks (``check``/``warm`` probe the model
 through ``agent.py``), so the command lives here with its logic rather than in
 ``commands.py``.
 """
@@ -20,6 +20,13 @@ from aiida_agents.cli._guards import _needs_recognized_settings
 from aiida_agents.cli.agent import _resolve_settings_or_fail
 from aiida_agents.cli.output import console
 from aiida_agents.cli.rag import _module_missing
+
+
+#: Seconds allowed for the sandbox privilege probe. It spawns a subprocess that
+#: loads AiiDA, so it is the slowest check here; capped well below
+#: ``verify_read_only``'s own default so one unresponsive database cannot make
+#: ``doctor`` look hung.
+_SANDBOX_PROBE_TIMEOUT = 30.0
 
 
 class _DiagnosticRow(NamedTuple):
@@ -108,6 +115,40 @@ def _check_rag_index() -> _DiagnosticRow:
         return _DiagnosticRow(label, False, _short_reason(exc))
 
 
+def _check_sandbox() -> _DiagnosticRow:
+    """Whether the Codegen agent has a profile it can actually run code against.
+
+    Reported here because the alternative is finding out from the answers. With
+    no sandbox the agent still replies --- it writes the snippet, says it could
+    not run it, and hands it over unverified --- which reads like a limitation
+    of the model rather than a setup step nobody performed. One red row in
+    ``doctor``, naming the command, is cheaper than that.
+
+    A profile that exists is not enough, so this asks Postgres the same
+    question ``sandbox check`` asks. A sandbox that turns out to be writable is
+    worse than none: code would run against it believing it cannot write.
+    """
+    from aiida_agents._settings import SandboxSettings
+    from aiida_agents.sandbox.setup import sandbox_profile_exists, verify_read_only
+
+    label = "Codegen sandbox (read-only profile)"
+    try:
+        profile = SandboxSettings().sandbox_profile
+        if not sandbox_profile_exists(profile):
+            return _DiagnosticRow(
+                label,
+                False,
+                f"no profile {profile!r}; run `aiida-agents sandbox init` "
+                "(codegen writes code but cannot run it without one)",
+            )
+        # Shorter than the default: doctor is a report, and a database that
+        # takes this long to answer is itself the finding.
+        result = verify_read_only(profile, timeout=_SANDBOX_PROBE_TIMEOUT)
+        return _DiagnosticRow(label, result.read_only, result.detail)
+    except Exception as exc:
+        return _DiagnosticRow(label, False, _short_reason(exc))
+
+
 def _check_docs_toolchain() -> _DiagnosticRow:
     """Whether the sphinx docs toolchain (needed only for ``rag build``) is present."""
     has_sphinx = not _module_missing("sphinx")
@@ -131,6 +172,7 @@ def _run_diagnostics(
         _check_profile(profile),
         _check_model(settings),
         _check_rag_index(),
+        _check_sandbox(),
         _check_docs_toolchain(),
     ]
 
@@ -139,7 +181,7 @@ def _run_diagnostics(
 @click.pass_context
 @_needs_recognized_settings
 def doctor(ctx: click.Context) -> None:
-    """Diagnose the setup: profile, model, RAG index, and docs toolchain."""
+    """Diagnose the setup: profile, model, RAG index, sandbox, docs toolchain."""
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     click.echo("Running diagnostics ...\n")
     rows = _run_diagnostics(settings, ctx.obj["profile"])

@@ -112,8 +112,27 @@ def _clean_line(line: str) -> str:
 
 
 def _as_specialist(name: str) -> Specialist:
-    """Narrow an already-validated name to the literal type."""
-    return "execution" if name.strip().lower() == "execution" else "analysis"
+    """Narrow an already-validated name to the literal type.
+
+    Matched against :data:`_SPECIALISTS` rather than written out as a chain of
+    comparisons, so adding a specialist to that tuple is the only edit needed.
+    The earlier form tested for ``execution`` and returned ``analysis`` for
+    everything else, which meant that once ``codegen`` was added, every step
+    routed to it -- by the planner or by ``--agent codegen`` -- silently ran the
+    Analysis agent instead, and answered plausibly enough that nothing looked
+    wrong.
+
+    Raises:
+        ValueError: If ``name`` is not a specialist. Callers validate before
+            calling, so this cannot fire in normal use; it is here because the
+            defaulting it replaces is what hid the bug above.
+    """
+    candidate = name.strip().lower()
+    for specialist in _SPECIALISTS:
+        if candidate == specialist:
+            return specialist
+    msg = f"{name!r} is not a specialist; expected one of {', '.join(_SPECIALISTS)}"
+    raise ValueError(msg)
 
 
 def _parse_plan(reply: str) -> list[Step] | None:

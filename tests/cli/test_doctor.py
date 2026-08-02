@@ -10,6 +10,7 @@ from click.testing import CliRunner
 from aiida_agents._settings import ModelSettings, _Provider
 from aiida_agents.cli import cli
 from aiida_agents.cli.doctor import _DiagnosticRow
+from aiida_agents.sandbox.setup import ReadOnlyCheck
 
 
 class _Profile:
@@ -37,6 +38,13 @@ def _patch_all_checks_passing(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda settings: _Reachability("http://endpoint", 3, model_ok=True),
     )
     monkeypatch.setattr("aiida_agents.rag.store.index_status", lambda: _Index(True))
+    monkeypatch.setattr(
+        "aiida_agents.sandbox.setup.sandbox_profile_exists", lambda profile: True
+    )
+    monkeypatch.setattr(
+        "aiida_agents.sandbox.setup.verify_read_only",
+        lambda profile, timeout=60.0: ReadOnlyCheck(True, "role cannot insert"),
+    )
     monkeypatch.setattr(doctor, "_module_missing", lambda name: False)
 
 
@@ -69,7 +77,7 @@ def test_short_reason_summarizes_exception(exc: Exception, expected: str) -> Non
 
 
 def test_run_diagnostics_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> None:
-    """With every subsystem healthy, all four checks report a passing row."""
+    """With every subsystem healthy, every check reports a passing row."""
     _patch_all_checks_passing(monkeypatch)
     rows = _rows_by_label()
 
@@ -77,6 +85,7 @@ def test_run_diagnostics_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> Non
         "AiiDA profile loads",
         "Model reachable (ollama:m)",
         "RAG index built",
+        "Codegen sandbox (read-only profile)",
         "Docs toolchain (sphinx)",
     ]
     assert all(row.ok for row in rows.values())
@@ -93,6 +102,11 @@ def test_run_diagnostics_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> Non
         ),
         pytest.param(
             "aiida_agents.rag.store.index_status", "RAG index built", id="rag"
+        ),
+        pytest.param(
+            "aiida_agents.sandbox.setup.verify_read_only",
+            "Codegen sandbox (read-only profile)",
+            id="sandbox",
         ),
     ],
 )
@@ -179,6 +193,15 @@ def test_run_diagnostics_model_availability_policy(
             "rag build",
             id="missing-docs-toolchain",
         ),
+        pytest.param(
+            lambda mp: mp.setattr(
+                "aiida_agents.sandbox.setup.sandbox_profile_exists",
+                lambda profile: False,
+            ),
+            "Codegen sandbox (read-only profile)",
+            "sandbox init",
+            id="unset-sandbox",
+        ),
     ],
 )
 def test_run_diagnostics_flags_optional_provisioning(
@@ -219,3 +242,24 @@ def test_doctor_exit_code_reflects_health(
     result = CliRunner().invoke(cli, ["doctor"])
 
     assert result.exit_code == exit_code
+
+
+def test_a_writable_sandbox_profile_fails_the_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A sandbox that can write is worse than no sandbox at all.
+
+    With none configured the Codegen agent knows it cannot run code and says
+    so. With a *writable* one it runs code believing the database will refuse
+    the writes, which is the one situation the read-only role exists to
+    prevent. Existing is therefore not enough for this row to pass.
+    """
+    _patch_all_checks_passing(monkeypatch)
+    monkeypatch.setattr(
+        "aiida_agents.sandbox.setup.verify_read_only",
+        lambda profile, timeout=60.0: ReadOnlyCheck(False, "role CAN insert"),
+    )
+    row = _rows_by_label()["Codegen sandbox (read-only profile)"]
+
+    assert row.ok is False
+    assert "CAN insert" in row.detail

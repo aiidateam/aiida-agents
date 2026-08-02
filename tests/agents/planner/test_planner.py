@@ -16,7 +16,16 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-from aiida_agents.agents.planner import MAX_STEPS, Step, _parse_plan, get_planner, plan
+from aiida_agents.agents.planner import (
+    MAX_STEPS,
+    _SPECIALISTS,
+    Specialist,
+    Step,
+    _as_specialist,
+    _parse_plan,
+    get_planner,
+    plan,
+)
 
 
 def _replying(text: str) -> FunctionModel:
@@ -36,6 +45,8 @@ class TestParsingASingleStep:
             ("execution: relax the structure at pk 512", "execution"),
             ("Execution: relax pk 512", "execution"),
             ("  analysis:   count the nodes  ", "analysis"),
+            ("codegen: tabulate every relaxation with its final energy", "codegen"),
+            ("Codegen: tabulate the relaxations", "codegen"),
         ],
     )
     def test_one_line_yields_one_step(self, reply: str, expected: str) -> None:
@@ -45,7 +56,9 @@ class TestParsingASingleStep:
         assert steps[0].specialist == expected
         assert steps[0].task
 
-    @pytest.mark.parametrize("reply", ["analysis", "execution", " Analysis \n"])
+    @pytest.mark.parametrize(
+        "reply", ["analysis", "execution", "codegen", " Analysis \n"]
+    )
     def test_a_bare_specialist_name_is_still_a_plan(self, reply: str) -> None:
         """The output format before this agent could plan.
 
@@ -56,6 +69,34 @@ class TestParsingASingleStep:
         assert steps is not None
         assert len(steps) == 1
         assert steps[0].task == "", "an empty task means 'use the request as given'"
+
+
+class TestEverySpecialistIsReachable:
+    """A plan may name any specialist, and gets the one it named.
+
+    These exist because of a real bug: the narrowing helper tested for
+    ``execution`` and returned ``analysis`` for anything else, so when
+    ``codegen`` was added, every step routed to it ran the Analysis agent
+    instead. Nothing raised. The Analysis agent simply answered the question
+    with its own tools, plausibly enough that only reading the debug log would
+    have shown it. The loop over ``_SPECIALISTS`` is deliberate: a fourth
+    specialist is then covered on the day it is added, not the day someone
+    notices.
+    """
+
+    @pytest.mark.parametrize("name", _SPECIALISTS)
+    def test_a_specialist_narrows_to_itself(self, name: Specialist) -> None:
+        assert _as_specialist(name) == name
+
+    @pytest.mark.parametrize("name", _SPECIALISTS)
+    def test_a_step_reaches_the_specialist_it_names(self, name: Specialist) -> None:
+        steps = _parse_plan(f"{name}: do the thing")
+        assert steps == [Step(name, "do the thing")]
+
+    def test_an_unknown_name_is_refused_rather_than_defaulted(self) -> None:
+        """Defaulting is what hid the bug; the helper now says so out loud."""
+        with pytest.raises(ValueError, match="is not a specialist"):
+            _as_specialist("diagnosis")
 
 
 class TestParsingAMultiStepPlan:

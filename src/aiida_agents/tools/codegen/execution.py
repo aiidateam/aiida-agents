@@ -19,22 +19,6 @@ _NOT_CONFIGURED = (
 )
 
 
-def _sandbox_profile_exists(profile: str) -> bool:
-    """Whether ``profile`` is a profile AiiDA knows about.
-
-    Checked before running rather than letting ``load_profile`` fail inside the
-    subprocess: "you have not set up a sandbox yet" and "your query has a bug"
-    are different problems, and a stack trace about an unknown profile reads as
-    the second.
-    """
-    try:
-        from aiida.manage.configuration import get_config
-
-        return profile in {p.name for p in get_config().profiles}
-    except Exception:  # pragma: no cover - a broken AiiDA config is not our news
-        return False
-
-
 def run_aiida_code(code: str) -> str:
     """Run Python against the user's AiiDA data and return what it printed.
 
@@ -64,11 +48,15 @@ def run_aiida_code(code: str) -> str:
         raised.
     """
     from aiida_agents.sandbox import run_in_sandbox
+    from aiida_agents.sandbox.setup import sandbox_profile_exists
 
     settings = SandboxSettings()
     profile = settings.sandbox_profile
 
-    if not _sandbox_profile_exists(profile):
+    # Checked before running rather than letting ``load_profile`` fail inside
+    # the subprocess, so an unset sandbox does not reach the model as a
+    # traceback it will try to debug.
+    if not sandbox_profile_exists(profile):
         logger.warning("sandbox profile %r is not configured", profile)
         return _NOT_CONFIGURED
 

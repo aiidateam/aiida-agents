@@ -28,6 +28,7 @@ __all__ = [
     "ReadOnlyCheck",
     "profile_setup_command",
     "readonly_role_sql",
+    "sandbox_profile_exists",
     "verify_read_only",
 ]
 
@@ -46,6 +47,25 @@ class ReadOnlyCheck:
 
     def __bool__(self) -> bool:
         return self.read_only
+
+
+def sandbox_profile_exists(profile: str) -> bool:
+    """Whether ``profile`` is a profile AiiDA knows about.
+
+    Worth asking before doing anything heavier, because "you have not set the
+    sandbox up yet" and "your query has a bug" are different problems and a
+    stack trace about an unknown profile reads as the second.
+
+    A broken or unreadable AiiDA config answers False: the caller's next move
+    is to tell the user to set the profile up, which is the right advice either
+    way.
+    """
+    try:
+        from aiida.manage.configuration import get_config
+
+        return profile in {p.name for p in get_config().profiles}
+    except Exception:  # pragma: no cover - a broken AiiDA config is not our news
+        return False
 
 
 def readonly_role_sql(database: str, role: str, password: str) -> str:

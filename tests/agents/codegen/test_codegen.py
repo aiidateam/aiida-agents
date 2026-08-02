@@ -103,7 +103,10 @@ class TestExecutionToolSafety:
         """The worst possible fallback is the user's writable profile."""
         from aiida_agents.tools.codegen import execution
 
-        monkeypatch.setattr(execution, "_sandbox_profile_exists", lambda profile: False)
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.setup.sandbox_profile_exists",
+            lambda profile: False,
+        )
         ran: list[str] = []
         monkeypatch.setattr(
             "aiida_agents.sandbox.run_in_sandbox",
@@ -120,7 +123,10 @@ class TestExecutionToolSafety:
     ) -> None:
         from aiida_agents.tools.codegen import execution
 
-        monkeypatch.setattr(execution, "_sandbox_profile_exists", lambda profile: False)
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.setup.sandbox_profile_exists",
+            lambda profile: False,
+        )
 
         assert "do NOT claim to have run it" in execution.run_aiida_code("print(1)")
 
@@ -131,7 +137,10 @@ class TestExecutionToolSafety:
         from aiida_agents.tools.codegen import execution
 
         monkeypatch.setenv("AIIDA_AGENTS_SANDBOX_PROFILE", "my-readonly")
-        monkeypatch.setattr(execution, "_sandbox_profile_exists", lambda profile: True)
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.setup.sandbox_profile_exists",
+            lambda profile: True,
+        )
         seen: dict[str, t.Any] = {}
 
         class _Result:
