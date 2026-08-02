@@ -351,6 +351,66 @@ def test_nonexistent_group_is_not_confused_with_an_empty_one(
     assert result["total"] == 0
 
 
+@pytest.mark.parametrize(
+    "bad_filter",
+    [
+        pytest.param({"attributes.exit_status": 0}, id="field-as-key"),
+        pytest.param({"exit_status": 410}, id="bare-key"),
+        pytest.param({"field": "a", "op": ">", "value": 1}, id="misspelled-operator"),
+        pytest.param({}, id="empty-group"),
+        pytest.param({"logic": "AND", "conditions": []}, id="explicitly-empty-group"),
+    ],
+)
+def test_an_unparseable_filter_is_rejected_not_dropped(
+    bad_filter: dict[str, t.Any],
+) -> None:
+    """A filter shape that does not parse must fail, never widen the query.
+
+    Pins the regression where every field of ``FilterGroup`` had a default and
+    extras were ignored, so *any* mapping validated as an empty group. A
+    per-tag filter like ``{"exit_status": 410}`` then lowered to ``{"and": []}``
+    -- no constraint at all -- and the query returned the whole unfiltered
+    table. That total is indistinguishable from a real answer, and the
+    grounding check cannot catch it because the number genuinely did come from
+    tool output: "how many runs failed?" would confidently report every run in
+    the profile.
+    """
+    with pytest.raises(ValidationError):
+        QuerySpec.model_validate(
+            {
+                "path": [{"entity_type": CALC, "tag": "calc"}],
+                "filters": {"calc": bad_filter},
+            }
+        )
+
+
+def test_a_rejected_filter_would_have_changed_the_answer(
+    query_archive: QueryArchive,
+) -> None:
+    """The dropped filter was not cosmetic: it selects a strict subset.
+
+    Guards the test above from becoming vacuous -- if the filtered and
+    unfiltered totals were equal, rejecting the bad shape would prove nothing.
+    """
+    both = {"path": [{"entity_type": CALC, "tag": "calc"}], "count_only": True}
+    unfiltered = query_nodes(QuerySpec.model_validate(both))["total"]
+    filtered = query_nodes(
+        QuerySpec.model_validate(
+            both
+            | {
+                "filters": {
+                    "calc": {
+                        "field": "attributes.exit_status",
+                        "operator": "==",
+                        "value": 0,
+                    }
+                }
+            }
+        )
+    )["total"]
+    assert 0 < filtered < unfiltered
+
+
 def test_unknown_entity_suggests_a_close_match() -> None:
     """The error is a repair hint, not just a rejection."""
     spec = QuerySpec.model_validate({"entity_type": "StructureDat"})
