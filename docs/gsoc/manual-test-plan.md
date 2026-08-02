@@ -69,7 +69,8 @@ aiida-agents ask "how many ArithmeticAddCalculations have a non-zero exit status
 ```
 
 - **Good:** the failed count is strictly less than the total count. Verify
-  against `verdi process list -a -S finished` yourself.
+  against `verdi process list -a -X` yourself (`-X/--failed`; `-S finished` is
+  the wrong comparison, since a process that succeeded is also *finished*).
 - **Flag it if:** "failed" and "total" come back equal. That means a filter was
   dropped rather than applied.
 

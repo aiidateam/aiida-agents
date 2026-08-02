@@ -83,11 +83,80 @@ class TestProfileCommand:
 
         assert "--profile-name my-sandbox" in command
 
-    def test_a_missing_repository_is_flagged_not_invented(self) -> None:
-        """A silently wrong repository path is worse than an obvious placeholder."""
-        command = profile_setup_command({}, "r", "p", "s")
+    def test_it_does_not_hijack_the_default_profile(
+        self, storage: dict[str, object]
+    ) -> None:
+        """The worst thing this command could do, and it used to do it.
 
-        assert "<same as source profile>" in command
+        ``--set-as-default`` defaults to *yes*, so without this flag pasting
+        the command made the write-refusing profile the user's default --- and
+        every ``verdi`` command and agent run afterwards would hit a database
+        that cannot write.
+        """
+        command = profile_setup_command(storage, "ro_role", "pw", "agents-sandbox")
+
+        assert "--no-set-as-default" in command
+
+    def test_it_asks_for_no_broker(self, storage: dict[str, object]) -> None:
+        """The sandbox only reads, so it has no processes to control.
+
+        Spelled ``--broker none``: the older ``--no-use-rabbitmq`` still parses
+        in aiida-core 2.8 but is hidden and deprecated.
+        """
+        command = profile_setup_command(storage, "ro_role", "pw", "agents-sandbox")
+
+        assert "--broker none" in command
+        assert "--no-use-rabbitmq" not in command
+
+    def test_it_is_a_one_liner_not_a_prompt_session(
+        self, storage: dict[str, object]
+    ) -> None:
+        """``--first-name``/``--last-name``/``--institution`` are *required*.
+
+        Omitting them did not fail; it dropped whoever pasted the command into
+        an interactive prompt, which is not what a copy-pasteable setup step
+        should be.
+        """
+        command = profile_setup_command(storage, "ro_role", "pw", "agents-sandbox")
+
+        assert "--non-interactive" in command
+        for required in ("--first-name", "--last-name", "--institution"):
+            assert required in command
+
+    def test_the_generated_command_parses_as_real_verdi(
+        self, storage: dict[str, object]
+    ) -> None:
+        """Checked against the installed aiida-core, not against our memory of it.
+
+        Every assertion above tests a string we wrote against a string we
+        expected. This one hands the command to ``verdi profile setup``'s own
+        parser, so an option we invented, misspelled, or that aiida-core drops
+        in a later release fails here rather than in the user's terminal --
+        which is where the last three of these were found.
+        """
+        import shlex
+
+        import click
+        from aiida.cmdline.commands.cmd_verdi import verdi
+
+        command = profile_setup_command(storage, "ro_role", "pw", "agents-sandbox")
+        argv = shlex.split(command)
+        assert argv[:4] == ["verdi", "profile", "setup", "core.psql_dos"]
+
+        profile = verdi.commands["profile"]
+        assert isinstance(profile, click.Group)
+        setup = profile.commands["setup"]
+        assert isinstance(setup, click.Group)
+        sub = setup.get_command(click.Context(setup), "core.psql_dos")
+        assert sub is not None
+        options, leftover, _ = sub.make_parser(click.Context(sub)).parse_args(argv[4:])
+
+        assert leftover == [], f"unrecognised positional arguments: {leftover}"
+        unsupplied = [
+            p.name for p in sub.params if p.required and p.name not in options
+        ]
+        assert unsupplied == [], f"required options missing: {unsupplied}"
+        assert options["set_as_default"] is False
 
 
 class TestInterpretingTheProbe:

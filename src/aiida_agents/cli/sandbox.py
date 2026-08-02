@@ -68,6 +68,14 @@ def init(profile: str | None, role: str, sandbox_name: str) -> None:
             f"Profile {source.name!r} does not use a PostgreSQL storage backend, "
             "so there is no role to restrict."
         )
+    if not storage.get("repository_uri"):
+        # Say so rather than emitting a placeholder. `--repository-uri` is
+        # required by `verdi profile setup`, and a command that carries an
+        # obvious-looking stand-in is one somebody pastes without reading.
+        raise click.ClickException(
+            f"Profile {source.name!r} declares no repository URI, so the "
+            "sandbox profile cannot be pointed at the same repository."
+        )
 
     password = secrets.token_urlsafe(24)
 

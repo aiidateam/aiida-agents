@@ -103,20 +103,43 @@ def profile_setup_command(
     Every value except the credentials is copied from the source profile, so
     the sandbox reaches *the same database* --- which is the point. A scratch
     database with no data could not answer anything worth asking.
+
+    Four details are not decoration, and each was wrong here at some point:
+
+    ``--no-set-as-default`` is the important one. That option defaults to
+    *yes*, so the earlier version of this command made the write-refusing
+    profile the user's default the moment they pasted it --- and then every
+    ``verdi`` command and every agent run they made afterwards would hit a
+    database that cannot write.
+
+    ``--non-interactive``, with ``--first-name`` / ``--last-name`` /
+    ``--institution`` supplied. Those three are *required* options; leaving
+    them out did not fail, it dropped the user into a prompt session, which is
+    not what a copy-pasteable one-liner should do.
+
+    ``--broker none``, not ``--no-use-rabbitmq``. The latter still parses in
+    aiida-core 2.8 but is hidden and deprecated. The sandbox only ever reads,
+    so it has no processes to control and wants no broker at all.
+
+    ``repository_uri`` is read without a fallback. A missing one used to become
+    a ``<same as source profile>`` placeholder that got pasted verbatim; the
+    caller checks for it and says so instead.
     """
     return " ".join(
         [
             "verdi profile setup core.psql_dos",
+            "--non-interactive",
             f"--profile-name {sandbox_name}",
+            "--no-set-as-default",
+            "--email sandbox@localhost",
+            "--first-name Agents --last-name Sandbox --institution local",
+            "--broker none",
             f"--database-name {storage_config.get('database_name', '')}",
             f"--database-hostname {storage_config.get('database_hostname', 'localhost')}",
             f"--database-port {storage_config.get('database_port', 5432)}",
             f"--database-username {role}",
             f"--database-password {password}",
-            "--repository-uri "
-            f"{storage_config.get('repository_uri', '<same as source profile>')}",
-            "--email sandbox@localhost",
-            "--no-use-rabbitmq",
+            f"--repository-uri {storage_config.get('repository_uri', '')}",
         ]
     )
 
