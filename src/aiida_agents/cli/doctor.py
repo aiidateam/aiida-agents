@@ -1,8 +1,8 @@
 """The ``aiida-agents doctor`` command and the health checks behind it.
 
-Each subsystem (AiiDA profile, model reachability, RAG index, codegen sandbox,
-docs toolchain) is probed in its own ``try`` so one failure never aborts the
-rest of the report. Only ``doctor`` runs these checks (``check``/``warm`` probe the model
+Each subsystem (AiiDA profile, daemon, model reachability, RAG index, codegen
+sandbox, docs toolchain) is probed in its own ``try`` so one failure never
+aborts the rest of the report. Only ``doctor`` runs these checks (``check``/``warm`` probe the model
 through ``agent.py``), so the command lives here with its logic rather than in
 ``commands.py``.
 """
@@ -58,6 +58,35 @@ def _check_profile(profile: str | None) -> _DiagnosticRow:
 
         loaded = load_profile(profile)
         return _DiagnosticRow(label, True, loaded.name)
+    except Exception as exc:
+        return _DiagnosticRow(label, False, _short_reason(exc))
+
+
+def _check_daemon() -> _DiagnosticRow:
+    """Whether the AiiDA daemon is running and reachable.
+
+    A loading profile is not enough: a submitted process only progresses if the
+    daemon is up *and* its workers can be reached. The two differ, the circus
+    endpoint can be briefly unreachable mid-restart while the daemon is
+    technically alive, so this asks for the worker count to confirm reachability
+    rather than trusting liveness alone.
+    """
+    label = "Daemon running and reachable"
+    try:
+        from aiida.engine.daemon.client import get_daemon_client
+
+        client = get_daemon_client()
+        if not client.is_daemon_running:
+            return _DiagnosticRow(label, False, "not running; run `verdi daemon start`")
+        # Running is not reachable. get_numprocesses() round-trips to the daemon,
+        # so a raise here means up-but-unreachable, caught below as a failed row.
+        workers = client.get_numprocesses().get("numprocesses")
+        if workers == 0:
+            return _DiagnosticRow(
+                label, False, "running but 0 workers; run `verdi daemon incr 1`"
+            )
+        detail = f"{workers} worker(s)" if workers is not None else "reachable"
+        return _DiagnosticRow(label, True, detail)
     except Exception as exc:
         return _DiagnosticRow(label, False, _short_reason(exc))
 
@@ -170,6 +199,7 @@ def _run_diagnostics(
     """
     return [
         _check_profile(profile),
+        _check_daemon(),
         _check_model(settings),
         _check_rag_index(),
         _check_sandbox(),
@@ -181,7 +211,7 @@ def _run_diagnostics(
 @click.pass_context
 @_needs_recognized_settings
 def doctor(ctx: click.Context) -> None:
-    """Diagnose the setup: profile, model, RAG index, sandbox, docs toolchain."""
+    """Diagnose the setup: profile, daemon, model, RAG index, sandbox, docs toolchain."""
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     click.echo("Running diagnostics ...\n")
     rows = _run_diagnostics(settings, ctx.obj["profile"])
