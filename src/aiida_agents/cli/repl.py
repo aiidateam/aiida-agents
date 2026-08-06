@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import os
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
+from prompt_toolkit.application import run_in_terminal
 from prompt_toolkit.formatted_text import HTML
 from prompt_toolkit.history import FileHistory
 from prompt_toolkit.key_binding import KeyBindings
@@ -34,6 +36,7 @@ from aiida_agents.cli.output import (
     _warn_ungrounded,
     _render_tool_calls,
     console,
+    render_all_generated_code,
     save_generated_code,
     show_generated_code,
 )
@@ -67,8 +70,9 @@ def _history_file() -> Path:
     return base / "aiida-agents" / "repl-history"
 
 
-def _key_bindings() -> KeyBindings:
-    """Bind Enter to submit; Esc+Enter or Ctrl+J to insert a newline.
+def _key_bindings(reveal_code: Callable[[], None]) -> KeyBindings:
+    """Bind Enter to submit; Esc+Enter or Ctrl+J to insert a newline; Ctrl+O to
+    reveal the last turn's generated code.
 
     prompt_toolkit's multiline default is the reverse (Enter inserts a
     newline, Meta+Enter submits), which is wrong for a chat REPL where
@@ -81,6 +85,11 @@ def _key_bindings() -> KeyBindings:
     works too. It also sidesteps Esc+Enter's awkwardness in vi mode, where Esc
     is the mode switch. (Shift+Enter can't be bound: terminals don't send a
     distinct byte for it.)
+
+    Ctrl+O prints every snippet from the last codegen turn above the prompt via
+    ``run_in_terminal``. A terminal cannot fold output already scrolled past, so
+    the inline view stays compact (one snippet) and this reveals the full set on
+    demand, the way Claude Code expands a collapsed tool call.
     """
     bindings = KeyBindings()
 
@@ -100,6 +109,12 @@ def _key_bindings() -> KeyBindings:
     ) -> None:  # pragma: no cover  # pyright: ignore[reportUnusedFunction]
         event.current_buffer.insert_text("\n")
 
+    @bindings.add("c-o")
+    def _reveal(
+        event: KeyPressEvent,
+    ) -> None:  # pragma: no cover  # pyright: ignore[reportUnusedFunction]
+        run_in_terminal(reveal_code)
+
     return bindings
 
 
@@ -112,13 +127,15 @@ def _prompt_continuation(width: int, _line_number: int, _wrap_count: int) -> str
     return "." * (width - 1) + " "
 
 
-def _make_session(repl_cfg: ReplSettings) -> PromptSession[str]:  # pragma: no cover
+def _make_session(
+    repl_cfg: ReplSettings, reveal_code: Callable[[], None]
+) -> PromptSession[str]:  # pragma: no cover
     """Build the prompt session: persistent history plus the REPL key bindings."""
     history_file = _history_file()
     history_file.parent.mkdir(parents=True, exist_ok=True)
     return PromptSession(
         history=FileHistory(str(history_file)),
-        key_bindings=_key_bindings(),
+        key_bindings=_key_bindings(reveal_code),
         multiline=True,
         vi_mode=repl_cfg.vi_mode,
     )
@@ -129,6 +146,7 @@ def _run_turn(
     question: str,
     history: list[ModelMessage],
     repl_cfg: ReplSettings,
+    last_messages: list[ModelMessage],
 ) -> tuple[
     list[ModelMessage], str | None, tuple[NodeReference, ...]
 ]:  # pragma: no cover
@@ -136,6 +154,10 @@ def _run_turn(
 
     Returns ``history`` unchanged if the run is interrupted (Ctrl-C) or errors,
     so a failed turn never corrupts the conversation.
+
+    ``last_messages`` is replaced in place with this turn's messages, so the
+    Ctrl+O / ``/code`` reveal (which closes over it) always shows the newest
+    turn's generated code.
 
     The answer comes back alongside it because a multi-step plan feeds each
     step's answer into the next. ``None`` means this turn produced no text to
@@ -160,18 +182,21 @@ def _run_turn(
         return history, None, ()
     elapsed = time.monotonic() - start
 
+    new_messages = result.new_messages()
     # Render the run's tool-call trace now that the spinner has stopped: the
     # traces are a post-run dump, so printing them into the still-live spinner
     # region above would fight its redraws. Debug-gated inside.
-    _render_tool_calls(result.new_messages(), console)
-    show_generated_code(result.new_messages(), console)
-    save_generated_code(result.new_messages())
+    _render_tool_calls(new_messages, console)
+    show_generated_code(new_messages, console)
+    save_generated_code(new_messages)
+    # In place, so the reveal binding's closure sees this turn's code.
+    last_messages[:] = new_messages
 
     answer: str | None = None
     # From this turn's messages only: the accumulated history carries pks from
     # earlier questions, and handing those to a later step as "what this step
     # found" would be false.
-    references = node_references_from_messages(result.new_messages())
+    references = node_references_from_messages(new_messages)
     if isinstance(result.output, DeferredToolRequests):
         history = _handle_deferred(agent, result, history)
     else:
@@ -217,7 +242,15 @@ def _run_repl(
     place (same profile, different agent) and reset the conversation.
     """
     repl_cfg = ReplSettings()
-    session = _make_session(repl_cfg)
+    # The Ctrl+O binding and /code command print the last turn's generated code;
+    # this list is replaced in place each turn (see _run_turn), so both always
+    # reach the newest turn without threading state through the loop.
+    last_messages: list[ModelMessage] = []
+
+    def reveal_code() -> None:  # pragma: no cover
+        render_all_generated_code(last_messages, console)
+
+    session = _make_session(repl_cfg, reveal_code)
 
     banner = (
         "AiiDA Agents (auto-routing)"
@@ -228,6 +261,7 @@ def _run_repl(
         f"{banner} [{settings.provider}:{settings.model}] - "
         "type 'quit' to exit, '/clear' to start a new conversation, "
         "'/agent [auto|analysis|execution]' to switch agent, "
+        "'/code' (or Ctrl+O) to show the last generated code, "
         "Ctrl+Enter (or Esc then Enter) for a new line\n"
     )
 
@@ -260,6 +294,9 @@ def _run_repl(
             histories.clear()
             click.echo("Conversation cleared.\n")
             continue
+        if question.lower() == "/code":
+            render_all_generated_code(last_messages, console)
+            continue
         if question.lower().startswith("/agent"):
             requested = _parse_agent_switch(question, agent_type)
             if requested is not None and requested != agent_type:
@@ -290,6 +327,7 @@ def _run_repl(
                 _step_prompt(step, question, previous),
                 histories.get(active, []),
                 repl_cfg,
+                last_messages,
             )
             if answer is None:
                 # The step errored, was interrupted, or ended in an approval
