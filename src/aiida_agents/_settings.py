@@ -190,6 +190,13 @@ class AgentSettings(_Base):
     negative is rejected."""
 
 
+def _default_codegen_dir() -> Path:
+    """The per-user directory generated code snippets are written to by default."""
+    from platformdirs import user_data_dir
+
+    return Path(user_data_dir("aiida-agents")) / "codegen"
+
+
 class SandboxSettings(_Base):
     """Where and how generated code is executed (``AIIDA_AGENTS_*``)."""
 
@@ -202,6 +209,11 @@ class SandboxSettings(_Base):
     sandbox_timeout: float = Field(default=30.0, gt=0)
     """Seconds a snippet may run before it is killed. A query over a large
     provenance graph is slow; an accidental ``while True`` is forever."""
+
+    codegen_save_dir: Path = Field(default_factory=_default_codegen_dir)
+    """Directory each snippet the codegen agent runs is written to as a ``.py``
+    file, so it can be read, edited, and re-run. Defaults under the per-user
+    data directory (honours ``$XDG_DATA_HOME``)."""
 
 
 class ReplSettings(_Base):

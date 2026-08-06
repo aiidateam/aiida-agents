@@ -29,6 +29,8 @@ from aiida_agents.cli.output import (
     _print_reply,
     _render_tool_calls,
     console,
+    save_generated_code,
+    show_generated_code,
 )
 from aiida_agents.cli.rag import rag
 from aiida_agents.cli.sandbox import sandbox
@@ -158,6 +160,8 @@ def ask_cmd(ctx: click.Context, question: str, raw: bool) -> None:
             raise click.ClickException(f"Agent run failed{where}: {exc}") from exc
 
         _render_tool_calls(result.new_messages(), console)  # debug-gated
+        show_generated_code(result.new_messages(), console)
+        save_generated_code(result.new_messages())
         if isinstance(result.output, DeferredToolRequests):
             # A write needs a terminal. Stopping here rather than continuing is
             # the point: later steps would build on a submission that never
