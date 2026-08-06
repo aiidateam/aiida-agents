@@ -201,41 +201,33 @@ def _code_syntax(code: str) -> Syntax:
     )
 
 
-def show_generated_code(messages: list[ModelMessage], console: Console) -> None:
-    """Show one snippet the codegen agent ran this turn, syntax-highlighted.
+def announce_saved_code(paths: list[Path], console: Console) -> None:
+    """Note where this turn's generated code was saved, without printing it.
 
-    The last snippet that ran cleanly, or the last attempt if none did, since
-    that is the one behind the answer. Only one is shown to keep the turn
-    readable; every clean snippet is saved, and the REPL's reveal (Ctrl+O or
-    ``/code``) prints them all. The full sequence, failures included, is in the
-    DEBUG tool-call trace (``AIIDA_AGENTS_LOG_LEVEL=DEBUG``). A no-op for the
-    analysis/execution agents, which never call ``run_aiida_code``.
+    The code is not echoed inline: it reads badly in the middle of an answer,
+    and the model's own reply already interprets the result. It is saved and, in
+    the REPL, revealed on demand with Ctrl+O or ``/code``. This is the
+    breadcrumb that always shows, one line naming the file(s) written. A no-op
+    when nothing ran cleanly, since nothing was saved.
     """
-    outcomes = _snippet_outcomes(messages)
-    if not outcomes:
+    if not paths:
         return
-    clean = [code for code, ok in outcomes if ok]
-    shown = clean[-1] if clean else outcomes[-1][0]
-    console.print()
-    if len(outcomes) == 1:
-        console.print("[bold cyan]Generated code[/bold cyan]")
-    else:
-        saved = len(dict.fromkeys(clean))
-        console.print(
-            "[bold cyan]Generated code[/bold cyan] "
-            f"[dim](last clean of {len(outcomes)} attempts; {saved} saved. "
-            "Ctrl+O or /code shows all)[/dim]"
-        )
-    console.print(_code_syntax(shown))
+    if len(paths) == 1:
+        console.print(f"[dim]Generated code saved to {paths[0]}[/dim]")
+        return
+    console.print(f"[dim]Generated code saved ({len(paths)} snippets):[/dim]")
+    for path in paths:
+        console.print(f"[dim]  {path}[/dim]")
 
 
 def render_all_generated_code(messages: list[ModelMessage], console: Console) -> None:
     """Print every snippet the codegen agent ran this turn, each marked ran/failed.
 
-    The compact inline view (:func:`show_generated_code`) shows one snippet; a
-    terminal cannot fold already-printed output, so this prints the full set on
-    demand instead (the REPL binds it to Ctrl+O and ``/code``). Prints a short
-    note rather than nothing on an empty turn, so the key press has feedback.
+    Generated code is not shown inline (only its save location is, see
+    :func:`announce_saved_code`); a terminal cannot fold already-printed output,
+    so this prints the full set on demand instead (the REPL binds it to Ctrl+O
+    and ``/code``). Prints a short note rather than nothing on an empty turn, so
+    the key press has feedback.
     """
     outcomes = _snippet_outcomes(messages)
     if not outcomes:

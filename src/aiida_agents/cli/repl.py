@@ -35,10 +35,10 @@ from aiida_agents.cli.output import (
     _print_agent,
     _warn_ungrounded,
     _render_tool_calls,
+    announce_saved_code,
     console,
     render_all_generated_code,
     save_generated_code,
-    show_generated_code,
 )
 
 
@@ -187,8 +187,9 @@ def _run_turn(
     # traces are a post-run dump, so printing them into the still-live spinner
     # region above would fight its redraws. Debug-gated inside.
     _render_tool_calls(new_messages, console)
-    show_generated_code(new_messages, console)
-    save_generated_code(new_messages)
+    # Do not echo the code inline: it reads badly mid-answer. Save it, name
+    # where, and let the user reveal it with Ctrl+O / /code.
+    announce_saved_code(save_generated_code(new_messages), console)
     # In place, so the reveal binding's closure sees this turn's code.
     last_messages[:] = new_messages
 

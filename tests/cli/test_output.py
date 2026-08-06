@@ -271,35 +271,48 @@ def test_save_generated_code_writes_a_runnable_py_file(tmp_path: Path) -> None:
     assert "print('hi')" in text
 
 
-def test_show_generated_code_prints_the_snippet(
+def test_announce_saved_code_names_the_file_without_printing_code(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The code the agent ran is shown under a label."""
-    from aiida_agents.cli.output import show_generated_code
+    """The breadcrumb names where code was saved; it does not echo the code."""
+    from aiida_agents.cli.output import announce_saved_code
 
-    show_generated_code(_codegen_call("print('hi')"), Console(color_system=None))
+    announce_saved_code(
+        [Path("/data/aiida-agents/codegen/20260101-000000-000000.py")],
+        Console(color_system=None, width=200),
+    )
 
     out = capsys.readouterr().out
-    assert "Generated code" in out
-    assert "print" in out
+    assert "saved to" in out
+    assert "20260101-000000-000000.py" in out
 
 
-def test_show_generated_code_shows_the_last_clean_snippet(
+def test_announce_saved_code_lists_several(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """When a later attempt failed, the shown one is the last that ran, not the last."""
-    from aiida_agents.cli.output import show_generated_code
+    """More than one saved snippet is listed by path."""
+    from aiida_agents.cli.output import announce_saved_code
 
-    messages: list[ModelMessage] = [
-        *_codegen_exchange("print('good')", "42", "c1"),
-        *_codegen_exchange("broken", "Raised:\nNameError", "c2"),
-    ]
-    show_generated_code(messages, Console(color_system=None))
+    announce_saved_code(
+        [Path("/data/one.py"), Path("/data/two.py")],
+        Console(color_system=None, width=200),
+    )
 
     out = capsys.readouterr().out
-    assert "good" in out
-    assert "broken" not in out
-    assert "2 attempts" in out
+    assert "2 snippets" in out
+    assert "one.py" in out
+    assert "two.py" in out
+
+
+def test_announce_saved_code_is_silent_when_nothing_saved(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Nothing ran cleanly, nothing was saved, so nothing is printed."""
+    from aiida_agents.cli.output import announce_saved_code
+
+    announce_saved_code([], Console(color_system=None))
+
+    assert capsys.readouterr().out == ""
 
 
 def test_save_generated_code_saves_every_clean_snippet(
@@ -370,17 +383,17 @@ def test_render_all_generated_code_marks_each_run(
     assert "failed" in out
 
 
-def test_show_generated_code_is_a_noop_without_codegen(
-    capsys: pytest.CaptureFixture[str],
+def test_save_generated_code_is_a_noop_without_codegen(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A non-codegen turn prints nothing."""
-    from aiida_agents.cli.output import show_generated_code
+    """A non-codegen turn saves nothing."""
+    from aiida_agents.cli.output import save_generated_code
 
+    monkeypatch.setenv("AIIDA_AGENTS_CODEGEN_SAVE_DIR", str(tmp_path))
     messages: list[ModelMessage] = [
         ModelResponse(
             parts=[ToolCallPart(tool_name="query_nodes", args={}, tool_call_id="c0")]
         )
     ]
-    show_generated_code(messages, Console(color_system=None))
 
-    assert capsys.readouterr().out == ""
+    assert save_generated_code(messages) == []
