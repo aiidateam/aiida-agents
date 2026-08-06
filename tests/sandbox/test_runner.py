@@ -18,6 +18,7 @@ from aiida_agents.sandbox.runner import (
     MAX_TIMEOUT_SECONDS,
     SandboxResult,
     run_in_sandbox,
+    summary_is_failure,
 )
 
 
@@ -137,6 +138,28 @@ class TestSummary:
         timed_out = run_in_sandbox("while True: pass", timeout=1.0).summary()
 
         assert len({refused, raised, timed_out}) == 3
+
+
+class TestSummaryIsFailure:
+    """summary_is_failure must agree with what summary() emits, so a caller
+    holding only the summary string (the CLI, deciding which snippets to keep)
+    can tell a clean run from a refusal, timeout or traceback."""
+
+    def test_a_clean_run_is_not_a_failure(self) -> None:
+        assert not summary_is_failure(run_in_sandbox("print('hi')").summary())
+
+    def test_a_silent_clean_run_is_not_a_failure(self) -> None:
+        assert not summary_is_failure(run_in_sandbox("x = 1").summary())
+
+    def test_a_raise_is_a_failure(self) -> None:
+        assert summary_is_failure(run_in_sandbox("raise ValueError()").summary())
+
+    def test_a_timeout_is_a_failure(self) -> None:
+        result = run_in_sandbox("while True: pass", timeout=1.0)
+        assert summary_is_failure(result.summary())
+
+    def test_a_refusal_is_a_failure(self) -> None:
+        assert summary_is_failure(run_in_sandbox("import os").summary())
 
 
 class TestResultShape:

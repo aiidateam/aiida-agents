@@ -32,7 +32,27 @@ from dataclasses import dataclass, field
 
 from aiida_agents.sandbox.guard import Rejection, check_code
 
-__all__ = ["SandboxResult", "run_in_sandbox"]
+__all__ = ["SandboxResult", "run_in_sandbox", "summary_is_failure"]
+
+#: Prefixes :meth:`SandboxResult.summary` gives the three non-success outcomes.
+#: A caller that only has the summary string, read back out of message history
+#: (the CLI deciding which snippets ran cleanly and are worth saving),
+#: classifies by these rather than re-running anything.
+_REFUSED_PREFIX = "Refused before running:"
+_TIMED_OUT_PREFIX = "Timed out after "
+_RAISED_PREFIX = "Raised:"
+_FAILURE_PREFIXES = (_REFUSED_PREFIX, _TIMED_OUT_PREFIX, _RAISED_PREFIX)
+
+
+def summary_is_failure(summary: str) -> bool:
+    """True if a :meth:`SandboxResult.summary` string reports a non-success run.
+
+    A refusal, timeout or traceback each open with a distinct marker; a clean
+    run is the snippet's own stdout (or the "ran cleanly" note), which never
+    does. Lets a caller holding only the summary tell the two apart.
+    """
+    return summary.lstrip().startswith(_FAILURE_PREFIXES)
+
 
 #: Longest a snippet may run. A query over a large provenance graph is slow;
 #: an accidental ``while True`` is forever. Thirty seconds separates them
@@ -77,14 +97,14 @@ class SandboxResult:
         """
         if self.refused:
             reasons = "\n".join(f"  - {r}" for r in self.rejections)
-            return f"Refused before running:\n{reasons}"
+            return f"{_REFUSED_PREFIX}\n{reasons}"
         if self.timed_out:
             return (
-                f"Timed out after {self.duration_seconds:.0f}s. The query is "
+                f"{_TIMED_OUT_PREFIX}{self.duration_seconds:.0f}s. The query is "
                 "probably unbounded -- add a filter or a limit."
             )
         if not self.ok:
-            return f"Raised:\n{self.stderr.strip()}"
+            return f"{_RAISED_PREFIX}\n{self.stderr.strip()}"
         return self.stdout.strip() or "Ran cleanly, but printed nothing."
 
 

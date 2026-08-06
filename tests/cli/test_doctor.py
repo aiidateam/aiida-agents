@@ -25,6 +25,29 @@ class _Index:
         self.stale = stale
 
 
+class _DaemonClient:
+    """Stub AiiDA daemon client exposing what the doctor check reads."""
+
+    def __init__(
+        self, *, running: bool = True, workers: int = 1, unreachable: bool = False
+    ) -> None:
+        self._running = running
+        self._workers = workers
+        self._unreachable = unreachable
+
+    @property
+    def is_daemon_running(self) -> bool:
+        return self._running
+
+    def get_numprocesses(self) -> dict[str, int]:
+        # Running is not reachable: mid-restart the circus endpoint can be down
+        # while the daemon is alive, which the check reports as a failed row.
+        if self._unreachable:
+            msg = "circus endpoint unreachable"
+            raise RuntimeError(msg)
+        return {"numprocesses": self._workers}
+
+
 def _patch_all_checks_passing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub every subsystem probe to succeed, so a test can then break exactly
     one and assert the others are unaffected.
@@ -33,6 +56,9 @@ def _patch_all_checks_passing(monkeypatch: pytest.MonkeyPatch) -> None:
     from aiida_agents.cli.agent import _Reachability
 
     monkeypatch.setattr("aiida.load_profile", lambda profile: _Profile())
+    monkeypatch.setattr(
+        "aiida.engine.daemon.client.get_daemon_client", lambda: _DaemonClient()
+    )
     monkeypatch.setattr(
         "aiida_agents.cli.agent._probe_reachable",
         lambda settings: _Reachability("http://endpoint", 3, model_ok=True),
@@ -83,12 +109,54 @@ def test_run_diagnostics_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert list(rows) == [
         "AiiDA profile loads",
+        "Daemon running and reachable",
         "Model reachable (ollama:m)",
         "RAG index built",
         "Codegen sandbox (read-only profile)",
         "Docs toolchain (sphinx)",
     ]
     assert all(row.ok for row in rows.values())
+
+
+@pytest.mark.parametrize(
+    "client, expected_ok, needle",
+    [
+        pytest.param(
+            _DaemonClient(running=True, workers=2), True, "2 worker(s)", id="reachable"
+        ),
+        pytest.param(
+            _DaemonClient(running=False), False, "verdi daemon start", id="not-running"
+        ),
+        pytest.param(
+            _DaemonClient(running=True, workers=0),
+            False,
+            "verdi daemon incr",
+            id="zero-workers",
+        ),
+        pytest.param(
+            _DaemonClient(running=True, unreachable=True),
+            False,
+            "unreachable",
+            id="running-but-unreachable",
+        ),
+    ],
+)
+def test_check_daemon(
+    monkeypatch: pytest.MonkeyPatch,
+    client: _DaemonClient,
+    expected_ok: bool,
+    needle: str,
+) -> None:
+    """The daemon check separates running-and-reachable from every way it is not:
+    stopped, zero workers, or up but with an unreachable circus endpoint.
+    """
+    from aiida_agents.cli.doctor import _check_daemon
+
+    monkeypatch.setattr("aiida.engine.daemon.client.get_daemon_client", lambda: client)
+    row = _check_daemon()
+
+    assert row.ok is expected_ok
+    assert needle in row.detail
 
 
 @pytest.mark.parametrize(
