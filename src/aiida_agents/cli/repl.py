@@ -34,6 +34,8 @@ from aiida_agents.cli.output import (
     _warn_ungrounded,
     _render_tool_calls,
     console,
+    save_generated_code,
+    show_generated_code,
 )
 
 
@@ -162,6 +164,8 @@ def _run_turn(
     # traces are a post-run dump, so printing them into the still-live spinner
     # region above would fight its redraws. Debug-gated inside.
     _render_tool_calls(result.new_messages(), console)
+    show_generated_code(result.new_messages(), console)
+    save_generated_code(result.new_messages())
 
     answer: str | None = None
     # From this turn's messages only: the accumulated history carries pks from
