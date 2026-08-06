@@ -14,7 +14,7 @@ from datetime import datetime
 from pathlib import Path
 
 import rich_click as click
-from pydantic_ai.messages import ModelMessage, ToolCallPart
+from pydantic_ai.messages import ModelMessage, ToolCallPart, ToolReturnPart
 from rich.console import Console
 from rich.markdown import Markdown
 from rich.markup import escape
@@ -142,19 +142,36 @@ def _tool_call_args(part: ToolCallPart) -> dict[str, object]:
     return {}
 
 
-def _generated_code(messages: list[ModelMessage]) -> list[str]:
-    """The Python the codegen agent ran this turn, in order.
+def _snippet_outcomes(messages: list[ModelMessage]) -> list[tuple[str, bool]]:
+    """Each ``run_aiida_code`` snippet this turn, paired with whether it ran cleanly.
 
-    Each ``run_aiida_code`` call carries its snippet as the ``code`` argument;
-    retried attempts are included, so the list mirrors what actually ran.
+    A snippet ran cleanly if its return is not a refusal, timeout or traceback
+    (:func:`~aiida_agents.sandbox.runner.summary_is_failure`). Calls are matched
+    to their returns by ``tool_call_id``; retried attempts are all included, in
+    order. The last attempt is not necessarily the right one, so callers that
+    keep code keep every clean run rather than guessing.
     """
-    snippets: list[str] = []
+    from aiida_agents.sandbox.runner import summary_is_failure
+
+    returns = {
+        part.tool_call_id: str(part.content)
+        for part in _tool_parts(messages)
+        if isinstance(part, ToolReturnPart) and part.tool_name == "run_aiida_code"
+    }
+    outcomes: list[tuple[str, bool]] = []
     for part in _tool_parts(messages):
         if isinstance(part, ToolCallPart) and part.tool_name == "run_aiida_code":
             code = _tool_call_args(part).get("code")
             if isinstance(code, str) and code.strip():
-                snippets.append(code)
-    return snippets
+                summary = returns.get(part.tool_call_id, "")
+                ran_cleanly = bool(summary) and not summary_is_failure(summary)
+                outcomes.append((code, ran_cleanly))
+    return outcomes
+
+
+def _generated_code(messages: list[ModelMessage]) -> list[str]:
+    """The Python the codegen agent ran this turn, in order (clean or not)."""
+    return [code for code, _ in _snippet_outcomes(messages)]
 
 
 def _save_generated_code(snippets: list[str], save_dir: Path) -> list[Path]:
@@ -177,44 +194,80 @@ def _save_generated_code(snippets: list[str], save_dir: Path) -> list[Path]:
     return paths
 
 
-def show_generated_code(messages: list[ModelMessage], console: Console) -> None:
-    """Show any code the codegen agent ran this turn, syntax-highlighted.
+def _code_syntax(code: str) -> Syntax:
+    """Syntax-highlight a snippet for the console, on the terminal's own theme."""
+    return Syntax(
+        code, "python", theme="ansi_dark", background_color="default", word_wrap=True
+    )
 
-    A no-op for the analysis/execution agents, which never call
-    ``run_aiida_code``.
+
+def show_generated_code(messages: list[ModelMessage], console: Console) -> None:
+    """Show one snippet the codegen agent ran this turn, syntax-highlighted.
+
+    The last snippet that ran cleanly, or the last attempt if none did, since
+    that is the one behind the answer. Only one is shown to keep the turn
+    readable; every clean snippet is saved, and the REPL's reveal (Ctrl+O or
+    ``/code``) prints them all. The full sequence, failures included, is in the
+    DEBUG tool-call trace (``AIIDA_AGENTS_LOG_LEVEL=DEBUG``). A no-op for the
+    analysis/execution agents, which never call ``run_aiida_code``.
     """
-    snippets = _generated_code(messages)
-    for index, code in enumerate(snippets, start=1):
-        label = (
-            "Generated code"
-            if len(snippets) == 1
-            else f"Generated code ({index}/{len(snippets)})"
-        )
-        console.print()
-        console.print(f"[bold cyan]{label}[/bold cyan]")
+    outcomes = _snippet_outcomes(messages)
+    if not outcomes:
+        return
+    clean = [code for code, ok in outcomes if ok]
+    shown = clean[-1] if clean else outcomes[-1][0]
+    console.print()
+    if len(outcomes) == 1:
+        console.print("[bold cyan]Generated code[/bold cyan]")
+    else:
+        saved = len(dict.fromkeys(clean))
         console.print(
-            Syntax(
-                code,
-                "python",
-                theme="ansi_dark",
-                background_color="default",
-                word_wrap=True,
-            )
+            "[bold cyan]Generated code[/bold cyan] "
+            f"[dim](last clean of {len(outcomes)} attempts; {saved} saved. "
+            "Ctrl+O or /code shows all)[/dim]"
         )
+    console.print(_code_syntax(shown))
+
+
+def render_all_generated_code(messages: list[ModelMessage], console: Console) -> None:
+    """Print every snippet the codegen agent ran this turn, each marked ran/failed.
+
+    The compact inline view (:func:`show_generated_code`) shows one snippet; a
+    terminal cannot fold already-printed output, so this prints the full set on
+    demand instead (the REPL binds it to Ctrl+O and ``/code``). Prints a short
+    note rather than nothing on an empty turn, so the key press has feedback.
+    """
+    outcomes = _snippet_outcomes(messages)
+    if not outcomes:
+        console.print("[dim]No code was generated in the last turn.[/dim]")
+        return
+    for index, (code, ok) in enumerate(outcomes, start=1):
+        marker = "[green]✓ ran[/green]" if ok else "[red]✗ failed[/red]"
+        console.print()
+        console.print(
+            f"[bold cyan]Snippet {index}/{len(outcomes)}[/bold cyan] {marker}"
+        )
+        console.print(_code_syntax(code))
 
 
 def save_generated_code(messages: list[ModelMessage]) -> list[Path]:
-    """Save each snippet the codegen agent ran this turn to a ``.py`` file the
-    user can read, edit, and re-run. Returns the paths written (empty for a
-    non-codegen turn); the directory is ``SandboxSettings.codegen_save_dir``.
+    """Save every snippet that ran cleanly this turn to its own ``.py`` file the
+    user can read, edit, and re-run.
+
+    One file per distinct clean snippet: the last attempt is not always the
+    right one, so keeping only it would drop earlier runs that worked, and a
+    refused or failed try is not worth keeping at all. Identical snippets are
+    written once. Returns the paths written (empty when nothing ran cleanly);
+    the directory is ``SandboxSettings.codegen_save_dir``.
     """
-    snippets = _generated_code(messages)
-    if not snippets:
+    clean = [code for code, ok in _snippet_outcomes(messages) if ok]
+    unique = list(dict.fromkeys(clean))
+    if not unique:
         return []
 
     from aiida_agents._settings import SandboxSettings
 
-    return _save_generated_code(snippets, SandboxSettings().codegen_save_dir)
+    return _save_generated_code(unique, SandboxSettings().codegen_save_dir)
 
 
 def _format_duration(seconds: float) -> str:

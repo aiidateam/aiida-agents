@@ -171,6 +171,44 @@ def _codegen_call(code: object) -> list[ModelMessage]:
     ]
 
 
+def _codegen_exchange(code: str, summary: str, call_id: str) -> list[ModelMessage]:
+    """A ``run_aiida_code`` call plus its return, so the run's outcome is known.
+
+    ``summary`` mimics what the sandbox tool returns: a clean run is its stdout,
+    a failure opens with "Raised:" / "Refused before running:" / "Timed out
+    after " (see SandboxResult.summary).
+    """
+    return [
+        ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name="run_aiida_code",
+                    args={"code": code},
+                    tool_call_id=call_id,
+                )
+            ]
+        ),
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="run_aiida_code", content=summary, tool_call_id=call_id
+                )
+            ]
+        ),
+    ]
+
+
+def test_snippet_outcomes_pairs_each_snippet_with_its_success() -> None:
+    """A clean return marks the snippet ran; a "Raised:" return marks it failed."""
+    from aiida_agents.cli.output import _snippet_outcomes
+
+    messages: list[ModelMessage] = [
+        *_codegen_exchange("print('ok')", "5", "c1"),
+        *_codegen_exchange("boom", "Raised:\nImportError: no", "c2"),
+    ]
+    assert _snippet_outcomes(messages) == [("print('ok')", True), ("boom", False)]
+
+
 def test_generated_code_extracts_run_aiida_code_snippets() -> None:
     """Only ``run_aiida_code`` args are collected, in order; other tools ignored."""
     from aiida_agents.cli.output import _generated_code
@@ -244,6 +282,92 @@ def test_show_generated_code_prints_the_snippet(
     out = capsys.readouterr().out
     assert "Generated code" in out
     assert "print" in out
+
+
+def test_show_generated_code_shows_the_last_clean_snippet(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """When a later attempt failed, the shown one is the last that ran, not the last."""
+    from aiida_agents.cli.output import show_generated_code
+
+    messages: list[ModelMessage] = [
+        *_codegen_exchange("print('good')", "42", "c1"),
+        *_codegen_exchange("broken", "Raised:\nNameError", "c2"),
+    ]
+    show_generated_code(messages, Console(color_system=None))
+
+    out = capsys.readouterr().out
+    assert "good" in out
+    assert "broken" not in out
+    assert "2 attempts" in out
+
+
+def test_save_generated_code_saves_every_clean_snippet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """All snippets that ran are kept (the last is not always the right one);
+    a failed attempt is not."""
+    from aiida_agents.cli.output import save_generated_code
+
+    monkeypatch.setenv("AIIDA_AGENTS_CODEGEN_SAVE_DIR", str(tmp_path))
+    messages: list[ModelMessage] = [
+        *_codegen_exchange("print('a')", "1", "c1"),
+        *_codegen_exchange("nope", "Raised:\nValueError", "c2"),
+        *_codegen_exchange("print('b')", "2", "c3"),
+    ]
+    paths = save_generated_code(messages)
+
+    saved = "\n".join(p.read_text(encoding="utf-8") for p in paths)
+    assert len(paths) == 2
+    assert "print('a')" in saved
+    assert "print('b')" in saved
+    assert "nope" not in saved
+
+
+def test_save_generated_code_dedupes_identical_snippets(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The same clean snippet run twice is written once."""
+    from aiida_agents.cli.output import save_generated_code
+
+    monkeypatch.setenv("AIIDA_AGENTS_CODEGEN_SAVE_DIR", str(tmp_path))
+    messages: list[ModelMessage] = [
+        *_codegen_exchange("print('x')", "1", "c1"),
+        *_codegen_exchange("print('x')", "1", "c2"),
+    ]
+
+    assert len(save_generated_code(messages)) == 1
+
+
+def test_save_generated_code_saves_nothing_when_all_failed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A turn where no snippet ran cleanly writes no files."""
+    from aiida_agents.cli.output import save_generated_code
+
+    monkeypatch.setenv("AIIDA_AGENTS_CODEGEN_SAVE_DIR", str(tmp_path))
+    messages = _codegen_exchange("boom", "Raised:\nImportError", "c1")
+
+    assert save_generated_code(messages) == []
+
+
+def test_render_all_generated_code_marks_each_run(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The reveal prints every snippet, marking which ran and which failed."""
+    from aiida_agents.cli.output import render_all_generated_code
+
+    messages: list[ModelMessage] = [
+        *_codegen_exchange("print('a')", "1", "c1"),
+        *_codegen_exchange("nope", "Raised:\nValueError", "c2"),
+    ]
+    render_all_generated_code(messages, Console(color_system=None))
+
+    out = capsys.readouterr().out
+    assert "print('a')" in out
+    assert "nope" in out
+    assert "ran" in out
+    assert "failed" in out
 
 
 def test_show_generated_code_is_a_noop_without_codegen(
