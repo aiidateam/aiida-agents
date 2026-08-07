@@ -114,13 +114,15 @@ def test_key_bindings_flip_enter_and_newline() -> None:
     """Enter submits; Esc+Enter and Ctrl+J (``ControlJ``, which most terminals
     also send for Ctrl+Enter) insert a newline: the deliberate flip of
     prompt_toolkit's multiline default (see ``_key_bindings``). ``Keys.Enter`` is
-    the ``ControlM`` alias prompt_toolkit stores for a bare ``"enter"``.
+    the ``ControlM`` alias prompt_toolkit stores for a bare ``"enter"``. Ctrl+O
+    reveals the last turn's generated code.
     """
-    bound = {binding.keys for binding in _key_bindings().bindings}
+    bound = {binding.keys for binding in _key_bindings(lambda: None).bindings}
     assert bound == {
         (Keys.Enter,),
         (Keys.Escape, Keys.Enter),
         (Keys.ControlJ,),
+        (Keys.ControlO,),
     }
 
 
