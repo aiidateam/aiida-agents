@@ -10,11 +10,32 @@ from click.testing import CliRunner
 from aiida_agents._settings import ModelSettings, _Provider
 from aiida_agents.cli import cli
 from aiida_agents.cli.doctor import _DiagnosticRow
-from aiida_agents.sandbox.setup import ReadOnlyCheck
 
 
 class _Profile:
     name = "test-profile"
+
+
+class _StorageProfile:
+    """A profile with somewhere to keep data, for the sandbox check."""
+
+    def __init__(self, name: str, filepath: str) -> None:
+        self.name = name
+        self.storage_backend = "core.sqlite_dos"
+        self.storage_config = {"filepath": filepath}
+
+
+class _SandboxConfig:
+    """An AiiDA config holding a real profile and a sandbox beside it.
+
+    `sandbox` names the sandbox profile; pass the same filepath as the real one
+    to model the storage-sharing case that issue #73 was about.
+    """
+
+    def __init__(self, sandbox: str | None, filepath: str = "/data/copy") -> None:
+        self.profiles = [_StorageProfile("real", "/data/real")]
+        if sandbox is not None:
+            self.profiles.append(_StorageProfile(sandbox, filepath))
 
 
 class _Index:
@@ -39,11 +60,8 @@ def _patch_all_checks_passing(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     monkeypatch.setattr("aiida_agents.rag.store.index_status", lambda: _Index(True))
     monkeypatch.setattr(
-        "aiida_agents.sandbox.setup.sandbox_profile_exists", lambda profile: True
-    )
-    monkeypatch.setattr(
-        "aiida_agents.sandbox.setup.verify_read_only",
-        lambda profile, timeout=60.0: ReadOnlyCheck(True, "role cannot insert"),
+        "aiida.manage.configuration.get_config",
+        lambda: _SandboxConfig("agents-sandbox"),
     )
     monkeypatch.setattr(doctor, "_module_missing", lambda name: False)
 
@@ -85,7 +103,7 @@ def test_run_diagnostics_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> Non
         "AiiDA profile loads",
         "Model reachable (ollama:m)",
         "RAG index built",
-        "Codegen sandbox (read-only profile)",
+        "Codegen sandbox (disposable copy)",
         "Docs toolchain (sphinx)",
     ]
     assert all(row.ok for row in rows.values())
@@ -104,8 +122,8 @@ def test_run_diagnostics_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> Non
             "aiida_agents.rag.store.index_status", "RAG index built", id="rag"
         ),
         pytest.param(
-            "aiida_agents.sandbox.setup.verify_read_only",
-            "Codegen sandbox (read-only profile)",
+            "aiida_agents.sandbox.copy.profiles_sharing_storage",
+            "Codegen sandbox (disposable copy)",
             id="sandbox",
         ),
     ],
@@ -195,10 +213,9 @@ def test_run_diagnostics_model_availability_policy(
         ),
         pytest.param(
             lambda mp: mp.setattr(
-                "aiida_agents.sandbox.setup.sandbox_profile_exists",
-                lambda profile: False,
+                "aiida.manage.configuration.get_config", lambda: _SandboxConfig(None)
             ),
-            "Codegen sandbox (read-only profile)",
+            "Codegen sandbox (disposable copy)",
             "sandbox init",
             id="unset-sandbox",
         ),
@@ -244,22 +261,23 @@ def test_doctor_exit_code_reflects_health(
     assert result.exit_code == exit_code
 
 
-def test_a_writable_sandbox_profile_fails_the_check(
+def test_a_sandbox_sharing_storage_fails_the_check(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A sandbox that can write is worse than no sandbox at all.
+    """A sandbox that shares storage is worse than no sandbox at all.
 
     With none configured the Codegen agent knows it cannot run code and says
-    so. With a *writable* one it runs code believing the database will refuse
-    the writes, which is the one situation the read-only role exists to
-    prevent. Existing is therefore not enough for this row to pass.
+    so. With a *sharing* one, everything looks healthy right up until somebody
+    deletes the profile they were told was disposable and takes the real
+    database with it, which is exactly what issue #73 records. Existing is
+    therefore not enough for this row to pass.
     """
     _patch_all_checks_passing(monkeypatch)
     monkeypatch.setattr(
-        "aiida_agents.sandbox.setup.verify_read_only",
-        lambda profile, timeout=60.0: ReadOnlyCheck(False, "role CAN insert"),
+        "aiida.manage.configuration.get_config",
+        lambda: _SandboxConfig("agents-sandbox", filepath="/data/real"),
     )
-    row = _rows_by_label()["Codegen sandbox (read-only profile)"]
+    row = _rows_by_label()["Codegen sandbox (disposable copy)"]
 
     assert row.ok is False
-    assert "CAN insert" in row.detail
+    assert "real" in row.detail

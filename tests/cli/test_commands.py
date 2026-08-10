@@ -339,61 +339,165 @@ class TestChatStartup:
 
 
 class TestSandboxCommands:
-    """The `sandbox` group: set up the read-only profile, and verify it."""
+    """The `sandbox` group, which builds and verifies the disposable copy.
+
+    Every test here is really about one rule: a sandbox profile must never
+    share deletable storage with a real one. Issue #73 is the cost of getting
+    that wrong -- a maintainer deleted the sandbox profile, agreed to delete
+    its data, and lost his own database with it.
+    """
 
     def test_the_group_is_registered(self) -> None:
         result = CliRunner().invoke(cli, ["--help"])
 
         assert "sandbox" in result.output
 
-    def test_init_refuses_a_non_postgres_profile(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """There is no role to restrict, so pretending to help would mislead."""
-        from aiida_agents.cli import sandbox as sandbox_cli
-
-        class _Profile:
-            name = "sqlite-profile"
-            storage_config: dict[str, str] = {}
-
+    @staticmethod
+    def _config(*profiles: object) -> object:
         class _Config:
-            def get_profile(self, _name: object) -> _Profile:
-                return _Profile()
+            def __init__(self) -> None:
+                self.profiles = list(profiles)
+                self.deleted: dict[str, object] = {}
 
-        monkeypatch.setattr("aiida.manage.configuration.get_config", lambda: _Config())
-        monkeypatch.setattr(sandbox_cli, "secrets", __import__("secrets"))
+            def get_profile(self, name: object = None) -> object:
+                for profile in self.profiles:
+                    if profile.name == name:  # type: ignore[attr-defined]
+                        return profile
+                raise ValueError(f"no profile {name!r}")
 
-        result = CliRunner().invoke(cli, ["sandbox", "init"])
+            def delete_profile(self, name: str, delete_storage: bool = True) -> None:
+                self.deleted = {"name": name, "delete_storage": delete_storage}
 
-        assert result.exit_code != 0
-        assert "PostgreSQL" in result.output
+            def store(self) -> None:
+                return None
 
-    def test_check_exits_nonzero_when_a_profile_can_write(
+        return _Config()
+
+    @staticmethod
+    def _profile(
+        name: str, backend: str = "core.sqlite_dos", filepath: str | None = None
+    ) -> object:
+        class _Profile:
+            pass
+
+        profile = _Profile()
+        profile.name = name  # type: ignore[attr-defined]
+        profile.storage_backend = backend  # type: ignore[attr-defined]
+        profile.storage_config = {"filepath": filepath or f"/data/{name}"}  # type: ignore[attr-defined]
+        return profile
+
+    def _patch(self, monkeypatch: pytest.MonkeyPatch, config: object) -> None:
+        monkeypatch.setattr("aiida.manage.configuration.get_config", lambda: config)
+
+    def test_check_fails_when_the_sandbox_shares_storage(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """A writable profile must fail the command, not merely be mentioned."""
-        from aiida_agents.sandbox.setup import ReadOnlyCheck
-
-        monkeypatch.setattr(
-            "aiida_agents.sandbox.setup.verify_read_only",
-            lambda profile, timeout=60.0: ReadOnlyCheck(False, "role CAN insert"),
+        """The exact shape of the design this replaced."""
+        config = self._config(
+            self._profile("real", filepath="/data/shared"),
+            self._profile("agents-sandbox", filepath="/data/shared"),
         )
+        self._patch(monkeypatch, config)
 
         result = CliRunner().invoke(cli, ["sandbox", "check"])
 
         assert result.exit_code == 1
-        assert "CAN insert" in result.output
+        assert "real" in result.output
 
-    def test_check_passes_a_read_only_profile(
+    def test_check_passes_a_genuinely_separate_copy(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from aiida_agents.sandbox.setup import ReadOnlyCheck
-
-        monkeypatch.setattr(
-            "aiida_agents.sandbox.setup.verify_read_only",
-            lambda profile, timeout=60.0: ReadOnlyCheck(True, "cannot insert"),
+        config = self._config(
+            self._profile("real", filepath="/data/real"),
+            self._profile("agents-sandbox", filepath="/data/copy"),
         )
+        self._patch(monkeypatch, config)
 
         result = CliRunner().invoke(cli, ["sandbox", "check"])
 
         assert result.exit_code == 0
+
+    def test_check_fails_on_a_backend_it_cannot_reason_about(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Fails closed. Not knowing whether two profiles are separate is not
+        the same as knowing they are, and only one of those mistakes is safe."""
+        config = self._config(
+            self._profile("real", filepath="/data/real"),
+            self._profile("agents-sandbox", backend="core.sqlite_zip"),
+        )
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "check"])
+
+        assert result.exit_code == 1
+
+    def test_init_refuses_a_backend_it_cannot_copy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Naming the limit beats a copy that half worked and looked contained."""
+        config = self._config(self._profile("real", backend="core.sqlite_zip"))
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "init", "--profile", "real"])
+
+        assert result.exit_code != 0
+        assert "cannot copy" in result.output
+
+    def test_init_refuses_to_overwrite_an_existing_sandbox(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Rebuilding is teardown then init, so nothing in use is copied over."""
+        config = self._config(self._profile("real"), self._profile("agents-sandbox"))
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "init", "--profile", "real"])
+
+        assert result.exit_code != 0
+        assert "refresh" in result.output
+
+    def test_teardown_refuses_a_sandbox_that_shares_storage(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The last line of defence, for a sandbox registered before this
+        rule existed. Deleting it is what destroyed a real database."""
+        config = self._config(
+            self._profile("real", filepath="/data/shared"),
+            self._profile("agents-sandbox", filepath="/data/shared"),
+        )
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "teardown", "--yes"])
+
+        assert result.exit_code != 0
+        assert config.deleted == {}, "nothing may be deleted"  # type: ignore[attr-defined]
+
+    def test_teardown_never_asks_aiida_to_delete_the_storage(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`delete_storage=True` is the call that did the damage in #73.
+
+        The copy's directory is removed here directly, so AiiDA is never asked
+        to delete storage on our behalf -- not even for a profile we believe is
+        self-contained.
+        """
+        config = self._config(
+            self._profile("real", filepath="/data/real"),
+            self._profile("agents-sandbox", filepath="/data/copy"),
+        )
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "teardown", "--yes"])
+
+        assert result.exit_code == 0
+        assert config.deleted["delete_storage"] is False  # type: ignore[attr-defined]
+
+    def test_teardown_on_a_missing_sandbox_is_not_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._patch(monkeypatch, self._config(self._profile("real")))
+
+        result = CliRunner().invoke(cli, ["sandbox", "teardown", "--yes"])
+
+        assert result.exit_code == 0
+        assert "nothing to tear down" in result.output

@@ -22,13 +22,6 @@ from aiida_agents.cli.output import console
 from aiida_agents.cli.rag import _module_missing
 
 
-#: Seconds allowed for the sandbox privilege probe. It spawns a subprocess that
-#: loads AiiDA, so it is the slowest check here; capped well below
-#: ``verify_read_only``'s own default so one unresponsive database cannot make
-#: ``doctor`` look hung.
-_SANDBOX_PROBE_TIMEOUT = 30.0
-
-
 class _DiagnosticRow(NamedTuple):
     """One ``doctor`` health-check result: a label, pass/fail, and a detail."""
 
@@ -124,27 +117,39 @@ def _check_sandbox() -> _DiagnosticRow:
     of the model rather than a setup step nobody performed. One red row in
     ``doctor``, naming the command, is cheaper than that.
 
-    A profile that exists is not enough, so this asks Postgres the same
-    question ``sandbox check`` asks. A sandbox that turns out to be writable is
-    worse than none: code would run against it believing it cannot write.
+    A profile that exists is not enough. The question asked here is the one
+    ``sandbox check`` asks: does it share storage with a real profile? A sandbox
+    that does is a profile whose deletion destroys somebody's work, which is
+    exactly how issue #73 cost a maintainer his database --- so it fails this
+    row rather than passing it with a note.
     """
-    from aiida_agents._settings import SandboxSettings
-    from aiida_agents.sandbox.setup import sandbox_profile_exists, verify_read_only
+    from aiida.manage.configuration import get_config
 
-    label = "Codegen sandbox (read-only profile)"
+    from aiida_agents._settings import SandboxSettings
+    from aiida_agents.sandbox.copy import profiles_sharing_storage
+
+    label = "Codegen sandbox (disposable copy)"
     try:
-        profile = SandboxSettings().sandbox_profile
-        if not sandbox_profile_exists(profile):
+        name = SandboxSettings().sandbox_profile
+        config = get_config()
+        profiles = {profile.name: profile for profile in config.profiles}
+        if name not in profiles:
             return _DiagnosticRow(
                 label,
                 False,
-                f"no profile {profile!r}; run `aiida-agents sandbox init` "
+                f"no profile {name!r}; run `aiida-agents sandbox init` "
                 "(codegen writes code but cannot run it without one)",
             )
-        # Shorter than the default: doctor is a report, and a database that
-        # takes this long to answer is itself the finding.
-        result = verify_read_only(profile, timeout=_SANDBOX_PROBE_TIMEOUT)
-        return _DiagnosticRow(label, result.read_only, result.detail)
+
+        sharing = profiles_sharing_storage(config, name)
+        if sharing:
+            return _DiagnosticRow(
+                label,
+                False,
+                f"shares storage with {', '.join(sharing)}; deleting it would "
+                "destroy that data. Rebuild with `aiida-agents sandbox refresh`",
+            )
+        return _DiagnosticRow(label, True, "own copy, shared with nothing")
     except Exception as exc:
         return _DiagnosticRow(label, False, _short_reason(exc))
 
