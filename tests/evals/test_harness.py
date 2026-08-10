@@ -17,6 +17,8 @@ from typing import Any
 
 import pytest
 from pydantic_ai import Agent
+
+from aiida_agents import grounding
 from pydantic_ai.messages import (
     ModelMessage,
     ModelResponse,
@@ -266,3 +268,82 @@ class TestTraceCapture:
         ]
         assert all(c.output == _DOCS_EXCERPT for c in trace.calls)
         assert trace.answer == "done"
+
+
+class TestEvidenceMustPresentTheNumberAsAQuantity:
+    """The oracle's own failure mode, reported as issue #81.
+
+    Grounding used to accept a claim whose bare number appeared *anywhere* in
+    the evidence. Real tool output is dense with incidental integers -- pks,
+    exit codes, counts, ports -- so a fabricated cutoff was certified the
+    moment some unrelated node happened to have that pk. Since this same path
+    is both the shipped CLI warning and the eval oracle, it was certifying the
+    exact class of invention it exists to catch.
+    """
+
+    def test_a_pk_does_not_ground_a_cutoff(self) -> None:
+        """Julian's case, verbatim: 60 is a pk and 8 is a count."""
+        evidence = "{'pk': 60, 'exit_status': 501, 'count': 8}"
+        answer = (
+            "ecutwfc varies widely (e.g., 60 Ry for gold, 8 for the alkali metals)."
+        )
+
+        assert "60.0" in grounding.ungrounded_quantities(answer, evidence)
+
+    def test_a_number_the_evidence_labels_is_grounded(self) -> None:
+        """The other direction, or the fix would just be "flag everything"."""
+        evidence = "{'ecutwfc': 60.0, 'ecutwfc_unit': 'Ry'}"
+
+        assert (
+            grounding.ungrounded_quantities("The cutoff was 60 Ry.", evidence) == set()
+        )
+
+    def test_a_unit_in_the_evidence_grounds_the_claim(self) -> None:
+        evidence = "recommended cutoff is 60 Ry for this family"
+
+        assert grounding.ungrounded_quantities("Use 60 Ry.", evidence) == set()
+
+    def test_a_bare_count_still_grounds_a_bare_number(self) -> None:
+        """The over-fire direction.
+
+        A bare number sharing a sentence with a parameter name is a guess about
+        what the sentence means, so it stays on the loose bar. Holding it to
+        the strict one would flag "I checked 3 relaxations and the cutoff was
+        fine", and a warning that fires on correct answers gets scrolled past.
+        """
+        evidence = "{'count': 3, 'ecutwfc': 60.0, 'unit': 'Ry'}"
+        answer = "I checked 3 relaxations and the cutoff of 60 Ry was fine."
+
+        assert grounding.ungrounded_quantities(answer, evidence) == set()
+
+    def test_a_realistic_tool_dump_does_not_ground_everything(self) -> None:
+        """The large-evidence case CI never exercised.
+
+        Every small integer appears somewhere in a real dump, which is what
+        made the old bare-number rule vacuous in practice rather than only in
+        principle. The dump below grounds none of the invented cutoffs.
+        """
+        evidence = repr(
+            [
+                {
+                    "pk": pk,
+                    "uuid": f"0000-{pk}",
+                    "exit_status": status,
+                    "process_label": "PwCalculation",
+                    "num_machines": 1,
+                    "seconds": pk * 3,
+                }
+                for pk, status in zip(range(30, 90), [0, 501, 400] * 20)
+            ]
+        )
+        answer = "Typical values are 40 Ry for the wavefunction and 80 Ry for the charge density."
+
+        assert grounding.ungrounded_quantities(answer, evidence) == {"40.0", "80.0"}
+
+    def test_units_are_matched_on_word_boundaries(self) -> None:
+        """`K`, `A` and `eV` sit inside ordinary words.
+
+        Unbounded, the unit pattern cut letters out of "Kelvin", "Analysis" and
+        "every" before the text was scanned for numbers.
+        """
+        assert grounding.quantities_in("However, several Analysis steps ran.") == set()

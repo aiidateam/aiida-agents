@@ -28,6 +28,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 
 import pytest
@@ -318,9 +319,25 @@ class TestNoInventedNumbersFromDatabaseResults:
         trace = _run(analysis_agent, "what ecutwfc did my successful relaxations use?")
 
         lowered = trace.answer.lower()
-        assert "execution" in lowered or "not" in lowered, (
-            "analysis agent neither redirected to execution nor said it could "
-            f"not answer:\n{trace.answer}"
+        # `"not" in lowered` was the original test and certified anything:
+        # "another", "cannot", "nothing" and "note" all contain it, so no
+        # answer in English could fail. Look for the actual refusal instead.
+        redirected = "execution agent" in lowered
+        declined = any(
+            phrase in lowered
+            for phrase in (
+                "cannot answer",
+                "can't answer",
+                "do not have",
+                "don't have",
+                "no tool",
+                "not able to",
+                "unable to",
+            )
+        )
+        assert redirected or declined, (
+            "analysis agent neither redirected to the execution agent nor said "
+            f"it could not answer:\n{trace.answer}"
         )
 
     def test_execution_agent_quotes_the_units_it_was_given(
@@ -330,9 +347,15 @@ class TestNoInventedNumbersFromDatabaseResults:
         trace = _run(execution_agent, "what ecutwfc did my successful runs use?")
 
         if "ecutwfc" in trace.all_output:
-            assert "ev" not in trace.answer.lower().replace("level", ""), (
-                "answer labelled a cutoff in eV; query_run_context reports Ry:\n"
-                f"{trace.answer}"
+            # The original searched for the substring "ev", which appears in
+            # "however", "several", "every" and "relevant" -- so it failed on
+            # ordinary prose while saying nothing about units. What matters is
+            # a *number* labelled eV, which is what the unit regex already
+            # finds; a bare mention of electronvolts in passing is not the bug.
+            mislabelled = re.findall(r"\d+(?:\.\d+)?\s*(?:eV|meV)\b", trace.answer)
+            assert not mislabelled, (
+                f"answer labelled a cutoff in eV ({', '.join(mislabelled)}); "
+                f"query_run_context reports Ry:\n{trace.answer}"
             )
 
 

@@ -25,7 +25,13 @@ from __future__ import annotations
 import re
 from typing import Any
 
-__all__ = ["quantities_in", "tool_output_text", "ungrounded_quantities"]
+__all__ = [
+    "asserted_quantities",
+    "evidence_quantities",
+    "quantities_in",
+    "tool_output_text",
+    "ungrounded_quantities",
+]
 
 
 #: Units whose presence makes the preceding number a physics claim. ASCII
@@ -68,7 +74,20 @@ _PARAM_SENTENCE = re.compile(rf"(?:{_PARAMS})", re.IGNORECASE)
 _PERCENT = re.compile(rf"(?P<num>{_NUMBER})\s*(?:%|percent\b)")
 
 #: A unit written on its own, for removal before counting bare numbers.
-_UNIT_TOKEN = re.compile(rf"(?:{_UNITS})")
+#:
+#: Bounded on both sides, which it was not. Unbounded, ``K`` matched inside
+#: "Kelvin", ``A`` inside "Analysis" and ``eV`` inside "every" --- so this
+#: substitution was quietly cutting letters out of ordinary words before the
+#: text was scanned for numbers.
+_UNIT_TOKEN = re.compile(rf"\b(?:{_UNITS})\b")
+
+#: A parameter name followed closely by a number, for reading *evidence*.
+#:
+#: Prose separates a value from its name, which is why the answer side is
+#: scoped to the sentence. Structured tool output does the opposite: ``repr``
+#: of a dict keeps ``'ecutwfc': 60.0`` adjacent, so a short window is both
+#: sufficient and much tighter than "any digit in the blob".
+_PARAM_VALUE = re.compile(rf"(?:{_PARAMS})\D{{0,24}}?(?P<num>{_NUMBER})", re.IGNORECASE)
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n")
 
 
@@ -95,6 +114,40 @@ def _percentages_in(text: str) -> set[str]:
     return {_normalise(m.group("num")) for m in _PERCENT.finditer(text)}
 
 
+def asserted_quantities(text: str) -> set[str]:
+    """Numbers ``text`` states *as measurements*: with a unit, or as a percentage.
+
+    The strong half of :func:`quantities_in`. A number written "60 Ry" or
+    "40%" is a claim about physics however it got there, so it is held to a
+    stricter standard of evidence than a bare number that merely shares a
+    sentence with a parameter name.
+    """
+    return {_normalise(m.group("num")) for m in _WITH_UNIT.finditer(text)} | (
+        _percentages_in(text)
+    )
+
+
+def evidence_quantities(evidence: str) -> set[str]:
+    """Numbers the tool output actually presents as quantities.
+
+    The fix for the failure this whole check exists to catch. Grounding used to
+    accept a claim if its bare number appeared *anywhere* in the evidence, and
+    real tool output is dense with incidental integers --- pks, exit codes,
+    counts, ports, timestamps. So a fabricated "60 Ry" was certified the moment
+    some unrelated node happened to have pk 60, which is precisely the class of
+    invention the check was built to find (issue #81).
+
+    A number counts here when the evidence carries it with a unit, writes it as
+    a percentage, or puts it next to a parameter name --- ``'ecutwfc': 60.0``.
+    Adjacency is the right rule on this side and the wrong one on the answer
+    side, because structured output keeps a key beside its value and prose does
+    not.
+    """
+    return asserted_quantities(evidence) | {
+        _normalise(m.group("num")) for m in _PARAM_VALUE.finditer(evidence)
+    }
+
+
 def quantities_in(text: str) -> set[str]:
     """Physical quantities asserted in ``text``, as normalised numbers.
 
@@ -104,8 +157,7 @@ def quantities_in(text: str) -> set[str]:
     structures") do not: flagging those would bury the signal, and a warning
     nobody believes protects nothing.
     """
-    found = {_normalise(m.group("num")) for m in _WITH_UNIT.finditer(text)}
-    found |= _percentages_in(text)
+    found = asserted_quantities(text)
 
     for sentence in _SENTENCE_SPLIT.split(text):
         if not _PARAM_SENTENCE.search(sentence):
@@ -133,9 +185,28 @@ def ungrounded_quantities(answer: str, evidence: str, prompt: str = "") -> set[s
     Returns:
         Normalised numeric literals with no source. Empty means every physics
         number in the answer is traceable to a tool or to the question.
+
+    Two classes of claim, held to different standards, because one bar cannot
+    serve both without failing in one direction or the other (issue #81).
+
+    A number the answer writes **with a unit or as a percentage** is an
+    unambiguous measurement, and is grounded only if the evidence also presents
+    it as one. Accepting any matching digit is how "60 Ry" passed on the
+    strength of an unrelated pk.
+
+    A **bare number sharing a sentence with a parameter name** is a guess about
+    what the sentence means; the sentence scope is deliberately generous
+    because prose separates a value from its name. Holding those to the strict
+    bar would flag "I checked 3 relaxations and the cutoff was fine", and a
+    warning that fires on correct answers is one people learn to scroll past.
+    They stay grounded by any number the evidence contains.
     """
-    grounded = _numbers_in(evidence) | _numbers_in(prompt)
-    missing = quantities_in(answer) - grounded
+    strict = evidence_quantities(evidence) | evidence_quantities(prompt)
+    loose = _numbers_in(evidence) | _numbers_in(prompt)
+
+    asserted = asserted_quantities(answer)
+    missing = (asserted - strict) | ((quantities_in(answer) - asserted) - loose)
+    grounded = loose
 
     # A percentage is also grounded by its fraction. ``query_run_context``
     # reports ``success_rate`` as 0.67, and an answer saying "67% succeeded" is
