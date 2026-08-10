@@ -238,7 +238,50 @@ def execute_workflow_batch(
         )
         raise ValueError(msg)
 
-    from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
+    from aiida_agents.tools.execution.spec_execution import _validate_spec
+    from aiida_agents.tools.execution.submit import _prepare_submission, _run_submission
 
-    results = [execute_workflow_spec(spec) for spec in specs]
+    # Every spec is resolved and validated before any of them is submitted.
+    # The obvious loop --- `[execute_workflow_spec(spec) for spec in specs]` ---
+    # validated and submitted each in turn, so a bad spec at position N left
+    # 1..N-1 already on the daemon and then raised, returning no BatchResult at
+    # all. The user was told "all are approved together, or none are", approved
+    # twenty, and got fourteen plus a traceback naming none of them.
+    prepared = []
+    for position, spec in enumerate(specs, start=1):
+        workflow_type, inputs = _validate_spec(spec)
+        try:
+            process_class, resolved = _prepare_submission(workflow_type, inputs)
+        except Exception as exc:
+            # Name the position as well as the reason: the specs were built
+            # from a query, so "the ninth one" is how the user finds it.
+            msg = (
+                f"Spec {position} of {len(specs)} ({workflow_type}) is not "
+                f"submittable, so none of the batch was submitted: {exc}"
+            )
+            raise ValueError(msg) from exc
+        prepared.append((workflow_type, process_class, resolved))
+
+    results = []
+    for position, (workflow_type, process_class, resolved) in enumerate(
+        prepared, start=1
+    ):
+        try:
+            results.append(_run_submission(workflow_type, process_class, resolved))
+        except Exception as exc:
+            # Validation is all-or-nothing; submission cannot be. There is no
+            # transaction across the daemon, so if the engine fails partway the
+            # batch is genuinely split --- and the one thing that must not
+            # happen then is losing the record of what did go out. Raising here
+            # would discard the pks of everything already submitted, which is
+            # how a user ends up unable to tell what is running.
+            submitted = ", ".join(str(result.get("pk")) for result in results)
+            msg = (
+                f"Submitted {len(results)} of {len(specs)} before spec "
+                f"{position} ({workflow_type}) failed: {exc}. "
+                f"Already running: {submitted or 'none'}. "
+                "Do not resubmit those; check them with get_process_status."
+            )
+            raise RuntimeError(msg) from exc
+
     return BatchResult(requested=len(specs), submitted=len(results), results=results)

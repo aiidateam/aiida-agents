@@ -48,12 +48,41 @@ def execute_workflow_spec(
     """
     logger.debug("execute_workflow_spec(validated_spec=%r)", validated_spec)
 
-    if not isinstance(validated_spec, dict):
+    workflow_type, inputs = _validate_spec(validated_spec)
+
+    # Delegate to our secure engine submission function
+    logger.info("Delegating validated_spec (%s) to submit_workflow", workflow_type)
+    return submit_workflow(entry_point=workflow_type, inputs=inputs)
+
+
+def _validate_spec(spec: WorkflowSpec) -> tuple[str, dict[str, t.Any]]:
+    """Check a spec's shape and entry point, and return its two halves.
+
+    Separated from :func:`execute_workflow_spec` so a batch can validate every
+    spec *before* submitting any of them. Inlined, this check ran immediately
+    before the submission it guarded, which is fine for one spec and wrong for
+    twenty: the twentieth was checked after the nineteenth had already been
+    handed to the daemon.
+
+    Writes nothing and loads nothing but the entry point.
+
+    Args:
+        spec: A ``WorkflowSpec`` with ``workflow_type`` and ``inputs``.
+
+    Returns:
+        ``(workflow_type, inputs)``, ready for submission.
+
+    Raises:
+        TypeError: If ``spec`` is not a dictionary.
+        ValueError: If either key is missing, or the workflow is not a known
+            AiiDA entry point.
+    """
+    if not isinstance(spec, dict):
         msg = "validated_spec must be a dictionary."
         raise TypeError(msg)
 
-    workflow_type = validated_spec.get("workflow_type")
-    inputs = validated_spec.get("inputs")
+    workflow_type = spec.get("workflow_type")
+    inputs = spec.get("inputs")
 
     if not workflow_type or not isinstance(workflow_type, str):
         msg = "validated_spec is missing required 'workflow_type' string parameter."
@@ -63,22 +92,15 @@ def execute_workflow_spec(
         msg = "validated_spec is missing required 'inputs' dictionary."
         raise ValueError(msg)
 
-    found = False
     for group in ("aiida.workflows", "aiida.calculations"):
         try:
             load_entry_point(group, workflow_type)
-            found = True
-            break
+            return workflow_type, inputs
         except MissingEntryPointError:
             continue
         except Exception as exc:
             msg = f"Workflow {workflow_type!r} failed to load: {exc}"
             raise ValueError(msg) from exc
 
-    if not found:
-        msg = f"Workflow {workflow_type!r} is not a known AiiDA entry point."
-        raise ValueError(msg)
-
-    # Delegate to our secure engine submission function
-    logger.info("Delegating validated_spec (%s) to submit_workflow", workflow_type)
-    return submit_workflow(entry_point=workflow_type, inputs=inputs)
+    msg = f"Workflow {workflow_type!r} is not a known AiiDA entry point."
+    raise ValueError(msg)

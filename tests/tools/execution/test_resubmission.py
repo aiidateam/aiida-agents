@@ -158,10 +158,7 @@ class TestBatchContract:
 
     def test_the_cap_itself_is_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Off-by-one in the other direction: exactly MAX_BATCH is fine."""
-        monkeypatch.setattr(
-            "aiida_agents.tools.execution.spec_execution.execute_workflow_spec",
-            lambda spec: {"pk": 1},
-        )
+        _stub_submission(monkeypatch, pk=1)
 
         result = execute_workflow_batch([{"workflow_type": "x"}] * MAX_BATCH)
 
@@ -172,12 +169,134 @@ class TestBatchContract:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         """So a trimmed batch cannot read as one that ran whole."""
-        monkeypatch.setattr(
-            "aiida_agents.tools.execution.spec_execution.execute_workflow_spec",
-            lambda spec: {"pk": 7},
-        )
+        _stub_submission(monkeypatch, pk=7)
 
         result = execute_workflow_batch([{"workflow_type": "x"}] * 3)
 
         assert result["requested"] == 3
         assert [r["pk"] for r in result["results"]] == [7, 7, 7]
+
+
+def _stub_submission(
+    monkeypatch: pytest.MonkeyPatch,
+    pk: int = 1,
+    fail_prepare_at: int | None = None,
+    fail_run_at: int | None = None,
+    trace: list[str] | None = None,
+) -> None:
+    """Stub the three seams a batch passes through, optionally failing at one.
+
+    Deliberately stubs `_validate_spec`/`_prepare_submission`/`_run_submission`
+    rather than `execute_workflow_spec`. The old tests stubbed the latter,
+    which is exactly why the partial-submit bug survived them: with validation
+    and submission behind one stub, no test could tell whether the batch
+    validated everything before submitting anything.
+
+    `trace`, when given, records the order the seams were reached, so a test
+    can assert on the interleaving rather than only the outcome.
+    """
+    prepared = {"n": 0}
+    ran = {"n": 0}
+
+    def _validate(spec: object) -> tuple[str, dict[str, object]]:
+        return "x", {"a": 1}
+
+    def _prepare(entry_point: str, inputs: object) -> tuple[object, object]:
+        prepared["n"] += 1
+        if trace is not None:
+            trace.append(f"prepare {prepared['n']}")
+        if fail_prepare_at == prepared["n"]:
+            msg = "input port 'x' is required"
+            raise ValueError(msg)
+        return object(), {}
+
+    def _run(
+        entry_point: str, process_class: object, resolved: object
+    ) -> dict[str, int]:
+        ran["n"] += 1
+        if trace is not None:
+            trace.append(f"run {ran['n']}")
+        if fail_run_at == ran["n"]:
+            msg = "the daemon went away"
+            raise RuntimeError(msg)
+        return {"pk": pk}
+
+    monkeypatch.setattr(
+        "aiida_agents.tools.execution.spec_execution._validate_spec", _validate
+    )
+    monkeypatch.setattr(
+        "aiida_agents.tools.execution.submit._prepare_submission", _prepare
+    )
+    monkeypatch.setattr("aiida_agents.tools.execution.submit._run_submission", _run)
+
+
+class TestTheBatchIsAllOrNothing:
+    """The guarantee the docstring makes, which the code did not keep.
+
+    Issue #76. The implementation was
+    `[execute_workflow_spec(spec) for spec in specs]`, and that call validates
+    *and submits* each spec in turn. A bad spec at position N therefore left
+    1..N-1 already on the daemon and then raised, returning no BatchResult at
+    all -- so the user who approved twenty got fourteen running and a traceback
+    naming none of them.
+    """
+
+    def test_every_spec_is_validated_before_any_is_submitted(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The interleaving is the whole property, so assert on it directly."""
+        trace: list[str] = []
+        _stub_submission(monkeypatch, trace=trace)
+
+        execute_workflow_batch([{"workflow_type": "x"}] * 3)
+
+        assert trace == [
+            "prepare 1",
+            "prepare 2",
+            "prepare 3",
+            "run 1",
+            "run 2",
+            "run 3",
+        ]
+
+    def test_a_bad_spec_submits_nothing_at_all(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The regression. With the old code the first two were already gone."""
+        trace: list[str] = []
+        _stub_submission(monkeypatch, fail_prepare_at=3, trace=trace)
+
+        with pytest.raises(ValueError):
+            execute_workflow_batch([{"workflow_type": "x"}] * 5)
+
+        assert not [step for step in trace if step.startswith("run")]
+
+    def test_the_error_names_which_spec_and_says_nothing_ran(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The specs came from a query, so "the third one" is how it is found."""
+        _stub_submission(monkeypatch, fail_prepare_at=3)
+
+        with pytest.raises(ValueError, match="Spec 3 of 5") as exc_info:
+            execute_workflow_batch([{"workflow_type": "x"}] * 5)
+
+        assert "none of the batch was submitted" in str(exc_info.value)
+
+    def test_a_failure_while_submitting_reports_what_already_went_out(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Validation can be atomic; submission cannot.
+
+        There is no transaction across the daemon, so a batch really can split
+        here. The one thing that must not happen then is losing the pks of what
+        did go out -- a user who cannot tell what is running is the worst
+        outcome, worse than the split itself.
+        """
+        _stub_submission(monkeypatch, pk=42, fail_run_at=3)
+
+        with pytest.raises(RuntimeError, match="Submitted 2 of 4") as exc_info:
+            execute_workflow_batch([{"workflow_type": "x"}] * 4)
+
+        message = str(exc_info.value)
+        assert "42, 42" in message, "the pks already running must be recoverable"
+        assert "Do not resubmit" in message
