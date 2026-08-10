@@ -147,3 +147,85 @@ class TestReporting:
 
     def test_empty_code_is_not_a_violation(self) -> None:
         assert check_code("") == []
+
+
+class TestReachingAModuleThroughAnotherModule:
+    """The bypass found by dogfooding, and the family it belongs to.
+
+    Reported as issue #73. `import os` was refused while
+    `import aiida.common.folders; aiida.common.folders.os.system(...)` was not,
+    because the import check looked at the root module only and `os` here is
+    the real standard-library `os`.
+
+    It was never specific to `aiida`. Nearly every module imports `os` and
+    re-exports it as an attribute, so every entry in `ALLOWED_IMPORTS` was a
+    doorway: `numpy.os` and `json.codecs.sys` worked too. These cases are kept
+    verbatim so the hole cannot reopen quietly.
+    """
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pytest.param(
+                "import aiida.common.folders\naiida.common.folders.os.system('x')",
+                id="the-reported-bypass",
+            ),
+            pytest.param(
+                "from aiida.common import folders\nfolders.os.system('x')",
+                id="via-a-bound-submodule",
+            ),
+            pytest.param("import numpy\nnumpy.os.environ", id="via-numpy"),
+            pytest.param("import json\njson.codecs.sys.argv", id="two-hops-to-sys"),
+            pytest.param("import aiida\naiida.sys.modules['os']", id="sys-modules"),
+            pytest.param(
+                "import aiida\naiida.importlib.import_module('os')", id="importlib"
+            ),
+            pytest.param("import aiida\naiida.io.open('/etc/passwd')", id="io-open"),
+            pytest.param("import aiida\naiida.subprocess.run(['sh'])", id="subprocess"),
+        ],
+    )
+    def test_a_forbidden_module_cannot_be_reached_as_an_attribute(
+        self, code: str
+    ) -> None:
+        assert check_code(code), f"bypass still open: {code!r}"
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pytest.param("from aiida.common.folders import os", id="plain"),
+            pytest.param("from aiida.common.folders import os as o", id="aliased"),
+        ],
+    )
+    def test_a_forbidden_module_cannot_be_imported_out_of_an_allowed_one(
+        self, code: str
+    ) -> None:
+        """`from <allowed> import os` passed the module check, then `os` was a
+        plain local name that no later rule looked at."""
+        assert check_code(code)
+
+    def test_the_refusal_says_where_the_problem_is(self) -> None:
+        (rejection,) = check_code("import numpy\nnumpy.os.getcwd()")
+
+        assert "os" in rejection.reason
+        assert rejection.line == 2
+
+    @pytest.mark.parametrize(
+        "code",
+        [
+            pytest.param("node.uuid", id="uuid-is-also-a-stdlib-module"),
+            pytest.param("builder.code", id="code-is-also-a-stdlib-module"),
+            pytest.param("node.ctime, node.time", id="time-is-also-a-stdlib-module"),
+            pytest.param("import numpy\nnumpy.mean([1, 2])", id="ordinary-numpy"),
+            pytest.param("import json\njson.dumps({})", id="ordinary-json"),
+        ],
+    )
+    def test_ordinary_attributes_that_share_a_stdlib_name_still_pass(
+        self, code: str
+    ) -> None:
+        """Why this is a curated list and not `sys.stdlib_module_names`.
+
+        `uuid`, `code` and `time` are stdlib modules *and* everyday AiiDA
+        attributes. A blanket rule would refuse `node.uuid` and be switched off
+        within a day, which is worse than a narrower rule that survives.
+        """
+        assert check_code(code) == []

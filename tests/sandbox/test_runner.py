@@ -18,6 +18,7 @@ from aiida_agents.sandbox.runner import (
     MAX_TIMEOUT_SECONDS,
     SandboxResult,
     run_in_sandbox,
+    sandbox_env,
 )
 
 
@@ -72,13 +73,15 @@ class TestTimeout:
         import subprocess
 
         captured: dict[str, float] = {}
-        real_run = subprocess.run
+        real_communicate = subprocess.Popen.communicate
 
-        def _spy(*args: t.Any, **kwargs: t.Any) -> t.Any:
-            captured["timeout"] = float(kwargs["timeout"])
-            return real_run(*args, **kwargs)
+        def _spy(self: t.Any, *args: t.Any, **kwargs: t.Any) -> t.Any:
+            # The reap after a kill passes no timeout; only record the wait.
+            if "timeout" in kwargs:
+                captured["timeout"] = float(kwargs["timeout"])
+            return real_communicate(self, *args, **kwargs)
 
-        monkeypatch.setattr(subprocess, "run", _spy)
+        monkeypatch.setattr(subprocess.Popen, "communicate", _spy)
 
         run_in_sandbox("pass", timeout=10_000)
 
@@ -177,3 +180,60 @@ class TestProfileSelection:
         from aiida_agents.sandbox.runner import _script
 
         assert "load_profile()" not in _script("print(1)", profile=None)
+
+
+class TestTheSubprocessEnvironment:
+    """What generated code can read out of the environment it runs in.
+
+    Until issue #73 the subprocess inherited the parent's whole environment,
+    so a snippet that got past the guard could read every API key the user had
+    exported. The guard is a pre-check, not a boundary, so it must not be the
+    only thing standing between generated code and a credential.
+    """
+
+    def test_provider_credentials_are_not_passed_through(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for name in ("OPENAI_API_KEY", "ANTHROPIC_API_KEY", "OPENROUTER_API_KEY"):
+            monkeypatch.setenv(name, "sk-secret")
+
+        assert not [name for name in sandbox_env() if "API_KEY" in name]
+
+    def test_the_agents_own_settings_are_not_passed_through(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Generated code has no business reading how the agent is configured."""
+        monkeypatch.setenv("AIIDA_AGENTS_MODEL", "gpt-4o")
+
+        assert "AIIDA_AGENTS_MODEL" not in sandbox_env()
+
+    def test_an_unanticipated_variable_is_absent_rather_than_leaked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The reason this is an allowlist: a denylist only blocks what it knows."""
+        monkeypatch.setenv("SOME_NEW_VENDOR_TOKEN", "hunter2")
+
+        assert "SOME_NEW_VENDOR_TOKEN" not in sandbox_env()
+
+    def test_what_aiida_actually_needs_still_gets_through(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Scrubbing so hard that the profile cannot load helps nobody."""
+        monkeypatch.setenv("HOME", "/home/someone")
+        monkeypatch.setenv("AIIDA_PATH", "/home/someone/.aiida")
+        env = sandbox_env()
+
+        assert env["HOME"] == "/home/someone"
+        assert env["AIIDA_PATH"] == "/home/someone/.aiida"
+
+    def test_the_snippet_runs_under_the_scrubbed_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """End to end, not just the helper: the value must reach `Popen`."""
+        monkeypatch.setenv("A_SECRET_TOKEN", "hunter2")
+        # `os` is refused by the guard, so ask the interpreter another way.
+        result = run_in_sandbox(
+            "import json\nprint(json.dumps('A_SECRET_TOKEN' in __builtins__))"
+        )
+
+        assert "hunter2" not in result.stdout

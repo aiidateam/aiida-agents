@@ -68,6 +68,27 @@ def sandbox_profile_exists(profile: str) -> bool:
         return False
 
 
+def quote_identifier(name: str) -> str:
+    """A Postgres identifier, safe to drop into generated SQL.
+
+    Unquoted identifiers may only hold letters, digits and underscores, so a
+    perfectly ordinary profile name like ``gsoc-psql`` became a syntax error in
+    the middle of the SQL people were told to paste as a superuser. Postgres
+    quotes with doubled ``"``, and an embedded ``"`` is escaped by doubling it.
+
+    Quoting also makes the identifier case-sensitive, which is what the caller
+    meant: a role named ``Sandbox`` should be the role named ``Sandbox``.
+    """
+    escaped = name.replace('"', '""')
+    return f'"{escaped}"'
+
+
+def _quote_literal(value: str) -> str:
+    """A Postgres string literal. Single quotes are escaped by doubling."""
+    escaped = value.replace("'", "''")
+    return f"'{escaped}'"
+
+
 def readonly_role_sql(database: str, role: str, password: str) -> str:
     """SQL that creates a role able to read ``database`` and nothing more.
 
@@ -77,20 +98,26 @@ def readonly_role_sql(database: str, role: str, password: str) -> str:
     table the role can *write* --- cannot happen, because no INSERT, UPDATE or
     DELETE is ever granted.
 
+    Every identifier is quoted and the password is emitted as a proper literal.
+    None of these values is attacker-supplied --- the database name comes from
+    the user's own profile --- but this SQL is handed to somebody to run **as a
+    superuser**, which is the last place to be relaxed about quoting.
+
     Args:
         database: The database the sandbox profile will read.
         role: Name for the new Postgres role.
         password: Password for it. Ends up in the profile's storage config, so
             it protects the role rather than the data.
     """
+    quoted_role = quote_identifier(role)
     return "\n".join(
         [
-            f"CREATE ROLE {role} LOGIN PASSWORD '{password}';",
-            f"GRANT CONNECT ON DATABASE {database} TO {role};",
-            f"GRANT USAGE ON SCHEMA public TO {role};",
-            f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {role};",
+            f"CREATE ROLE {quoted_role} LOGIN PASSWORD {_quote_literal(password)};",
+            f"GRANT CONNECT ON DATABASE {quote_identifier(database)} TO {quoted_role};",
+            f"GRANT USAGE ON SCHEMA public TO {quoted_role};",
+            f"GRANT SELECT ON ALL TABLES IN SCHEMA public TO {quoted_role};",
             "ALTER DEFAULT PRIVILEGES IN SCHEMA public "
-            f"GRANT SELECT ON TABLES TO {role};",
+            f"GRANT SELECT ON TABLES TO {quoted_role};",
         ]
     )
 

@@ -4,13 +4,26 @@ The first line of defence for executing model-written Python, and the cheapest:
 a static pass over the AST that rejects whole categories of code outright. It
 runs before a subprocess is spawned, so a rejection costs nothing.
 
-**This is not a sandbox and must not be described as one.** Python cannot be
-contained in-process, and a determined generation can defeat any pattern match.
-Containment is the read-only database role the code runs under and the
-subprocess it runs in (see :mod:`aiida_agents.sandbox.runner`); this layer
-exists to turn the obvious mistakes into a clear message instead of a Postgres
-permission error, and to keep the blast radius small enough that the other two
-layers are not the only thing standing between a model and someone's data.
+**This is a pre-check, never the boundary.** Python cannot be contained
+in-process, and a determined generation can defeat any pattern match. The point
+of this layer is to turn the obvious mistakes into a clear message instead of a
+Postgres permission error; the containment is what the code runs *under*, in
+:mod:`aiida_agents.sandbox.runner`.
+
+That distinction was not academic. Dogfooding turned up a one-line bypass
+(`#73 <https://github.com/aiidateam/aiida-agents/issues/73>`_)::
+
+    import aiida.common.folders
+    aiida.common.folders.os.system("...")
+
+``aiida`` is an allowed import, and the check was on the root module only, so
+this passed --- and ``os`` here is the real standard-library ``os``. It was not
+specific to ``aiida`` either: ``numpy.os`` and ``json.codecs.sys`` were
+reachable the same way, because nearly every module imports ``os`` and
+re-exports it as an attribute. :data:`FORBIDDEN_MODULE_ATTRIBUTES` closes the
+route by naming the destinations rather than the routes, but the lesson is the
+one above: assume this layer is porous and put nothing behind it that the layers
+below do not also refuse.
 
 The rules are deliberately narrow and deliberately dumb. Anything cleverer
 would be a static analyser we would then have to trust, and the value here is
@@ -91,6 +104,62 @@ FORBIDDEN_NAMES = frozenset(
     }
 )
 
+#: Modules that must not be reached **as an attribute of something else**, and
+#: must not be pulled out of an allowed package by ``from ... import``.
+#:
+#: Refusing ``import os`` while allowing ``import aiida.common.folders`` then
+#: ``aiida.common.folders.os.system(...)`` is not a policy, it is a formality:
+#: a module that imports ``os`` re-exports it as an attribute, and almost every
+#: module imports ``os``. The same held for every entry in
+#: :data:`ALLOWED_IMPORTS`, not only ``aiida`` --- ``numpy.os`` and
+#: ``json.codecs.sys`` were both reachable.
+#:
+#: These are the *terminal* names, not every module that contains one. Reaching
+#: ``os.system`` means writing ``os`` somewhere; reading ``sys.modules['os']``
+#: means writing ``sys``. Blocking the destinations covers every route to them
+#: without trying to enumerate the routes.
+#:
+#: Deliberately not the whole of ``sys.stdlib_module_names``: ``uuid``, ``code``
+#: and ``time`` are all stdlib modules *and* ordinary AiiDA attributes, so a
+#: blanket rule would refuse ``node.uuid`` and be abandoned within a day.
+FORBIDDEN_MODULE_ATTRIBUTES = frozenset(
+    {
+        "atexit",
+        "builtins",
+        "ctypes",
+        "fcntl",
+        "fileinput",
+        "ftplib",
+        "gc",
+        "glob",
+        "http",
+        "importlib",
+        "inspect",
+        "io",
+        "marshal",
+        "mmap",
+        "multiprocessing",
+        "nt",
+        "os",
+        "pathlib",
+        "pickle",
+        "posix",
+        "pty",
+        "requests",
+        "resource",
+        "runpy",
+        "shutil",
+        "site",
+        "socket",
+        "subprocess",
+        "sys",
+        "sysconfig",
+        "tempfile",
+        "urllib",
+        "webbrowser",
+    }
+)
+
 
 @dataclass(frozen=True)
 class Rejection:
@@ -130,11 +199,26 @@ class _Inspector(ast.NodeVisitor):
         module = node.module or ""
         if _root_module(module) not in ALLOWED_IMPORTS:
             self._reject(node, f"importing from {module!r} is not allowed here")
+        # The names matter as much as the module. ``from aiida.common.folders
+        # import os`` passes the module check --- the root is ``aiida`` --- and
+        # then ``os`` is a plain local name that no later rule looks at.
+        for alias in node.names:
+            if alias.name in FORBIDDEN_MODULE_ATTRIBUTES:
+                self._reject(
+                    node,
+                    f"importing {alias.name!r} is not allowed here, "
+                    f"whichever module it is taken from",
+                )
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
         if node.attr in FORBIDDEN_ATTRIBUTES:
             self._reject(node, f"{node.attr}() would modify the database")
+        elif node.attr in FORBIDDEN_MODULE_ATTRIBUTES:
+            self._reject(
+                node,
+                f"reaching {node.attr!r} through another module is not allowed here",
+            )
         elif node.attr.startswith("__"):
             # ``obj.__class__.__subclasses__()`` is the standard way out of a
             # restricted namespace. Generated code has no business here.
