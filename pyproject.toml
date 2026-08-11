@@ -154,8 +154,13 @@ vasp = [
 # refuses two different URLs for one package. An override resolves the whole
 # graph through the pinned tag, so our pin wins over a transitive dependency's
 # looser one rather than deadlocking against it.
+# Both spellings: an override replaces *every* requirement for the package, so
+# listing only the bare one silently dropped the `[docs]` extra that
+# `aiida-agents[docs]` asks for -- taking sphinx and 50 other packages out of
+# the lockfile, and `rag build` with them.
 override-dependencies = [
   "aiida-core @ git+https://github.com/aiidateam/aiida-core.git@c91007e254a5fa8235398d33675e58c2ff2d9088",
+  "aiida-core[docs] @ git+https://github.com/aiidateam/aiida-core.git@c91007e254a5fa8235398d33675e58c2ff2d9088",
 ]
 
 [tool.uv.sources]
