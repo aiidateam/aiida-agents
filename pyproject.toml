@@ -21,17 +21,11 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    # Pinned to a commit, not the default branch. Tracking the branch broke
-    # every build the day aiida-core bumped it to 3.0.dev: `aiida-pseudo~=1.8`
-    # caps at `aiida-core<3.dev0`, so the two became unresolvable and CI went
-    # red on main and on every open PR at once, with no change on our side.
-    #
-    # This is the commit (2.8.0.post0) the lockfile had already resolved and
-    # everything here was built and tested against, so pinning it changes
-    # nothing except who decides when we move. Note it is *not* the `v2.8.0`
-    # tag: `verdi profile setup` gained `--broker` between the two, and
-    # `sandbox init` generates a command that uses it.
-    "aiida-core @ git+https://github.com/aiidateam/aiida-core.git@c91007e254a5fa8235398d33675e58c2ff2d9088",
+    # A released version, not a git branch. Tracking the branch broke every
+    # build the day aiida-core bumped it to 3.0.dev: `aiida-pseudo~=1.8` caps
+    # at `aiida-core<3.dev0`, so the two became unresolvable and CI went red on
+    # main and on every open PR at once, with no change on our side.
+    "aiida-core~=2.9",
     "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
     # Reached only through rich_click (which itself requires click>=8); no
     # speculative upper bound. Reproducibility comes from uv.lock, and a ceiling
@@ -154,13 +148,17 @@ vasp = [
 # refuses two different URLs for one package. An override resolves the whole
 # graph through the pinned tag, so our pin wins over a transitive dependency's
 # looser one rather than deadlocking against it.
+# `aiida-restapi` still requires aiida-core from its default branch, which is
+# now 3.0.dev, so without this the resolution fails exactly as it did before the
+# pin -- releasing 2.9 fixed aiida-core's half of the problem, not this half.
+#
 # Both spellings: an override replaces *every* requirement for the package, so
 # listing only the bare one silently dropped the `[docs]` extra that
 # `aiida-agents[docs]` asks for -- taking sphinx and 50 other packages out of
 # the lockfile, and `rag build` with them.
 override-dependencies = [
-  "aiida-core @ git+https://github.com/aiidateam/aiida-core.git@c91007e254a5fa8235398d33675e58c2ff2d9088",
-  "aiida-core[docs] @ git+https://github.com/aiidateam/aiida-core.git@c91007e254a5fa8235398d33675e58c2ff2d9088",
+  "aiida-core==2.9.0",
+  "aiida-core[docs]==2.9.0",
 ]
 
 [tool.uv.sources]
