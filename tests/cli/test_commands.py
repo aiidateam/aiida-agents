@@ -501,3 +501,100 @@ class TestSandboxCommands:
 
         assert result.exit_code == 0
         assert "nothing to tear down" in result.output
+
+
+class TestRootOptionsWorkOnEitherSideOfTheCommand:
+    """Issue #79: `--agent` was position-sensitive, and said so badly.
+
+    Click binds a flag to the group or the command by position, so `--agent`,
+    declared on the root group, stopped being recognised the moment a
+    subcommand name was read. `aiida-agents ask -a codegen ...` --- the
+    spelling every other CLI a researcher uses would accept --- failed with a
+    bare "No such option: -a", which names the option without saying that it
+    exists, where it goes, or that moving it two words left would fix it.
+    """
+
+    @staticmethod
+    def _agent_type(monkeypatch: pytest.MonkeyPatch, argv: list[str]) -> str | None:
+        """The specialist `ask` resolved to, without running anything."""
+        from aiida_agents.cli import commands as commands_module
+
+        seen: dict[str, str] = {}
+
+        def _capture(agent_type: str, question: str, settings: object) -> list[object]:
+            seen["agent"] = agent_type
+            raise SystemExit(0)
+
+        monkeypatch.setattr(commands_module, "_resolve_plan", _capture)
+        CliRunner().invoke(cli, argv)
+        return seen.get("agent")
+
+    @pytest.mark.parametrize(
+        "argv",
+        [
+            pytest.param(["-a", "codegen", "ask", "q"], id="before-the-command"),
+            pytest.param(["ask", "-a", "codegen", "q"], id="after-the-command"),
+        ],
+    )
+    def test_the_agent_can_be_named_in_either_position(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> None:
+        assert self._agent_type(monkeypatch, argv) == "codegen"
+
+    def test_the_more_specific_position_wins(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Given both, the one nearer the command is the one meant."""
+        argv = ["-a", "analysis", "ask", "-a", "codegen", "q"]
+
+        assert self._agent_type(monkeypatch, argv) == "codegen"
+
+    def test_the_duplicate_option_does_not_clobber_the_root_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The failure mode this design has to avoid.
+
+        If the subcommand's copy carried a default, that default would silently
+        beat an explicit `-a codegen` written before the command. It carries
+        none, so "not given" stays distinguishable from "given the default".
+        """
+        argv = ["-a", "codegen", "ask", "q"]
+
+        assert self._agent_type(monkeypatch, argv) == "codegen"
+
+    def test_naming_neither_still_routes_automatically(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        assert self._agent_type(monkeypatch, ["ask", "q"]) == "auto"
+
+    @pytest.mark.parametrize("flag", ["--provider", "--model", "--profile", "--agent"])
+    def test_every_root_option_is_accepted_after_the_command(self, flag: str) -> None:
+        """Not just `-a`.
+
+        All four root options had the same trap; the issue names `--agent` only
+        because that is the one being used at the time. Fixing one would leave
+        it set for whoever reaches for `--model` next.
+        """
+        result = CliRunner().invoke(cli, ["ask", "--help"])
+
+        assert flag in result.output
+
+    def test_a_misplaced_option_elsewhere_says_where_it_goes(self) -> None:
+        """`--agent` on `rag` is still an error --- but a useful one.
+
+        Accepting it there would be pretending it does something. The parse
+        still fails; what changed is that the message names the option and
+        shows the working spelling.
+        """
+        result = CliRunner().invoke(cli, ["rag", "status", "-a", "codegen"])
+
+        assert result.exit_code != 0
+        assert "goes before the command" in result.output
+        assert "No such option" not in result.output
+
+    def test_an_option_that_really_does_not_exist_is_unaffected(self) -> None:
+        """The rewrite is scoped to root options, not to every parse failure."""
+        result = CliRunner().invoke(cli, ["rag", "status", "--not-an-option"])
+
+        assert result.exit_code != 0
+        assert "goes before the command" not in result.output

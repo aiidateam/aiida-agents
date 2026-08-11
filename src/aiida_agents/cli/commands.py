@@ -20,6 +20,7 @@ from aiida_agents._logging import _configure_logging
 from aiida_agents.agents.handoff import node_references_from_messages
 from aiida_agents._settings import _PROVIDER_CHOICES, LoggingSettings
 from aiida_agents.cli._guards import _needs_recognized_settings
+from aiida_agents.cli._position import PositionAwareGroup, accepts_root_options
 from aiida_agents.cli.config import config
 from aiida_agents.cli.doctor import doctor
 from aiida_agents.cli.mcp import mcp
@@ -52,7 +53,11 @@ from aiida_agents.cli.agent import (
 _CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
 
 
-@click.group(invoke_without_command=True, context_settings=_CONTEXT_SETTINGS)
+@click.group(
+    cls=PositionAwareGroup,
+    invoke_without_command=True,
+    context_settings=_CONTEXT_SETTINGS,
+)
 @click.version_option(package_name="aiida-agents", message="%(prog)s %(version)s")
 @click.option(
     "--provider",
@@ -104,6 +109,7 @@ def cli(
 
 
 @cli.command()
+@accepts_root_options
 @click.pass_context
 @_needs_recognized_settings
 def chat(ctx: click.Context) -> None:
@@ -129,6 +135,7 @@ def chat(ctx: click.Context) -> None:
     is_flag=True,
     help="Print the raw Markdown reply instead of rendering it (for piping/copy).",
 )
+@accepts_root_options
 @click.pass_context
 @_needs_recognized_settings
 def ask_cmd(ctx: click.Context, question: str, raw: bool) -> None:
