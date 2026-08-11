@@ -21,17 +21,21 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    # Pinned to a commit, not the default branch. Tracking the branch broke
-    # every build the day aiida-core bumped it to 3.0.dev: `aiida-pseudo~=1.8`
-    # caps at `aiida-core<3.dev0`, so the two became unresolvable and CI went
-    # red on main and on every open PR at once, with no change on our side.
+    # Floored at a PyPI release now that 2.9.0 is out, with reproducibility
+    # coming from uv.lock (the same approach as `click` below). This replaces
+    # the earlier pin to commit c91007e: tracking aiida-core's default branch
+    # had broken every build the day it bumped to 3.0.dev (`aiida-pseudo~=1.8`
+    # caps at `aiida-core<3.dev0`, so the two became unresolvable), and a fixed
+    # commit was the stopgap until a release we could floor against existed.
     #
-    # This is the commit (2.8.0.post0) the lockfile had already resolved and
-    # everything here was built and tested against, so pinning it changes
-    # nothing except who decides when we move. Note it is *not* the `v2.8.0`
-    # tag: `verdi profile setup` gained `--broker` between the two, and
-    # `sandbox init` generates a command that uses it.
-    "aiida-core @ git+https://github.com/aiidateam/aiida-core.git@c91007e254a5fa8235398d33675e58c2ff2d9088",
+    # 2.9 rather than 2.8: `verdi profile setup` gained `--broker` after the
+    # v2.8.0 tag, and `sandbox init` generates a command that uses it, so the
+    # floor has to be the release that carries it. Capped below 3.0 (`~=2.9`):
+    # aiida-core's 3.0 line is the known breaker (`aiida-pseudo~=1.8` refuses
+    # `aiida-core>=3.dev0`), and that cap lives only in the `tests` extra, so an
+    # unbounded floor could pull a 3.0 into the base install that CI never
+    # exercises. Within 2.x, uv.lock still pins the exact version.
+    "aiida-core~=2.9",
     "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
     # Reached only through rich_click (which itself requires click>=8); no
     # speculative upper bound. Reproducibility comes from uv.lock, and a ceiling
@@ -150,17 +154,18 @@ vasp = [
 ]
 
 [tool.uv]
-# `aiida-restapi` also requires `aiida-core` from its default branch, and uv
-# refuses two different URLs for one package. An override resolves the whole
-# graph through the pinned tag, so our pin wins over a transitive dependency's
-# looser one rather than deadlocking against it.
-# Both spellings: an override replaces *every* requirement for the package, so
+# `aiida-restapi` still requires `aiida-core` from a git URL (its `@deps`
+# fork), and a bare `aiida-core~=2.9` in our own dependencies would lose to
+# that URL: uv prefers a URL requirement over a version one. The override
+# replaces *every* requirement for the package with our own spec, so aiida-core
+# resolves from PyPI rather than through the fork's branch.
+# Both spellings: an override replaces every requirement for the package, so
 # listing only the bare one silently dropped the `[docs]` extra that
-# `aiida-agents[docs]` asks for -- taking sphinx and 50 other packages out of
-# the lockfile, and `rag build` with them.
+# `aiida-agents[rag-build]` asks for -- taking sphinx and 50 other packages out
+# of the lockfile, and `rag build` with them.
 override-dependencies = [
-  "aiida-core @ git+https://github.com/aiidateam/aiida-core.git@c91007e254a5fa8235398d33675e58c2ff2d9088",
-  "aiida-core[docs] @ git+https://github.com/aiidateam/aiida-core.git@c91007e254a5fa8235398d33675e58c2ff2d9088",
+  "aiida-core~=2.9",
+  "aiida-core[docs]~=2.9",
 ]
 
 [tool.uv.sources]

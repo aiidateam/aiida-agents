@@ -16,8 +16,8 @@ resolution-markers = [
 
 [manifest]
 overrides = [
-    { name = "aiida-core", git = "https://github.com/aiidateam/aiida-core.git?rev=c91007e254a5fa8235398d33675e58c2ff2d9088" },
-    { name = "aiida-core", extras = ["docs"], git = "https://github.com/aiidateam/aiida-core.git?rev=c91007e254a5fa8235398d33675e58c2ff2d9088" },
+    { name = "aiida-core", specifier = "~=2.9" },
+    { name = "aiida-core", extras = ["docs"], specifier = "~=2.9" },
 ]
 
 [[package]]
@@ -104,7 +104,7 @@ vasp = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aiida-core", git = "https://github.com/aiidateam/aiida-core.git?rev=c91007e254a5fa8235398d33675e58c2ff2d9088" },
+    { name = "aiida-core", specifier = "~=2.9" },
     { name = "aiida-core", extras = ["docs"], marker = "extra == 'rag-build'" },
     { name = "aiida-pseudo", marker = "extra == 'tests'", specifier = "~=1.8" },
     { name = "aiida-restapi", git = "https://github.com/edan-bainglass/aiida-restapi?rev=deps" },
@@ -155,8 +155,8 @@ vasp = [
 
 [[package]]
 name = "aiida-core"
-version = "2.8.0.post0"
-source = { git = "https://github.com/aiidateam/aiida-core.git?rev=c91007e254a5fa8235398d33675e58c2ff2d9088#c91007e254a5fa8235398d33675e58c2ff2d9088" }
+version = "2.9.0"
+source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "alembic" },
     { name = "archive-path" },
@@ -168,6 +168,7 @@ dependencies = [
     { name = "disk-objectstore" },
     { name = "docstring-parser" },
     { name = "graphviz" },
+    { name = "importlib-metadata" },
     { name = "ipython", version = "8.39.0", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "ipython", version = "9.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "jedi" },
@@ -190,6 +191,10 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "upf-to-json" },
     { name = "wrapt" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/0b/b9/5d81ce7308c582972ca2b7b27135157e31f098192f6542c1ce508ccf60eb/aiida_core-2.9.0.tar.gz", hash = "sha256:303ec8711dd0b2b26f188fa95f2db8617df5c0bac8ad23385fb58e5d9aa6ba62", size = 1212985, upload-time = "2026-08-06T14:14:33.951Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/32/88/2f32058099dcc2abf788171527461d5373ef17c723a420f2eab7497fe42c/aiida_core-2.9.0-py3-none-any.whl", hash = "sha256:a0bea38bacb1284eb0417fe5a4118305d75d049651da37fc4b4ffd2fe53d40d8", size = 1498390, upload-time = "2026-08-06T14:14:31.789Z" },
 ]
 
 [package.optional-dependencies]
