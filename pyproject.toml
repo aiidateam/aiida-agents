@@ -21,7 +21,17 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
 ]
 dependencies = [
-    "aiida-core @ git+https://github.com/aiidateam/aiida-core.git",
+    # Pinned to a commit, not the default branch. Tracking the branch broke
+    # every build the day aiida-core bumped it to 3.0.dev: `aiida-pseudo~=1.8`
+    # caps at `aiida-core<3.dev0`, so the two became unresolvable and CI went
+    # red on main and on every open PR at once, with no change on our side.
+    #
+    # This is the commit (2.8.0.post0) the lockfile had already resolved and
+    # everything here was built and tested against, so pinning it changes
+    # nothing except who decides when we move. Note it is *not* the `v2.8.0`
+    # tag: `verdi profile setup` gained `--broker` between the two, and
+    # `sandbox init` generates a command that uses it.
+    "aiida-core @ git+https://github.com/aiidateam/aiida-core.git@c91007e254a5fa8235398d33675e58c2ff2d9088",
     "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
     # Reached only through rich_click (which itself requires click>=8); no
     # speculative upper bound. Reproducibility comes from uv.lock, and a ceiling
@@ -137,6 +147,15 @@ qe = [
 vasp = [
   "aiida-vasp~=5.1",
   "vasp-rag-stub",
+]
+
+[tool.uv]
+# `aiida-restapi` also requires `aiida-core` from its default branch, and uv
+# refuses two different URLs for one package. An override resolves the whole
+# graph through the pinned tag, so our pin wins over a transitive dependency's
+# looser one rather than deadlocking against it.
+override-dependencies = [
+  "aiida-core @ git+https://github.com/aiidateam/aiida-core.git@c91007e254a5fa8235398d33675e58c2ff2d9088",
 ]
 
 [tool.uv.sources]
