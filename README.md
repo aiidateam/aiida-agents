@@ -81,7 +81,9 @@ aiida-agents chat          # interactive, and the only mode that can approve a w
 
 `ask` is one-shot and cannot approve anything, so a request that wants to submit will tell you to use `chat`.
 
-Other commands: `check` (provider reachability), `config` (effective settings), `rag search`, `mcp` (serve the read-only tools over the Model Context Protocol).
+Other commands: `config` (effective settings), `rag search`, `sandbox` (the read-only profile generated code runs against), `mcp` (serve the read-only tools over the Model Context Protocol).
+
+`doctor` is the one diagnostic: `--only model` narrows it to a quick provider-reachability probe, and `--warm` additionally loads a local model so the first query is not a cold start.
 
 ## Where to look
 

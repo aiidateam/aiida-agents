@@ -21,7 +21,7 @@ ______________________________________________________________________
 ```bash
 aiida-agents doctor          # profile, model reachability, RAG index, docs toolchain
 aiida-agents config show     # every setting, its env var, and where the value came from
-aiida-agents check           # provider reachability, without loading the model
+aiida-agents doctor --only model   # provider reachability, without loading the model
 aiida-agents --help
 ```
 

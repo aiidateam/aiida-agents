@@ -254,7 +254,9 @@ def test_doctor_exit_code_reflects_health(
     monkeypatch.setattr(
         doctor,
         "_run_diagnostics",
-        lambda settings, profile: [_DiagnosticRow(*row) for row in rows],
+        lambda settings, profile, only=(), warm=False: [
+            _DiagnosticRow(*row) for row in rows
+        ],
     )
     result = CliRunner().invoke(cli, ["doctor"])
 
@@ -281,3 +283,136 @@ def test_a_sandbox_sharing_storage_fails_the_check(
 
     assert row.ok is False
     assert "real" in row.detail
+
+
+class TestOnlyNarrowsTheSweep:
+    """`--only` is what makes one command able to replace three (issue #75).
+
+    `check` was a strict subset of `doctor` and `warm` was its model row with a
+    generation instead of a listing, so both became flags. The point of the
+    flag is that it runs *less*, which is the thing worth pinning: a `--only`
+    that quietly ran everything would look identical until someone timed it.
+    """
+
+    def test_naming_one_check_runs_only_that_one(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from aiida_agents.cli.doctor import _run_diagnostics
+
+        _patch_all_checks_passing(monkeypatch)
+        settings = ModelSettings(provider="ollama", model="m")
+
+        rows = _run_diagnostics(settings, None, only=("model",))
+
+        assert [row.label for row in rows] == ["Model reachable (ollama:m)"]
+
+    def test_naming_several_runs_exactly_those(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from aiida_agents.cli.doctor import _run_diagnostics
+
+        _patch_all_checks_passing(monkeypatch)
+        settings = ModelSettings(provider="ollama", model="m")
+
+        rows = _run_diagnostics(settings, None, only=("docs", "profile"))
+
+        # Report order, not the order they were asked for: a diagnostic table
+        # that reshuffles itself per invocation is harder to read across runs.
+        assert [row.label for row in rows] == [
+            "AiiDA profile loads",
+            "Docs toolchain (sphinx)",
+        ]
+
+    def test_naming_none_runs_everything(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """The default stays the full picture.
+
+        This is the command you reach for when something is already wrong, so
+        narrowing is the opt-in and the sweep is the default.
+        """
+        from aiida_agents.cli.doctor import _CHECKS, _run_diagnostics
+
+        _patch_all_checks_passing(monkeypatch)
+        settings = ModelSettings(provider="ollama", model="m")
+
+        assert len(_run_diagnostics(settings, None)) == len(_CHECKS)
+
+    def test_every_name_offered_selects_a_check(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`--only` cannot advertise a name that runs nothing."""
+        from aiida_agents.cli.doctor import _CHECKS, _run_diagnostics
+
+        _patch_all_checks_passing(monkeypatch)
+        settings = ModelSettings(provider="ollama", model="m")
+
+        for name in _CHECKS:
+            assert len(_run_diagnostics(settings, None, only=(name,))) == 1
+
+    def test_an_unknown_name_is_a_usage_error(self) -> None:
+        result = CliRunner().invoke(cli, ["doctor", "--only", "nonsense"])
+
+        assert result.exit_code == 2
+        assert "nonsense" in result.output
+
+    def test_the_default_sweep_never_generates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Warming is opt-in: it costs a round-trip, and on a cloud model a token."""
+        from aiida_agents.cli import agent as agent_module
+        from aiida_agents.cli.doctor import _run_diagnostics
+
+        _patch_all_checks_passing(monkeypatch)
+        generated: list[str] = []
+        monkeypatch.setattr(
+            agent_module, "_probe_model", lambda settings: generated.append("gen")
+        )
+        settings = ModelSettings(provider="ollama", model="m")
+
+        _run_diagnostics(settings, None)
+
+        assert generated == []
+
+    def test_warm_generates_and_says_so(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from aiida_agents.cli import agent as agent_module
+        from aiida_agents.cli.doctor import _run_diagnostics
+
+        _patch_all_checks_passing(monkeypatch)
+        generated: list[str] = []
+        monkeypatch.setattr(
+            agent_module, "_probe_model", lambda settings: generated.append("gen")
+        )
+        settings = ModelSettings(provider="ollama", model="m")
+
+        (row,) = _run_diagnostics(settings, None, only=("model",), warm=True)
+
+        assert generated == ["gen"]
+        assert "warmed" in row.detail
+
+    def test_warm_does_not_generate_against_an_unpulled_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The listing is checked first, so the row says "not pulled".
+
+        Generating against a model Ollama does not have would fail with
+        whatever that raises, burying the one fact the user needs.
+        """
+        from aiida_agents.cli import agent as agent_module
+        from aiida_agents.cli.agent import _Reachability
+        from aiida_agents.cli.doctor import _run_diagnostics
+
+        _patch_all_checks_passing(monkeypatch)
+        monkeypatch.setattr(
+            agent_module,
+            "_probe_reachable",
+            lambda settings: _Reachability("http://endpoint", 3, model_ok=False),
+        )
+        generated: list[str] = []
+        monkeypatch.setattr(
+            agent_module, "_probe_model", lambda settings: generated.append("gen")
+        )
+        settings = ModelSettings(provider="ollama", model="m")
+
+        (row,) = _run_diagnostics(settings, None, only=("model",), warm=True)
+
+        assert generated == []
+        assert "not pulled" in row.detail

@@ -2,13 +2,24 @@
 
 Each subsystem (AiiDA profile, model reachability, RAG index, codegen sandbox,
 docs toolchain) is probed in its own ``try`` so one failure never aborts the
-rest of the report. Only ``doctor`` runs these checks (``check``/``warm`` probe the model
-through ``agent.py``), so the command lives here with its logic rather than in
-``commands.py``.
+rest of the report.
+
+This is the *only* diagnostic command. There were three, and telling them apart
+was a puzzle nobody should have to solve: ``check`` probed config and model
+reachability, ``doctor`` did that plus everything else, and ``warm`` was the
+same model probe with a real generation instead of a listing. So ``check`` was
+a strict subset of ``doctor``, and ``warm`` differed from its model row by one
+boolean (issue #75).
+
+They are now flags on the sweep. ``--only model`` is what ``check`` did,
+``--only model --warm`` is what ``warm`` did, and plain ``doctor`` is still
+everything --- the default stays the full picture, because this is the command
+you reach for when something is already wrong.
 """
 
 from __future__ import annotations
 
+import time
 from typing import NamedTuple
 
 import rich_click as click
@@ -17,8 +28,8 @@ from typing_extensions import assert_never
 
 from aiida_agents._settings import ModelSettings
 from aiida_agents.cli._guards import _needs_recognized_settings
-from aiida_agents.cli.agent import _resolve_settings_or_fail
-from aiida_agents.cli.output import console
+from aiida_agents.cli.agent import _resolve_settings_or_fail, probe_failure_reason
+from aiida_agents.cli.output import _format_duration, console
 from aiida_agents.cli.rag import _module_missing
 
 
@@ -55,20 +66,36 @@ def _check_profile(profile: str | None) -> _DiagnosticRow:
         return _DiagnosticRow(label, False, _short_reason(exc))
 
 
-def _check_model(settings: ModelSettings) -> _DiagnosticRow:
-    """Whether the configured model is reachable and advertised (no generation).
+def _check_model(settings: ModelSettings, warm: bool = False) -> _DiagnosticRow:
+    """Whether the configured model is reachable and advertised.
 
-    Uses the no-generation reachability probe, so ``doctor`` never warms the
-    model. An unadvertised model is fatal for Ollama (its listing is
-    authoritative) but only a note for a cloud endpoint (its listing may be
-    partial).
+    Reachability is probed without generating, so the default sweep stays cheap.
+    An unadvertised model is fatal for Ollama (its listing is authoritative) but
+    only a note for a cloud endpoint (its listing may be partial).
+
+    ``warm`` additionally fires one tiny generation. That is a different
+    question --- "can it answer" rather than "is it there" --- and for a local
+    model it has the side effect of loading it into memory, so the first real
+    query is not a cold start. It is opt-in because it costs a round-trip, and
+    on a cloud model, a token.
     """
-    from aiida_agents.cli.agent import _model_availability, _probe_reachable
+    from aiida_agents.cli.agent import (
+        _model_availability,
+        _probe_model,
+        _probe_reachable,
+    )
 
     label = f"Model reachable ({settings.provider}:{settings.model})"
     try:
         reach = _probe_reachable(settings)
         availability = _model_availability(reach, settings.provider)
+        if warm and availability != "not_pulled":
+            # After the listing probe, so an unpulled Ollama model is reported
+            # as unpulled rather than as whatever generating against it raises.
+            started = time.monotonic()
+            _probe_model(settings)
+            elapsed = _format_duration(time.monotonic() - started)
+            return _DiagnosticRow(label, True, f"{reach.endpoint}; warmed in {elapsed}")
         if availability == "available":
             return _DiagnosticRow(label, True, reach.endpoint)
         if availability == "not_pulled":
@@ -81,7 +108,11 @@ def _check_model(settings: ModelSettings) -> _DiagnosticRow:
             )
         assert_never(availability)  # pragma: no cover
     except Exception as exc:
-        return _DiagnosticRow(label, False, _short_reason(exc))
+        # `probe_failure_reason`, not `_short_reason`: a connection error should
+        # say what to do about it. That mapping was the value `check` and `warm`
+        # added over a raw traceback, so it moves here rather than dying with
+        # them.
+        return _DiagnosticRow(label, False, probe_failure_reason(settings, exc))
 
 
 def _check_rag_index() -> _DiagnosticRow:
@@ -164,32 +195,77 @@ def _check_docs_toolchain() -> _DiagnosticRow:
     )
 
 
+#: Every check, by the name ``--only`` uses. Order is report order.
+#:
+#: One mapping rather than a list plus a set of choices: ``--only`` derives its
+#: choices from these keys, so a check cannot exist without being selectable,
+#: and a name cannot be offered that selects nothing.
+_CHECKS: tuple[str, ...] = ("profile", "model", "rag", "sandbox", "docs")
+
+
 def _run_diagnostics(
-    settings: ModelSettings, profile: str | None
+    settings: ModelSettings,
+    profile: str | None,
+    only: tuple[str, ...] = (),
+    warm: bool = False,
 ) -> list[_DiagnosticRow]:
-    """Run each health check, one :class:`_DiagnosticRow` per check.
+    """Run the selected health checks, one :class:`_DiagnosticRow` per check.
 
     Each check catches its own failure and reports it as a failed row, so one
     broken check (an unreachable model, an unloadable profile) never aborts the
     rest of the report.
+
+    Args:
+        settings: Resolved model/provider configuration.
+        profile: AiiDA profile to load, or None for the default.
+        only: Check names to run. Empty means all of them, which is the
+            default because ``doctor`` is what you run when something is
+            already wrong and you want the whole picture.
+        warm: Also fire one real generation on the model check, loading a
+            local model into memory instead of only probing reachability.
     """
-    return [
-        _check_profile(profile),
-        _check_model(settings),
-        _check_rag_index(),
-        _check_sandbox(),
-        _check_docs_toolchain(),
-    ]
+    selected = only or _CHECKS
+    runners = {
+        "profile": lambda: _check_profile(profile),
+        "model": lambda: _check_model(settings, warm=warm),
+        "rag": _check_rag_index,
+        "sandbox": _check_sandbox,
+        "docs": _check_docs_toolchain,
+    }
+    return [runners[name]() for name in _CHECKS if name in selected]
 
 
 @click.command()
+@click.option(
+    "--only",
+    type=click.Choice(_CHECKS, case_sensitive=False),
+    multiple=True,
+    help=(
+        "Run only these checks (repeatable). The default is all of them; "
+        "`--only model` is the quick reachability probe on its own."
+    ),
+)
+@click.option(
+    "--warm",
+    is_flag=True,
+    help=(
+        "Also generate once, so a local model is loaded into memory rather "
+        "than only probed. Mainly useful before an interactive session."
+    ),
+)
 @click.pass_context
 @_needs_recognized_settings
-def doctor(ctx: click.Context) -> None:
-    """Diagnose the setup: profile, model, RAG index, sandbox, docs toolchain."""
+def doctor(ctx: click.Context, only: tuple[str, ...], warm: bool) -> None:
+    """Diagnose the setup: profile, model, RAG index, sandbox, docs toolchain.
+
+    The one diagnostic command. `--only` narrows it; `--warm` makes the model
+    check load the model instead of merely reaching it.
+
+    Exits non-zero if any check that ran failed, so it can gate a script.
+    """
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     click.echo("Running diagnostics ...\n")
-    rows = _run_diagnostics(settings, ctx.obj["profile"])
+    rows = _run_diagnostics(settings, ctx.obj["profile"], only=only, warm=warm)
     for row in rows:
         # escape() the dynamic label/detail (a model name, or an error message
         # from _short_reason) so a stray bracket can't be swallowed as Rich

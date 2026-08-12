@@ -1,8 +1,8 @@
 """Agent lifecycle for the CLI: build it, run it, probe it.
 
 Turns resolved settings into a ready agent (``_build_agent``), runs a one-shot
-query (``ask``), and checks/warms the configured model (``_probe_model`` +
-``_diagnose_probe_failure``). The heavy aiida / agent-stack imports stay local so
+query (``ask``), and probes the configured model (``_probe_reachable`` /
+``_probe_model``). The heavy aiida / agent-stack imports stay local so
 ``--help`` and shell completion never load AiiDA.
 """
 
@@ -17,11 +17,10 @@ from pydantic import ValidationError
 from pydantic_ai import Agent
 from pydantic_ai.exceptions import UserError
 from pydantic_ai.messages import ModelMessage
-from typing_extensions import assert_never
 
 from aiida_agents._settings import ModelSettings, _Provider, _format_validation_error
 from aiida_agents.agents.planner import Specialist, Step, _as_specialist
-from aiida_agents.cli.ollama import _ensure_ollama_model, _ollama_pull
+from aiida_agents.cli.ollama import _ensure_ollama_model
 from aiida_agents.agents.handoff import Handoff, NodeReference
 from aiida_agents.cli.output import _trace_tool_calls, console
 
@@ -154,8 +153,8 @@ def _probe_model(settings: ModelSettings) -> None:  # pragma: no cover
 
     A failure surfaces here (before a session), and for a local Ollama model the
     call loads it into memory so the first real query isn't a cold start. This is
-    the heavy path behind ``warm``; ``check`` uses :func:`_check_reachable`, which
-    never generates.
+    the heavy path behind ``doctor --warm``; the default sweep uses
+    :func:`_probe_reachable`, which never generates.
     """
     from aiida_agents.agents._models import get_model
 
@@ -182,7 +181,7 @@ async def _list_model_ids(client: Any) -> set[str]:
         # ``wait_for`` raises the asyncio one, a distinct class from the builtin
         # ``TimeoutError`` (they were only merged into aliases in 3.11), so
         # catching the builtin would let the timeout escape uncaught there.
-        # Phrase the message so ``_diagnose_probe_failure`` routes it to the
+        # Phrase the message so ``probe_failure_reason`` routes it to the
         # "unreachable" branch (it matches on "connect").
         msg = f"could not connect within {_REACHABILITY_TIMEOUT:.0f}s"
         raise ConnectionError(msg) from exc
@@ -237,67 +236,36 @@ def _model_availability(
     Ollama's ``/models`` listing is authoritative, so a model absent from it is
     genuinely not pulled; a cloud (or openai-compatible) endpoint's listing may be
     partial, so an absent model is only "unlisted" and may still work. Callers
-    render this as they need (``check`` echoes and exits; ``doctor`` builds a row).
+    ``doctor`` renders this as a row.
     """
     if reach.model_ok:
         return "available"
     return "not_pulled" if provider == "ollama" else "unlisted"
 
 
-def _check_reachable(settings: ModelSettings) -> None:
-    """Print ``check``'s reachability report; exit non-zero on a real problem.
+def probe_failure_reason(settings: ModelSettings, exc: Exception) -> str:
+    """Turn a model-probe failure into something the user can act on.
 
-    Reachability / auth failures raise for the caller to diagnose. A configured
-    model the endpoint doesn't advertise is fatal for Ollama (its listing is
-    authoritative, so it means "not pulled"), but only a warning for cloud or
-    openai-compatible endpoints, whose ``/models`` listing may be partial.
+    "Connection error." names what happened and not what to do about it. This
+    maps the handful of failures that actually occur onto the fix for each,
+    which is the whole value the old ``check``/``warm`` commands added over a
+    raw traceback --- so it survives their removal (issue #75) rather than
+    being lost with them.
+
+    Returns a sentence, never raises, and falls back to the exception's own
+    message for anything it does not recognise. An unrecognised failure
+    reported verbatim is honest; one mapped onto a guessed remedy is not.
     """
-    reach = _probe_reachable(settings)
-    click.echo(f"Endpoint: {reach.endpoint}")
-    click.echo(f"{_OK} reachable ({reach.n_models} models advertised)")
-    availability = _model_availability(reach, settings.provider)
-    if availability == "available":
-        click.echo(f"{_OK} model '{settings.model}' is available")
-        return
-    if availability == "not_pulled":
-        click.echo(f"{_FAIL} model '{settings.model}' is not pulled.", err=True)
-        click.echo(f"  Pull it with: ollama pull {settings.model}", err=True)
-        raise SystemExit(1)
-    if availability == "unlisted":
-        click.echo(
-            f"{_WARN} model '{settings.model}' is not in this endpoint's list "
-            "(it may be partial; the model may still work).",
-            err=True,
-        )
-        return
-    assert_never(availability)  # pragma: no cover
-
-
-def _diagnose_probe_failure(settings: ModelSettings, exc: Exception) -> None:
-    """Turn a probe failure into an actionable message, offering an Ollama pull."""
-    msg = str(exc).lower()
-    if settings.provider == "ollama" and ("not found" in msg or "404" in msg):
-        click.echo(f"{_FAIL} Ollama model '{settings.model}' is not pulled.", err=True)
-        if click.confirm(f"Pull it now (ollama pull {settings.model})?", default=True):
-            _ollama_pull(settings.model)
-        return
-    if ("api" in msg and "key" in msg) or "401" in msg or "403" in msg:
-        if "not set" in msg or "environment variable" in msg or "set the" in msg:
-            click.echo(
-                f"{_FAIL} API key not set: set the provider's API key.", err=True
-            )
-        else:
-            click.echo(
-                f"{_FAIL} Authentication failed: check the provider's API key.",
-                err=True,
-            )
-        return
-    if "connect" in msg or "connection" in msg:
-        click.echo(
-            f"{_FAIL} Could not reach the endpoint. Is the server running?", err=True
-        )
-        return
-    click.echo(f"{_FAIL} {exc}", err=True)
+    message = str(exc).lower()
+    if settings.provider == "ollama" and ("not found" in message or "404" in message):
+        return f"model not pulled (ollama pull {settings.model})"
+    if ("api" in message and "key" in message) or "401" in message or "403" in message:
+        if "not set" in message or "environment variable" in message:
+            return "API key not set for this provider"
+        return "authentication failed; check the provider's API key"
+    if "connect" in message or "connection" in message:
+        return "could not reach the endpoint; is the server running?"
+    return str(exc)
 
 
 def _resolve_plan(

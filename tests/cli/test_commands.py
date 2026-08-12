@@ -12,7 +12,7 @@ def test_cli_exposes_expected_commands() -> None:
     """The top-level group lists every subcommand we ship."""
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    for command in ("ask", "chat", "check", "config", "doctor", "mcp", "rag", "warm"):
+    for command in ("ask", "chat", "config", "doctor", "mcp", "rag", "sandbox"):
         assert command in result.output
 
 
@@ -33,32 +33,53 @@ def test_dash_h_is_a_help_alias(args: list[str]) -> None:
 
 
 @pytest.mark.parametrize(
-    "command, expected_calls",
+    "argv, expected_calls",
     [
-        pytest.param("check", ["reachable"], id="check-probes-never-generates"),
-        pytest.param("warm", ["generate"], id="warm-generates"),
+        pytest.param(["doctor", "--only", "model"], ["reachable"], id="probe-only"),
+        pytest.param(
+            ["doctor", "--only", "model", "--warm"],
+            ["reachable", "generate"],
+            id="warm-also-generates",
+        ),
     ],
 )
-def test_check_and_warm_use_distinct_probes(
-    monkeypatch: pytest.MonkeyPatch, command: str, expected_calls: list[str]
+def test_doctor_only_model_replaces_check_and_warm(
+    monkeypatch: pytest.MonkeyPatch, argv: list[str], expected_calls: list[str]
 ) -> None:
-    """`check` probes reachability and never generates; `warm` runs the generation
-    probe that loads the model. Pins the deliberate split (a check stays cheap and
-    side-effect-free): both probes are stubbed, so the recorded calls prove which
-    one each command drives.
+    """`check` and `warm` are now flags on `doctor` (issue #75).
+
+    The split they encoded still matters and is pinned here: the default sweep
+    probes reachability and never generates, and `--warm` additionally fires a
+    real generation to load a local model. Both probes are stubbed, so the
+    recorded calls prove which one each invocation drives.
     """
+    from aiida_agents.cli import agent as agent_module
+    from aiida_agents.cli.agent import _Reachability
+
     calls: list[str] = []
+
+    def _reachable(settings: object) -> _Reachability:
+        calls.append("reachable")
+        return _Reachability("http://endpoint", 3, model_ok=True)
+
+    monkeypatch.setattr(agent_module, "_probe_reachable", _reachable)
     monkeypatch.setattr(
-        "aiida_agents.cli.commands._check_reachable",
-        lambda settings: calls.append("reachable"),
+        agent_module, "_probe_model", lambda settings: calls.append("generate")
     )
-    monkeypatch.setattr(
-        "aiida_agents.cli.commands._probe_model",
-        lambda settings: calls.append("generate"),
-    )
-    result = CliRunner().invoke(cli, [command])
-    assert result.exit_code == 0
+
+    CliRunner().invoke(cli, argv)
+
     assert calls == expected_calls
+
+
+def test_the_removed_commands_are_gone() -> None:
+    """Three diagnostic commands became one, so the other two must not linger.
+
+    A command left behind as a thin alias is a third thing to document and a
+    third place for the behaviour to drift.
+    """
+    for removed in ("check", "warm"):
+        assert CliRunner().invoke(cli, [removed]).exit_code != 0
 
 
 def test_version_option_prints_version() -> None:
@@ -82,7 +103,7 @@ def test_check_reports_invalid_setting_value_cleanly(
     from pydantic import ValidationError
 
     monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", "bogus")
-    result = CliRunner().invoke(cli, ["check"])
+    result = CliRunner().invoke(cli, ["doctor"])
     assert result.exit_code == 1
     assert "Invalid configuration" in result.output
     assert "provider" in result.output
@@ -94,42 +115,36 @@ def test_provider_flag_rejects_unknown_choice() -> None:
     bad value is a clean 'invalid choice' usage error listing the real providers
     (complements the env-var path above, which pydantic validates).
     """
-    result = CliRunner().invoke(cli, ["--provider", "bogus", "check"])
+    result = CliRunner().invoke(cli, ["--provider", "bogus", "doctor"])
     assert result.exit_code == 2  # Click usage error, before any work
     assert "bogus" in result.output
     assert "ollama" in result.output  # the derived choices are listed
 
 
-@pytest.mark.parametrize(
-    "command, probe",
-    [
-        pytest.param("check", "_check_reachable", id="check"),
-        pytest.param("warm", "_probe_model", id="warm"),
-    ],
-)
-def test_probe_failure_is_diagnosed_and_exits(
-    monkeypatch: pytest.MonkeyPatch, command: str, probe: str
+def test_a_probe_failure_becomes_an_actionable_row(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A probe failure routes through `_diagnose_probe_failure` and exits 1,
-    never a raw traceback.
+    """A failed model probe says what to do, not just what happened.
+
+    `check`/`warm` ran their failures through a mapping from the handful of
+    real causes onto the fix for each. That mapping was the value they added
+    over a raw traceback, so removing them had to keep it: it now fills the
+    model row rather than being printed by a command that no longer exists.
     """
-    from aiida_agents.cli import commands
+    from aiida_agents.cli import agent as agent_module
 
-    def _boom(settings: object) -> None:
-        raise RuntimeError("endpoint down")
+    def _unreachable(settings: object) -> object:
+        raise ConnectionError("Connection error.")
 
-    diagnosed: list[str] = []
-    monkeypatch.setattr(f"aiida_agents.cli.commands.{probe}", _boom)
-    monkeypatch.setattr(
-        commands,
-        "_diagnose_probe_failure",
-        lambda settings, exc: diagnosed.append(str(exc)),
-    )
+    monkeypatch.setattr(agent_module, "_probe_reachable", _unreachable)
 
-    result = CliRunner().invoke(cli, [command])
+    result = CliRunner().invoke(cli, ["doctor", "--only", "model"])
 
+    # Whitespace-normalised: rich wraps the row to the terminal width, so the
+    # sentence arrives split across lines.
+    rendered = " ".join(result.output.split())
     assert result.exit_code == 1
-    assert diagnosed == ["endpoint down"]
+    assert "could not reach the endpoint; is the server running?" in rendered
 
 
 class _FakeResult:

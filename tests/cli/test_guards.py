@@ -29,7 +29,7 @@ def test_action_command_fails_fast_on_mistyped_setting(
 @pytest.mark.parametrize(
     "args",
     [
-        pytest.param(["check", "--help"], id="command-help"),
+        pytest.param(["doctor", "--help"], id="command-help"),
         pytest.param(["rag", "--help"], id="group-help"),
         pytest.param(["rag", "status", "-h"], id="subcommand-h"),
     ],
