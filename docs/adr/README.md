@@ -13,7 +13,7 @@ Diagrams are embedded as [Mermaid](https://mermaid.js.org/) fenced blocks (and e
 
 ## Log
 
-Numbering follows build/dependency order, not chronology: **01–06** are the path to the first milestone (a natural-language agent that reads a real AiiDA database); **07–08** are the write path; **09–10** expansion; **11** exploratory.
+Numbering follows build/dependency order, not chronology: **01–06** are the path to the first milestone (a natural-language agent that reads a real AiiDA database); **07–08** are the write path; **09–10** expansion; **11** code execution; **12** exploratory.
 
 | ADR                                                   | Title                                                                                          |
 | ----------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
@@ -27,11 +27,11 @@ Numbering follows build/dependency order, not chronology: **01–06** are the pa
 | [08](/docs/adr/08-human-in-the-loop-before-writes.md) | Enforced human-in-the-loop confirmation before any write/submit                                |
 | [09](/docs/adr/09-agent-orchestration.md)             | Agent orchestration: a planner over two specialists; specialists are never wrapped             |
 | [10](/docs/adr/10-plugin-extensibility.md)            | Plugin extensibility through one `aiida_agents.plugins` entry point                            |
-| [11](/docs/adr/11-code-execution.md)                  | Executing generated code against a write-refusing database role                                |
-| 11                                                    | Agent-run provenance: persist agent decisions/traces in AiiDA's provenance graph (exploratory) |
+| [11](/docs/adr/11-code-execution.md)                  | Executing generated code against a disposable copy of the user's storage                       |
+| 12                                                    | Agent-run provenance: persist agent decisions/traces in AiiDA's provenance graph (exploratory) |
 
 ADR-01 is in effect; ADR-02 and ADR-03 are seeds with direction confirmed (2026-05-22).
-ADR-04 through ADR-10 are written; ADR-11 is still exploratory and has no record yet.
+ADR-04 through ADR-11 are written; ADR-12 is exploratory and has no record yet.
 ADR-09 supersedes ADR-04's future-architecture table and settles the agent-to-agent question ADR-04 left open; ADR-06 and ADR-07 carry Revision sections where reality diverged from the original decision.
 
 For how the pieces fit together rather than why each was chosen, see [Architecture](/docs/architecture.md); to add your own, see [Extending](/docs/extending.md).
