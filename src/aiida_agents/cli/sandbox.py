@@ -21,6 +21,8 @@ import shutil
 
 import rich_click as click
 
+from rich.markup import escape
+
 from aiida_agents.cli.output import console
 
 __all__ = ["sandbox"]
@@ -77,7 +79,7 @@ def init(profile: str | None, sandbox_name: str, role: str) -> None:
 
     from aiida_agents.sandbox.copy import (
         SUPPORTED_BACKENDS,
-        SandboxStorage,
+        ProfileStorage,
         copy_sqlite_storage,
         postgres_copy_commands,
         register_profile,
@@ -113,7 +115,7 @@ def init(profile: str | None, sandbox_name: str, role: str) -> None:
             copy_sqlite_storage(Path(storage_config["filepath"]), target)
         except (FileNotFoundError, FileExistsError, OSError) as exc:
             raise click.ClickException(str(exc)) from exc
-        new_storage = SandboxStorage(backend, {"filepath": str(target)})
+        new_storage = ProfileStorage(backend, {"filepath": str(target)})
     else:
         sandbox_database = (
             f"{storage_config.get('database_name', 'aiida')}_agents_sandbox"
@@ -142,7 +144,7 @@ def init(profile: str | None, sandbox_name: str, role: str) -> None:
             f"Then rerun [cyan]aiida-agents sandbox init --sandbox-name "
             f"{sandbox_name}[/cyan] to register the profile."
         )
-        new_storage = SandboxStorage(
+        new_storage = ProfileStorage(
             backend,
             {
                 **storage_config,
@@ -154,7 +156,7 @@ def init(profile: str | None, sandbox_name: str, role: str) -> None:
             return
 
     # The whole point of the exercise, checked rather than assumed.
-    if shares_storage(backend, storage_config, new_storage.backend, new_storage.config):
+    if shares_storage(ProfileStorage(backend, storage_config), new_storage):
         raise click.ClickException(
             "Refusing to register a sandbox that shares storage with "
             f"{source.name!r}. Deleting it would take the real data with it."  # type: ignore[attr-defined]
@@ -209,7 +211,7 @@ def check(profile: str) -> None:
     """
     from aiida.manage.configuration import get_config
 
-    from aiida_agents.sandbox.copy import profiles_sharing_storage
+    from aiida_agents.sandbox.copy import Overlap, profiles_sharing_storage
     from aiida_agents.sandbox.setup import verify_read_only
 
     config = get_config()
@@ -220,11 +222,28 @@ def check(profile: str) -> None:
 
     failures = profiles_sharing_storage(config, profile)
     if failures:
-        console.print(
-            f"[red]✗[/red] {profile!r} shares storage with "
-            f"{', '.join(repr(name) for name in failures)}. Deleting it would "
-            "destroy their data too. This must not be used as a sandbox."
-        )
+        # A proven overlap and a config that could not be read both stop the
+        # command, and saying which one it was is the difference between "your
+        # sandbox is pointed at your own storage" and "some profile here does
+        # not say where its storage is". Only the first is about their data.
+        proven = any(entry.overlap is Overlap.SHARED for entry in failures)
+        verdict = "must not be used" if proven else "cannot be cleared for use"
+        console.print(f"[red]✗[/red] {escape(repr(profile))} {verdict} as a sandbox:")
+        for entry in failures:
+            console.print(f"    {escape(entry.describe())}")
+        # Both remedies when there is one of each: `init` compares the copy
+        # against its source alone, so a rebuild clears the overlap and leaves
+        # the unreadable profile failing the next check for the same reason.
+        if proven:
+            console.print(
+                f"  Delete it with [cyan]verdi profile delete --keep-data "
+                f"{escape(profile)}[/cyan], then rebuild with [cyan]aiida-agents "
+                "sandbox init[/cyan]."
+            )
+        if any(entry.overlap is Overlap.UNKNOWN for entry in failures):
+            console.print(
+                "  What cannot be read is treated as sharing until it can be ruled out."
+            )
         raise SystemExit(1)
 
     console.print(f"[green]✓[/green] {profile!r} shares no storage with any profile")
@@ -279,9 +298,10 @@ def teardown(profile: str, yes: bool) -> None:
 
     sharing = profiles_sharing_storage(config, profile)
     if sharing:
+        reasons = "\n".join(f"  {entry.describe()}" for entry in sharing)
         raise click.ClickException(
-            f"{profile!r} shares storage with {', '.join(sharing)}. Refusing to "
-            "delete its data. Remove the profile by hand if you are certain."
+            f"Refusing to delete {profile!r} and its storage:\n{reasons}\n"
+            "Remove the profile by hand if you are certain."
         )
 
     if not yes and not click.confirm(f"Delete profile {profile!r} and its copy?"):

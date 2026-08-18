@@ -368,6 +368,9 @@ class TestSandboxCommands:
             def delete_profile(self, name: str, delete_storage: bool = True) -> None:
                 self.deleted = {"name": name, "delete_storage": delete_storage}
 
+            def add_profile(self, profile: object) -> None:
+                self.profiles.append(profile)
+
             def store(self) -> None:
                 return None
 
@@ -375,62 +378,37 @@ class TestSandboxCommands:
 
     @staticmethod
     def _profile(
-        name: str, backend: str = "core.sqlite_dos", filepath: str | None = None
+        name: str,
+        backend: str = "core.sqlite_dos",
+        filepath: str | None = None,
+        *,
+        config: dict[str, object] | None = None,
     ) -> object:
         class _Profile:
             pass
 
+        if config is None:
+            config = {"filepath": filepath or f"/data/{name}"}
+
         profile = _Profile()
         profile.name = name  # type: ignore[attr-defined]
         profile.storage_backend = backend  # type: ignore[attr-defined]
-        profile.storage_config = {"filepath": filepath or f"/data/{name}"}  # type: ignore[attr-defined]
+        # One dict, referenced by both: a stub whose `dictionary` and
+        # `storage_config` disagree describes a profile that cannot exist.
+        profile.storage_config = config  # type: ignore[attr-defined]
+        # What `sandbox_profile_dictionary` clones the sandbox's own from.
+        profile.dictionary = {  # type: ignore[attr-defined]
+            "storage": {"backend": backend, "config": profile.storage_config},  # type: ignore[attr-defined]
+            "process_control": {"backend": None, "config": None},
+            "default_user_email": "someone@example.com",
+            "PROFILE_UUID": "1111",
+            "options": {},
+            "test_profile": False,
+        }
         return profile
 
     def _patch(self, monkeypatch: pytest.MonkeyPatch, config: object) -> None:
         monkeypatch.setattr("aiida.manage.configuration.get_config", lambda: config)
-
-    def test_check_fails_when_the_sandbox_shares_storage(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The exact shape of the design this replaced."""
-        config = self._config(
-            self._profile("real", filepath="/data/shared"),
-            self._profile("agents-sandbox", filepath="/data/shared"),
-        )
-        self._patch(monkeypatch, config)
-
-        result = CliRunner().invoke(cli, ["sandbox", "check"])
-
-        assert result.exit_code == 1
-        assert "real" in result.output
-
-    def test_check_passes_a_genuinely_separate_copy(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        config = self._config(
-            self._profile("real", filepath="/data/real"),
-            self._profile("agents-sandbox", filepath="/data/copy"),
-        )
-        self._patch(monkeypatch, config)
-
-        result = CliRunner().invoke(cli, ["sandbox", "check"])
-
-        assert result.exit_code == 0
-
-    def test_check_fails_on_a_backend_it_cannot_reason_about(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Fails closed. Not knowing whether two profiles are separate is not
-        the same as knowing they are, and only one of those mistakes is safe."""
-        config = self._config(
-            self._profile("real", filepath="/data/real"),
-            self._profile("agents-sandbox", backend="core.sqlite_zip"),
-        )
-        self._patch(monkeypatch, config)
-
-        result = CliRunner().invoke(cli, ["sandbox", "check"])
-
-        assert result.exit_code == 1
 
     def test_init_refuses_a_backend_it_cannot_copy(
         self, monkeypatch: pytest.MonkeyPatch
@@ -501,6 +479,111 @@ class TestSandboxCommands:
 
         assert result.exit_code == 0
         assert "nothing to tear down" in result.output
+
+    @pytest.mark.parametrize(
+        "others, code, expected, why",
+        [
+            pytest.param(
+                [("real", "core.sqlite_dos", "/data/copy")],
+                1,
+                "shares storage with 'real'",
+                "the exact shape of the design this replaced",
+                id="shares-storage",
+            ),
+            pytest.param(
+                [("real", "core.sqlite_dos", "/data/real")],
+                0,
+                "shares no storage",
+                "a genuinely separate copy",
+                id="separate",
+            ),
+            pytest.param(
+                [("odd", "thirdparty.custom_dos", "/data/odd")],
+                1,
+                "cannot be told apart from 'odd'",
+                "fails closed, and says which of the two it is",
+                id="unreadable-backend",
+            ),
+            pytest.param(
+                [("dev-archive", "core.sqlite_zip", "/data/e.aiida")],
+                0,
+                "shares no storage",
+                "an archive is a built-in backend, not an unreadable one",
+                id="archive-elsewhere",
+            ),
+            pytest.param(
+                [
+                    ("real", "core.sqlite_dos", "/data/copy"),
+                    ("odd", "thirdparty.custom_dos", "/data/odd"),
+                ],
+                1,
+                "verdi profile delete --keep-data",
+                "both remedies, because rebuilding fixes only one of them",
+                id="one-of-each",
+            ),
+        ],
+    )
+    def test_check_reports_what_it_found(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        others: list[tuple[str, str, str]],
+        code: int,
+        expected: str,
+        why: str,
+    ) -> None:
+        """The sandbox is at `/data/copy` throughout; the other profiles vary."""
+        config = self._config(
+            *(
+                self._profile(name, backend=backend, filepath=filepath)
+                for name, backend, filepath in others
+            ),
+            self._profile("agents-sandbox", filepath="/data/copy"),
+        )
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "check"])
+        output = " ".join(result.output.split())
+
+        assert result.exit_code == code, why
+        assert expected in output, why
+
+    def test_check_does_not_claim_to_have_found_what_it_could_not_read(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A researcher reading "deleting this destroys their data" concludes
+        their sandbox is pointed at their own database. Where the truth is that
+        a backend could not be read, saying so is the difference between a
+        problem they can fix and one they cannot."""
+        config = self._config(
+            self._profile("odd", backend="thirdparty.custom_dos"),
+            self._profile("agents-sandbox", filepath="/data/copy"),
+        )
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "check"])
+
+        assert "destroys" not in " ".join(result.output.split())
+
+    def test_a_profile_named_like_rich_markup_survives_the_output(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`aiida[test]` is a legal profile name, and rich read `[test]` as a
+        style tag and dropped it.
+
+        The command then reported a profile the user does not have, which is
+        the same failure as naming the wrong one.
+        """
+        config = self._config(
+            self._profile("real", filepath="/data/real"),
+            self._profile("aiida[test]", filepath="/data/real"),
+        )
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(
+            cli, ["sandbox", "check", "--profile", "aiida[test]"]
+        )
+
+        assert "aiida[test]" in result.output
 
 
 class TestRootOptionsWorkOnEitherSideOfTheCommand:

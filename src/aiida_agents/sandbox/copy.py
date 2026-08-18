@@ -1,71 +1,128 @@
-"""A disposable copy of a profile's storage, for generated code to read.
+"""A disposable copy of a profile's storage, for generated code to run against.
 
-The sandbox used to be a second profile pointing at **the same** database and
-repository as the user's own, reached through a read-only Postgres role. That
-choice weighed a shared database against an *empty* one --- an empty database
-cannot answer "which structures did I relax last month" --- and missed that a
-**copy** is neither.
-
-The cost of missing it was a maintainer's database. Deleting the sandbox
-profile and agreeing to delete its data deleted the storage underneath both
-profiles (`#73 <https://github.com/aiidateam/aiida-agents/issues/73>`_). A
-read-only role is no defence: the destructive command is run by the user, as
-themselves, against a profile they were told was disposable.
-
-So the rule this module exists to enforce is:
+The rule this module exists to enforce:
 
     **A sandbox profile must never share deletable storage with a real one.**
 
-:func:`shares_storage` is that rule as a function, and it fails closed --- two
+:func:`shares_storage` is that rule as a function, and it fails closed: two
 profiles it cannot compare are treated as sharing, because "I could not tell"
-and "they are separate" must not lead to the same action.
-
-Copying rather than restricting also settles three other things at once:
-
-* Setup needs no write to the source. The old flow printed a
-  ``verdi profile setup`` command that could never complete, because that
-  command creates a default user and the read-only role refuses the insert.
-  A copy is registered by cloning the source profile's own configuration,
-  which already describes initialised storage.
-* SQLite gets containment for the first time. It has no roles and no
-  ``GRANT``, so the old design simply had nothing to offer the default
-  ``verdi presto`` backend; a copy works the same way for both.
-* The read-only role becomes belt-and-braces rather than the whole mechanism.
-  A write that reaches the copy costs a refresh, not someone's data.
+and "they are separate" must not lead to the same action. Issue `#73
+<https://github.com/aiidateam/aiida-agents/issues/73>`_ is what the other
+answer costs, and `ADR-11 </docs/adr/11-code-execution.md>`_ records why the
+sandbox is a copy rather than a restricted view of the real thing.
 """
 
 from __future__ import annotations
 
+import enum
 import shutil
 import typing as t
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import url2pathname
+
+from typing_extensions import assert_never
 
 __all__ = [
-    "SandboxStorage",
+    "FILEPATH_BACKENDS",
+    "SUPPORTED_BACKENDS",
+    "DatabaseLocation",
+    "Location",
+    "Overlap",
+    "PathLocation",
+    "ProfileStorage",
+    "SharingProfile",
+    "StorageConfig",
+    "ConfigLike",
+    "ProfileLike",
+    "profile_storage",
     "profiles_sharing_storage",
     "register_profile",
-    "copy_sqlite_storage",
-    "postgres_copy_commands",
     "sandbox_profile_dictionary",
+    "sandbox_profile_exists",
     "sandbox_storage_root",
     "shares_storage",
     "storage_locations",
+    "storage_overlap",
 ]
 
-#: Backends this module knows how to copy. Anything else is refused by name
-#: rather than attempted, because a copy that half worked would be worse than
-#: no sandbox: it would look like containment.
-SUPPORTED_BACKENDS = frozenset({"core.psql_dos", "core.sqlite_dos"})
+# Backends this module knows how to copy. Anything else is refused by name
+# rather than attempted, because a copy that half worked would be worse than
+# no sandbox: it would look like containment.
+SUPPORTED_BACKENDS: t.Final = frozenset({"core.psql_dos", "core.sqlite_dos"})
+
+# Backends whose whole storage is the one path under `filepath`, and so can be
+# compared without loading them. Deliberately wider than SUPPORTED_BACKENDS: an
+# imported archive cannot be copied into a sandbox, but it can be told apart
+# from one, and until it could, every config holding an archive read as sharing
+# storage with the sandbox.
+FILEPATH_BACKENDS: t.Final = frozenset({"core.sqlite_dos", "core.sqlite_zip"})
+
+# Read and written a chunk at a time so the copy can be reported as it goes.
+# Large enough that the reporting costs nothing against gigabytes of packs.
+_COPY_CHUNK_BYTES: t.Final = 4 * 1024 * 1024
+
+#: A profile's ``storage.config`` as it comes out of ``config.json``: whatever
+#: the backend put there, which is why every read of it is defensive.
+StorageConfig: t.TypeAlias = dict[str, t.Any]
+
+
+class ProfileLike(t.Protocol):
+    """The three things this module reads off an AiiDA ``Profile``.
+
+    A protocol rather than the class itself, because importing ``aiida`` at
+    module scope is what the lazy imports below exist to avoid, and because a
+    test that hands this a stub then has the stub checked rather than trusted.
+    """
+
+    @property
+    def name(self) -> str: ...
+
+    @property
+    def storage_backend(self) -> str: ...
+
+    @property
+    def storage_config(self) -> StorageConfig | None: ...
+
+
+class ConfigLike(t.Protocol):
+    """The one thing this module reads off an AiiDA ``Config``."""
+
+    @property
+    def profiles(self) -> t.Sequence[ProfileLike]: ...
 
 
 @dataclass(frozen=True)
-class SandboxStorage:
-    """Where a sandbox's copied storage lives."""
+class ProfileStorage:
+    """A profile's storage: the backend that reads it, and where it keeps data.
+
+    One value rather than two arguments, so that pairing one profile's backend
+    with another's config is not something a caller can write.
+    """
 
     backend: str
-    config: dict[str, t.Any]
+    config: StorageConfig
+
+
+def sandbox_profile_exists(profile: str) -> bool:
+    """Whether ``profile`` is a profile AiiDA knows about.
+
+    Worth asking before doing anything heavier, because "you have not set the
+    sandbox up yet" and "your query has a bug" are different problems and a
+    stack trace about an unknown profile reads as the second.
+
+    A broken or unreadable AiiDA config answers False: the caller's next move
+    is to tell the user to set the profile up, which is the right advice either
+    way.
+    """
+    try:
+        from aiida.manage.configuration import get_config
+
+        return profile in {p.name for p in get_config().profiles}
+    except Exception:  # pragma: no cover - a broken AiiDA config is not our news
+        return False
 
 
 def sandbox_storage_root(sandbox_name: str) -> Path:
@@ -80,43 +137,188 @@ def sandbox_storage_root(sandbox_name: str) -> Path:
     return Path(AiiDAConfigDir.get()) / "agents-sandbox" / sandbox_name
 
 
-def storage_locations(backend: str, config: dict[str, t.Any]) -> frozenset[str]:
-    """Everything ``verdi profile delete --delete-data`` would destroy.
+class Overlap(enum.Enum):
+    """How one profile's storage compares with another's.
 
-    Canonical strings rather than paths so that two profiles can be compared
-    without either being loadable. An empty set means "I could not tell", which
-    :func:`shares_storage` treats as sharing.
+    ``UNKNOWN`` is acted on exactly like ``SHARED``. They are kept apart only so
+    the user can be told which one they have, because "these are the same
+    directory" and "there is not enough here to tell" call for different next
+    steps. The second is the rarer, and comes from a plugin backend or a
+    configuration written by something other than ``verdi``.
     """
-    if backend == "core.sqlite_dos":
-        filepath = config.get("filepath")
+
+    SEPARATE = "separate"
+    SHARED = "shared"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True, kw_only=True)
+class SharingProfile:
+    """A profile that could not be proved separate from the one being checked.
+
+    ``overlap`` cannot be ``SEPARATE``: such a profile is not one of these at
+    all. Keyword-only because ``name`` and ``backend`` are both strings, and
+    swapping them names the wrong thing in a sentence that still reads.
+    """
+
+    name: str
+    backend: str
+    overlap: t.Literal[Overlap.SHARED, Overlap.UNKNOWN]
+
+    def describe(self) -> str:
+        """The reason, as a clause that follows the checked profile's name.
+
+        Here rather than at the call sites because ``sandbox check``,
+        ``sandbox teardown`` and ``doctor`` all report it, and three wordings
+        of one finding would drift.
+        """
+        if self.overlap is Overlap.SHARED:
+            return (
+                f"shares storage with {self.name!r}, so deleting either "
+                "destroys the other's data"
+            )
+        if self.overlap is Overlap.UNKNOWN:
+            # Not "its backend cannot be read": the unreadable half is as often
+            # an incomplete configuration, and it can be either profile's.
+            return (
+                f"cannot be told apart from {self.name!r} (storage backend "
+                f"{self.backend!r}): the two configurations do not say enough "
+                "to prove they are separate"
+            )
+        assert_never(self.overlap)  # pragma: no cover
+
+
+def _storage_path(value: object) -> Path | None:
+    """A configuration value read as a place on disk, or ``None`` if it is not one.
+
+    The one place a configuration value becomes a comparable path. These come
+    from ``config.json``, where a path is a string, so anything else fails
+    closed; so does a relative path, which :meth:`Path.resolve` would answer
+    against whatever directory the command was run from.
+    """
+    if not isinstance(value, str):
+        return None
+    # Postgres writes its repository as a `file://` URL, the SQLite backends a
+    # plain path. Both name a place on disk, and the URL is decoded the way
+    # `aiida.storage.psql_dos.backend.get_filepath_container` decodes it ---
+    # `Path.as_uri` percent-encodes, so stripping the scheme by hand leaves
+    # `/home/u/My%20Drive/...`, which never matches the directory it names.
+    text = url2pathname(urlparse(value).path) if value.startswith("file://") else value
+    path = Path(text)
+    return path.resolve() if path.is_absolute() else None
+
+
+def _database_location(config: StorageConfig) -> DatabaseLocation | None:
+    """The database a Postgres profile uses, or ``None`` if it cannot be read.
+
+    Wrong types fail closed rather than raising out of the comparison: these
+    end up in a set, and an unhashable hostname took ``frozenset`` down with it.
+    """
+    name = config.get("database_name")
+    if not isinstance(name, str) or not name:
+        return None
+    host = config.get("database_hostname") or "localhost"
+    port = config.get("database_port") or 5432
+    if not isinstance(host, str) or not isinstance(port, int):
+        return None
+    return DatabaseLocation(host=host, port=port, name=name)
+
+
+@dataclass(frozen=True)
+class PathLocation:
+    """Storage kept somewhere on disk: a directory, or a single archive file."""
+
+    path: Path
+
+    def overlaps(self, other: Location) -> bool:
+        """Whether destroying this place would destroy ``other`` as well.
+
+        Containment counts, not only equality. ``sandbox teardown`` removes its
+        root with :func:`shutil.rmtree`, so a profile whose storage sits inside
+        another's goes with it, and comparing the two paths for equality would
+        call them separate right up until the moment one deleted the other.
+        """
+        if not isinstance(other, PathLocation):
+            return False
         return (
-            frozenset({f"dir:{Path(filepath).resolve()}"}) if filepath else frozenset()
+            self.path == other.path
+            or self.path.is_relative_to(other.path)
+            or other.path.is_relative_to(self.path)
         )
 
-    if backend == "core.psql_dos":
-        locations = set()
-        database = config.get("database_name")
-        if database:
-            host = config.get("database_hostname") or "localhost"
-            port = config.get("database_port") or 5432
-            locations.add(f"pg://{host}:{port}/{database}")
-        repository = config.get("repository_uri")
-        if repository:
-            locations.add(
-                f"dir:{Path(str(repository).removeprefix('file://')).resolve()}"
-            )
+
+@dataclass(frozen=True)
+class DatabaseLocation:
+    """Storage kept in a database on a server, named the way a client reaches it."""
+
+    host: str
+    port: int
+    name: str
+
+    def overlaps(self, other: Location) -> bool:
+        """Whether this is the same database. Two of them nest in no sense."""
+        return self == other
+
+
+#: Somewhere a profile keeps data. A Postgres profile has two, one of each.
+Location: t.TypeAlias = PathLocation | DatabaseLocation
+
+
+def storage_locations(storage: ProfileStorage) -> frozenset[Location]:
+    """Everywhere ``verdi profile delete --delete-data`` would destroy.
+
+    Read from the configuration, so two profiles can be compared without either
+    being loadable. An empty set means "I could not tell", which
+    :func:`shares_storage` treats as sharing.
+    """
+    # core.sqlite_dos keeps its database and container in one directory;
+    # core.sqlite_zip is a single archive file, read-only in every respect but
+    # this one --- `SqliteZipBackend.delete` unlinks it, so `--delete-data`
+    # destroys it just the same. One kind of location for both, because two
+    # profiles naming one path share it whatever each of them calls it.
+    if storage.backend in FILEPATH_BACKENDS:
+        path = _storage_path(storage.config.get("filepath"))
+        return frozenset({PathLocation(path)}) if path is not None else frozenset()
+
+    if storage.backend == "core.psql_dos":
+        locations: set[Location] = set()
+        database = _database_location(storage.config)
+        if database is not None:
+            locations.add(database)
+        repository = _storage_path(storage.config.get("repository_uri"))
+        if repository is not None:
+            locations.add(PathLocation(repository))
         # A Postgres profile with neither is not something we can reason about.
         return frozenset(locations) if len(locations) == 2 else frozenset()
 
     return frozenset()
 
 
-def shares_storage(
-    backend_a: str,
-    config_a: dict[str, t.Any],
-    backend_b: str,
-    config_b: dict[str, t.Any],
-) -> bool:
+def profile_storage(profile: ProfileLike) -> ProfileStorage:
+    """The storage of an AiiDA profile, as this module compares it.
+
+    The one place AiiDA's profile object is read, so a missing
+    ``storage_config`` becomes an empty one here rather than at four call sites.
+    """
+    return ProfileStorage(profile.storage_backend, profile.storage_config or {})
+
+
+def storage_overlap(a: ProfileStorage, b: ProfileStorage) -> Overlap:
+    """How two profiles' storage compares, and why when it is not separate.
+
+    :func:`shares_storage` answers the same question yes-or-no. Callers that
+    report it to a user need the distinction, and both come from here so there
+    is one implementation of the rule.
+    """
+    locations_a = storage_locations(a)
+    locations_b = storage_locations(b)
+    if not locations_a or not locations_b:
+        return Overlap.UNKNOWN
+    shared = any(one.overlaps(other) for one in locations_a for other in locations_b)
+    return Overlap.SHARED if shared else Overlap.SEPARATE
+
+
+def shares_storage(a: ProfileStorage, b: ProfileStorage) -> bool:
     """Whether deleting one profile's data would destroy the other's.
 
     **Fails closed.** A backend this module does not understand, or a config
@@ -128,14 +330,10 @@ def shares_storage(
     Sharing *either* the database or the repository counts. A sandbox with its
     own database but the real repository still loses the user their files.
     """
-    locations_a = storage_locations(backend_a, config_a)
-    locations_b = storage_locations(backend_b, config_b)
-    if not locations_a or not locations_b:
-        return True
-    return bool(locations_a & locations_b)
+    return storage_overlap(a, b) is not Overlap.SEPARATE
 
 
-def profiles_sharing_storage(config: t.Any, name: str) -> list[str]:
+def profiles_sharing_storage(config: ConfigLike, name: str) -> list[SharingProfile]:
     """Every other profile whose data would go with ``name``'s.
 
     The one implementation of this question. ``sandbox check`` asks it before
@@ -145,21 +343,31 @@ def profiles_sharing_storage(config: t.Any, name: str) -> list[str]:
     somebody deletes.
 
     Returns:
-        Profile names, empty when the sandbox is genuinely self-contained.
+        One entry per profile that could not be proved separate, carrying which
+        of the two reasons it was. Empty when the sandbox is genuinely
+        self-contained.
     """
     profiles = {profile.name: profile for profile in config.profiles}
-    target = profiles[name]
-    return [
-        other.name
-        for other in config.profiles
-        if other.name != name
-        and shares_storage(
-            target.storage_backend,
-            target.storage_config or {},
-            other.storage_backend,
-            other.storage_config or {},
-        )
-    ]
+    target = profile_storage(profiles[name])
+    found = []
+    for other in config.profiles:
+        if other.name == name:
+            continue
+        overlap = storage_overlap(target, profile_storage(other))
+        if overlap is not Overlap.SEPARATE:
+            found.append(
+                SharingProfile(
+                    name=other.name, backend=other.storage_backend, overlap=overlap
+                )
+            )
+    return found
+
+
+#: Where the sandbox records which profile it was copied from. A profile
+#: called `agents-sandbox` says what it is and not what it holds, and with
+#: several real profiles in a configuration that is the question anybody
+#: reading `verdi profile list` actually has.
+SOURCE_KEY: t.Final = "agents_sandbox_source"
 
 
 def register_profile(config: t.Any, name: str, dictionary: dict[str, t.Any]) -> None:
@@ -247,7 +455,7 @@ def postgres_copy_commands(
 
 
 def sandbox_profile_dictionary(
-    source: dict[str, t.Any], storage: SandboxStorage
+    source: dict[str, t.Any], storage: ProfileStorage
 ) -> dict[str, t.Any]:
     """A profile configuration for the sandbox, cloned from the source profile's.
 

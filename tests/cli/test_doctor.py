@@ -281,3 +281,24 @@ def test_a_sandbox_sharing_storage_fails_the_check(
 
     assert row.ok is False
     assert "real" in row.detail
+
+
+def test_a_sharing_sandbox_is_not_sent_to_a_command_that_would_refuse(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """This row used to end in "rebuild with `aiida-agents sandbox refresh`".
+
+    Teardown refuses a sandbox in exactly this state, so that advice sent the
+    reader to a command that could not run, on the one row where they most need
+    a next step that works. There is no `refresh` at all now, which makes the
+    assertion cheap and worth keeping: the row must not name a remedy that
+    cannot be carried out.
+    """
+    _patch_all_checks_passing(monkeypatch)
+    monkeypatch.setattr(
+        "aiida.manage.configuration.get_config",
+        lambda: _SandboxConfig("agents-sandbox", filepath="/data/real"),
+    )
+    row = _rows_by_label()["Codegen sandbox (disposable copy)"]
+
+    assert "refresh" not in row.detail

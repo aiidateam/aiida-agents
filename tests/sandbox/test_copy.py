@@ -15,22 +15,62 @@ from pathlib import Path
 
 import pytest
 
-from aiida_agents.sandbox.copy import (
-    SandboxStorage,
+from aiida_agents.sandbox.copy import (  # noqa: F401
     copy_sqlite_storage,
     postgres_copy_commands,
+    Location,
+    Overlap,
+    PathLocation,
+    ProfileStorage,
+    StorageConfig,
+    SharingProfile,
+    profiles_sharing_storage,
     sandbox_profile_dictionary,
     shares_storage,
     storage_locations,
+    storage_overlap,
 )
 
 SQLITE = "core.sqlite_dos"
 POSTGRES = "core.psql_dos"
+ARCHIVE = "core.sqlite_zip"
+UNREADABLE = "thirdparty.custom_dos"
 
 
-def _pg(
-    database: str = "aiida_db", repository: str = "/data/repo"
-) -> dict[str, object]:
+def _shares(
+    backend_a: str,
+    config_a: StorageConfig,
+    backend_b: str,
+    config_b: StorageConfig,
+) -> bool:
+    """`shares_storage` spelled from the two halves each case is written in.
+
+    The module compares `ProfileStorage` values, which is what stops a caller
+    pairing one profile's backend with another's config. These tests are about
+    which configurations share storage, so they name the halves and let this
+    do the pairing once.
+    """
+    return shares_storage(
+        ProfileStorage(backend_a, config_a), ProfileStorage(backend_b, config_b)
+    )
+
+
+def _locations(backend: str, config: StorageConfig) -> frozenset[Location]:
+    return storage_locations(ProfileStorage(backend, config))
+
+
+def _overlap(
+    backend_a: str,
+    config_a: StorageConfig,
+    backend_b: str,
+    config_b: StorageConfig,
+) -> Overlap:
+    return storage_overlap(
+        ProfileStorage(backend_a, config_a), ProfileStorage(backend_b, config_b)
+    )
+
+
+def _pg(database: str = "aiida_db", repository: str = "/data/repo") -> StorageConfig:
     return {
         "database_name": database,
         "database_hostname": "localhost",
@@ -41,55 +81,132 @@ def _pg(
     }
 
 
-class TestSharingIsRefused:
-    """The rule the module exists for."""
+class TestWhichPairsShareStorage:
+    """The rule the module exists for, as the table of pairs it comes down to.
 
-    def test_the_same_sqlite_directory_is_sharing(self) -> None:
-        config = {"filepath": "/data/storage"}
+    One case per way two profiles can be related, because the interesting part
+    is the boundary: an archive and a directory at one path share it, a name
+    that merely starts the same does not, and anything unreadable counts as
+    sharing rather than as separate.
+    """
 
-        assert shares_storage(SQLITE, config, SQLITE, dict(config))
+    SANDBOX = "/data/agents-sandbox/storage"
 
-    def test_the_same_postgres_database_is_sharing(self) -> None:
-        assert shares_storage(POSTGRES, _pg(), POSTGRES, _pg())
-
-    def test_a_separate_database_but_the_same_repository_is_still_sharing(self) -> None:
-        """Half a copy is not a copy.
-
-        A sandbox with its own database and the user's repository still loses
-        them every file their nodes refer to.
-        """
-        assert shares_storage(
-            POSTGRES,
-            _pg(database="aiida_db"),
-            POSTGRES,
-            _pg(database="aiida_db_agents_sandbox"),
-        )
-
-    def test_a_genuinely_separate_copy_is_not_sharing(self) -> None:
-        assert not shares_storage(
-            POSTGRES,
-            _pg(database="aiida_db", repository="/data/repo"),
-            POSTGRES,
-            _pg(database="aiida_db_sandbox", repository="/data/sandbox/repo"),
-        )
-
-    def test_separate_sqlite_directories_are_not_sharing(self) -> None:
-        assert not shares_storage(
-            SQLITE, {"filepath": "/data/real"}, SQLITE, {"filepath": "/data/copy"}
-        )
-
-    def test_the_same_directory_written_differently_is_still_sharing(self) -> None:
-        """Paths are compared resolved, not as strings.
-
-        `/data/storage` and `/data/./sub/../storage` are one directory, and a
-        string comparison would call them two.
-        """
-        assert shares_storage(
-            SQLITE,
-            {"filepath": "/data/storage"},
-            SQLITE,
-            {"filepath": "/data/./sub/../storage"},
-        )
+    @pytest.mark.parametrize(
+        "a, b, shared, why",
+        [
+            # The same storage, spelled in every way it can be spelled.
+            (
+                (SQLITE, {"filepath": "/data/s"}),
+                (SQLITE, {"filepath": "/data/s"}),
+                True,
+                "one directory",
+            ),
+            (
+                (SQLITE, {"filepath": "/data/s"}),
+                (SQLITE, {"filepath": "/data/./x/../s"}),
+                True,
+                "one directory, written differently: paths are resolved",
+            ),
+            ((POSTGRES, _pg()), (POSTGRES, _pg()), True, "one database"),
+            (
+                (POSTGRES, _pg(database="a")),
+                (POSTGRES, _pg(database="b")),
+                True,
+                "own database, shared repository: half a copy is not a copy",
+            ),
+            (
+                (ARCHIVE, {"filepath": "/data/e.aiida"}),
+                (ARCHIVE, {"filepath": "/data/./e.aiida"}),
+                True,
+                "one archive, which `--delete-data` unlinks",
+            ),
+            # A path is a path, whatever the profile calls the thing there.
+            (
+                (SQLITE, {"filepath": "/data/thing"}),
+                (ARCHIVE, {"filepath": "/data/thing"}),
+                True,
+                "a directory and an archive at one path",
+            ),
+            (
+                (POSTGRES, {"database_name": "d", "repository_uri": "/data/thing"}),
+                (ARCHIVE, {"filepath": "/data/thing"}),
+                True,
+                "a repository and an archive at one path",
+            ),
+            (
+                (
+                    POSTGRES,
+                    {
+                        "database_name": "d",
+                        "repository_uri": Path("/data/My Drive").as_uri(),
+                    },
+                ),
+                (SQLITE, {"filepath": "/data/My Drive"}),
+                True,
+                "a percent-encoded `file://` repository is the directory it names",
+            ),
+            # Containment, because `teardown` removes its root recursively.
+            (
+                (SQLITE, {"filepath": SANDBOX}),
+                (ARCHIVE, {"filepath": f"{SANDBOX}/e.aiida"}),
+                True,
+                "an archive inside the sandbox directory",
+            ),
+            (
+                (ARCHIVE, {"filepath": f"{SANDBOX}/e.aiida"}),
+                (SQLITE, {"filepath": SANDBOX}),
+                True,
+                "the same, the other way round",
+            ),
+            (
+                (POSTGRES, {"database_name": "d", "repository_uri": "/data/repo"}),
+                (SQLITE, {"filepath": "/data/repo/nested"}),
+                True,
+                "a profile inside a Postgres repository",
+            ),
+            # Genuinely separate.
+            (
+                (SQLITE, {"filepath": "/data/real"}),
+                (SQLITE, {"filepath": "/data/copy"}),
+                False,
+                "two directories",
+            ),
+            (
+                (SQLITE, {"filepath": "/data/s"}),
+                (SQLITE, {"filepath": "/data/s-2"}),
+                False,
+                "a name that merely starts the same",
+            ),
+            (
+                (POSTGRES, _pg(database="a", repository="/data/a")),
+                (POSTGRES, _pg(database="b", repository="/data/b")),
+                False,
+                "a whole copy: own database, own repository",
+            ),
+            (
+                (SQLITE, {"filepath": SANDBOX}),
+                (ARCHIVE, {"filepath": "/data/e.aiida"}),
+                False,
+                "an archive elsewhere, which is the false positive #90 was about",
+            ),
+            (
+                (POSTGRES, _pg()),
+                (ARCHIVE, {"filepath": "/data/e.aiida"}),
+                False,
+                "a Postgres profile and an archive elsewhere",
+            ),
+        ],
+    )
+    def test_a_pair_shares_storage_or_does_not(
+        self,
+        a: tuple[str, StorageConfig],
+        b: tuple[str, StorageConfig],
+        shared: bool,
+        why: str,
+    ) -> None:
+        assert _shares(*a, *b) is shared, why
+        assert _shares(*b, *a) is shared, f"{why}, and order must not matter"
 
 
 class TestFailingClosed:
@@ -103,8 +220,9 @@ class TestFailingClosed:
     @pytest.mark.parametrize(
         "backend, config",
         [
-            pytest.param("core.sqlite_zip", {"filepath": "/x"}, id="unknown-backend"),
+            pytest.param(UNREADABLE, {"filepath": "/x"}, id="unknown-backend"),
             pytest.param(SQLITE, {}, id="sqlite-with-no-path"),
+            pytest.param(ARCHIVE, {}, id="archive-with-no-path"),
             pytest.param(POSTGRES, {}, id="postgres-with-nothing"),
             pytest.param(
                 POSTGRES, {"database_name": "aiida"}, id="postgres-with-no-repository"
@@ -112,16 +230,172 @@ class TestFailingClosed:
             pytest.param(
                 POSTGRES, {"repository_uri": "/r"}, id="postgres-with-no-database"
             ),
+            pytest.param(SQLITE, {"filepath": "storage"}, id="sqlite-relative-path"),
+            pytest.param(ARCHIVE, {"filepath": "export.aiida"}, id="archive-relative"),
+            pytest.param(
+                POSTGRES,
+                {"database_name": "aiida", "repository_uri": "repo"},
+                id="postgres-relative-repository",
+            ),
+            pytest.param(SQLITE, {"filepath": 42}, id="sqlite-with-a-number"),
+            pytest.param(
+                SQLITE, {"filepath": Path("/data/real")}, id="sqlite-with-a-path-object"
+            ),
+            pytest.param(
+                POSTGRES,
+                {"database_name": "d", "database_hostname": ["h"]},
+                id="postgres-with-an-unhashable-host",
+            ),
         ],
     )
     def test_an_unreadable_config_counts_as_sharing(
-        self, backend: str, config: dict[str, object]
+        self, backend: str, config: StorageConfig
     ) -> None:
-        assert shares_storage(backend, config, SQLITE, {"filepath": "/somewhere/else"})
-        assert shares_storage(SQLITE, {"filepath": "/somewhere/else"}, backend, config)
+        """Relative, non-string and unhashable values are in here deliberately.
+
+        `Path.resolve` would answer a relative path against whatever directory
+        the command was run from, `Path(42)` raises, and an unhashable hostname
+        took `frozenset` down with it. None of them may become "separate", and
+        none may reach the user as a traceback out of the one check that guards
+        their data.
+        """
+        assert _shares(backend, config, SQLITE, {"filepath": "/somewhere/else"})
+        assert _shares(SQLITE, {"filepath": "/somewhere/else"}, backend, config)
 
     def test_an_unreadable_config_yields_no_locations(self) -> None:
-        assert storage_locations("core.sqlite_zip", {"filepath": "/x"}) == frozenset()
+        assert _locations(UNREADABLE, {"filepath": "/x"}) == frozenset()
+
+    def test_an_archive_yields_its_own_location(self) -> None:
+        """Named, because falling through to nothing here is what made every
+        archive profile read as sharing storage with the sandbox."""
+        assert _locations(ARCHIVE, {"filepath": "/data/e.aiida"}) == frozenset(
+            {PathLocation(Path("/data/e.aiida"))}
+        )
+
+
+class TestSayingWhichKindOfNotSeparate:
+    """`shares_storage` decides; `storage_overlap` says why.
+
+    Both readings stop the same commands, and they need different words in
+    front of the user: "this is the same directory as your own profile" is
+    their problem to fix, "this backend is one I cannot read" is not.
+    """
+
+    def test_the_same_location_is_a_proven_overlap(self) -> None:
+        config = {"filepath": "/data/storage"}
+
+        assert _overlap(SQLITE, config, SQLITE, dict(config)) is Overlap.SHARED
+
+    def test_different_locations_are_separate(self) -> None:
+        assert (
+            _overlap(
+                SQLITE, {"filepath": "/data/real"}, SQLITE, {"filepath": "/data/copy"}
+            )
+            is Overlap.SEPARATE
+        )
+
+    @pytest.mark.parametrize(
+        "backend, config",
+        [
+            pytest.param(UNREADABLE, {"filepath": "/x"}, id="unknown-backend"),
+            pytest.param(SQLITE, {}, id="no-path-to-compare"),
+        ],
+    )
+    def test_what_cannot_be_read_is_unknown_rather_than_shared(
+        self, backend: str, config: dict[str, object]
+    ) -> None:
+        assert (
+            _overlap(SQLITE, {"filepath": "/data/real"}, backend, config)
+            is Overlap.UNKNOWN
+        )
+
+    def test_shares_storage_acts_on_unknown_exactly_as_on_shared(self) -> None:
+        """The distinction is for the message, never for the decision."""
+        assert _shares(SQLITE, {"filepath": "/data/real"}, UNREADABLE, {})
+
+
+class _Profile:
+    """The three attributes `profiles_sharing_storage` reads off a profile."""
+
+    def __init__(self, name: str, backend: str, config: dict[str, object]) -> None:
+        self.name = name
+        self.storage_backend = backend
+        self.storage_config = config
+
+
+class _Config:
+    def __init__(self, *profiles: _Profile) -> None:
+        self.profiles = list(profiles)
+
+
+class TestWhatTheSandboxCouldNotBeClearedOf:
+    """The list `check`, `teardown` and `doctor` all report from."""
+
+    @pytest.fixture
+    def sandbox(self) -> _Profile:
+        return _Profile("agents-sandbox", SQLITE, {"filepath": "/data/copy"})
+
+    def test_a_separate_profile_is_not_listed(self, sandbox: _Profile) -> None:
+        config = _Config(sandbox, _Profile("real", SQLITE, {"filepath": "/r"}))
+
+        assert profiles_sharing_storage(config, "agents-sandbox") == []
+
+    def test_an_archive_profile_is_not_listed(self, sandbox: _Profile) -> None:
+        """The bug this suite grew out of, at the layer that reported it."""
+        config = _Config(
+            sandbox,
+            _Profile("real", SQLITE, {"filepath": "/data/real"}),
+            _Profile("dev-archive", ARCHIVE, {"filepath": "/data/export.aiida"}),
+        )
+
+        assert profiles_sharing_storage(config, "agents-sandbox") == []
+
+    def test_a_shared_profile_is_listed_with_the_overlap_proved(
+        self, sandbox: _Profile
+    ) -> None:
+        config = _Config(sandbox, _Profile("real", SQLITE, {"filepath": "/data/copy"}))
+
+        assert profiles_sharing_storage(config, "agents-sandbox") == [
+            SharingProfile(name="real", backend=SQLITE, overlap=Overlap.SHARED)
+        ]
+
+    def test_an_unreadable_profile_is_listed_as_unknown(
+        self, sandbox: _Profile
+    ) -> None:
+        config = _Config(sandbox, _Profile("odd", UNREADABLE, {"filepath": "/x"}))
+
+        assert profiles_sharing_storage(config, "agents-sandbox") == [
+            SharingProfile(name="odd", backend=UNREADABLE, overlap=Overlap.UNKNOWN)
+        ]
+
+    def test_a_proven_overlap_reads_as_one(self) -> None:
+        reason = SharingProfile(
+            name="real", backend=SQLITE, overlap=Overlap.SHARED
+        ).describe()
+
+        assert "shares storage with 'real'" in reason
+
+    @pytest.mark.parametrize(
+        "backend",
+        [
+            pytest.param(UNREADABLE, id="a-backend-nobody-has-heard-of"),
+            pytest.param(POSTGRES, id="a-backend-we-know-but-a-config-we-cannot-read"),
+        ],
+    )
+    def test_what_could_not_be_read_is_not_blamed_on_the_backend(
+        self, backend: str
+    ) -> None:
+        """The unreadable half is as often a config with a field missing, and
+        it can be either profile's. Saying "this backend cannot be read" would
+        be false for a `core.psql_dos` profile with no repository, which is the
+        commoner way to land here than a third-party plugin."""
+        reason = SharingProfile(
+            name="odd", backend=backend, overlap=Overlap.UNKNOWN
+        ).describe()
+
+        assert "cannot be told apart from 'odd'" in reason
+        assert backend in reason
+        assert "destroy" not in reason
 
 
 class TestCopyingSqliteStorage:
@@ -239,30 +513,28 @@ class TestTheClonedProfile:
         }
 
     @pytest.fixture
-    def storage(self) -> SandboxStorage:
-        return SandboxStorage(SQLITE, {"filepath": "/data/copy"})
+    def storage(self) -> ProfileStorage:
+        return ProfileStorage(SQLITE, {"filepath": "/data/copy"})
 
     def test_it_points_at_the_copy(
-        self, source: dict[str, object], storage: SandboxStorage
+        self, source: dict[str, object], storage: ProfileStorage
     ) -> None:
         result = sandbox_profile_dictionary(source, storage)
 
         assert result["storage"]["config"]["filepath"] == "/data/copy"
 
     def test_it_does_not_point_at_the_source(
-        self, source: dict[str, object], storage: SandboxStorage
+        self, source: dict[str, object], storage: ProfileStorage
     ) -> None:
         result = sandbox_profile_dictionary(source, storage)
 
         assert not shares_storage(
-            SQLITE,
-            {"filepath": "/data/real"},
-            result["storage"]["backend"],
-            result["storage"]["config"],
+            ProfileStorage(SQLITE, {"filepath": "/data/real"}),
+            ProfileStorage(result["storage"]["backend"], result["storage"]["config"]),
         )
 
     def test_the_uuid_is_regenerated(
-        self, source: dict[str, object], storage: SandboxStorage
+        self, source: dict[str, object], storage: ProfileStorage
     ) -> None:
         """Two profiles sharing a UUID are two profiles AiiDA cannot tell apart."""
         result = sandbox_profile_dictionary(source, storage)
@@ -270,7 +542,7 @@ class TestTheClonedProfile:
         assert result["PROFILE_UUID"] != "1111"
 
     def test_the_broker_is_not_carried_over(
-        self, source: dict[str, object], storage: SandboxStorage
+        self, source: dict[str, object], storage: ProfileStorage
     ) -> None:
         """The sandbox runs nothing, so it needs no queues --- and pointing it
         at the source profile's would let generated code reach a daemon."""
@@ -279,7 +551,7 @@ class TestTheClonedProfile:
         assert result["process_control"]["backend"] is None
 
     def test_the_user_is_carried_over(
-        self, source: dict[str, object], storage: SandboxStorage
+        self, source: dict[str, object], storage: ProfileStorage
     ) -> None:
         """The copy holds the same users; a different default would not resolve."""
         result = sandbox_profile_dictionary(source, storage)

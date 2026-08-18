@@ -143,11 +143,13 @@ def _check_sandbox() -> _DiagnosticRow:
 
         sharing = profiles_sharing_storage(config, name)
         if sharing:
+            # No remedy named here: `check` is where the two cases are told
+            # apart, and only one of them is the user's to fix.
             return _DiagnosticRow(
                 label,
                 False,
-                f"shares storage with {', '.join(sharing)}; deleting it would "
-                "destroy that data. Rebuild with `aiida-agents sandbox refresh`",
+                "; ".join(entry.describe() for entry in sharing)
+                + "; `aiida-agents sandbox check` spells out what to do",
             )
         return _DiagnosticRow(label, True, "own copy, shared with nothing")
     except Exception as exc:
