@@ -12,23 +12,27 @@ in particular tested for what it does when it *cannot tell*.
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from aiida_agents.sandbox.copy import (  # noqa: F401
-    copy_sqlite_storage,
-    postgres_copy_commands,
+from aiida_agents.sandbox.copy import (
     Location,
     Overlap,
     PathLocation,
     ProfileStorage,
     StorageConfig,
     SharingProfile,
+    copy_storage_directory,
+    postgres_copy_argv,
+    postgres_restore_argv,
+    postgres_sandbox_storage,
     profiles_sharing_storage,
     sandbox_profile_dictionary,
     shares_storage,
     storage_locations,
     storage_overlap,
+    storage_size,
 )
 
 SQLITE = "core.sqlite_dos"
@@ -410,11 +414,69 @@ class TestCopyingSqliteStorage:
         (source / "container" / "config.json").write_text("{}")
         return source
 
+    def test_the_size_is_what_the_copy_will_write(self, storage: Path) -> None:
+        """What the caller shows before asking, and counts the bar up to."""
+        expected = sum(
+            item.stat().st_size for item in storage.rglob("*") if item.is_file()
+        )
+
+        assert storage_size(storage) == expected
+
+    def test_a_missing_directory_has_no_size_to_report(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            storage_size(tmp_path / "nope")
+
+    def test_progress_is_reported_in_bytes_as_the_copy_runs(
+        self, storage: Path, tmp_path: Path
+    ) -> None:
+        """A packed container is a few very large files, so a caller counting
+        files would show nothing until it was nearly done."""
+        reported: list[int] = []
+
+        copy_storage_directory(storage, tmp_path / "copy", progress=reported.append)
+
+        assert sum(reported) == storage_size(storage)
+        assert all(chunk > 0 for chunk in reported)
+
+    def test_a_copy_with_no_room_is_refused_before_it_starts(
+        self, storage: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Filling the disk mid-copy leaves a partial tree that the next
+        attempt then refuses as something already in use, so the room is
+        checked while refusing still costs nothing."""
+        target = tmp_path / "copy"
+        monkeypatch.setattr(
+            "shutil.disk_usage", lambda path: SimpleNamespace(total=0, used=0, free=1)
+        )
+
+        with pytest.raises(OSError, match="free"):
+            copy_storage_directory(storage, target)
+
+        assert not target.exists()
+
+    def test_a_failed_copy_leaves_nothing_behind(
+        self, storage: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Half a copy answers queries wrongly and blocks the next attempt."""
+        target = tmp_path / "copy"
+
+        def _fail(*args: object, **kwargs: object) -> None:
+            target.mkdir(parents=True, exist_ok=True)
+            (target / "half-written").write_bytes(b"...")
+            raise OSError("no space left on device")
+
+        monkeypatch.setattr("shutil.copytree", _fail)
+
+        with pytest.raises(OSError):
+            copy_storage_directory(storage, target)
+
+        assert not target.exists()
+
     def test_the_database_and_the_repository_both_come_across(
         self, storage: Path, tmp_path: Path
     ) -> None:
         target = tmp_path / "copy"
-        copy_sqlite_storage(storage, target)
+        copy_storage_directory(storage, target)
 
         assert (target / "database.sqlite").read_bytes() == b"not really a database"
         assert (target / "container" / "config.json").exists()
@@ -431,7 +493,7 @@ class TestCopyingSqliteStorage:
         container and every query raised `UnreachableStorage`.
         """
         target = tmp_path / "copy"
-        copy_sqlite_storage(storage, target)
+        copy_storage_directory(storage, target)
 
         assert (target / "container" / "sandbox").is_dir()
 
@@ -439,7 +501,7 @@ class TestCopyingSqliteStorage:
         self, storage: Path, tmp_path: Path
     ) -> None:
         target = tmp_path / "copy"
-        copy_sqlite_storage(storage, target)
+        copy_storage_directory(storage, target)
 
         expected = {path.relative_to(storage) for path in storage.rglob("*")}
         actual = {path.relative_to(target) for path in target.rglob("*")}
@@ -457,47 +519,77 @@ class TestCopyingSqliteStorage:
         target.mkdir()
 
         with pytest.raises(FileExistsError, match="tear the sandbox down"):
-            copy_sqlite_storage(storage, target)
+            copy_storage_directory(storage, target)
 
     def test_a_missing_source_says_so(self, tmp_path: Path) -> None:
         with pytest.raises(FileNotFoundError):
-            copy_sqlite_storage(tmp_path / "nope", tmp_path / "copy")
+            copy_storage_directory(tmp_path / "nope", tmp_path / "copy")
 
 
-class TestPostgresCopyCommands:
+class TestThePostgresCopyPipeline:
     def test_it_dumps_rather_than_using_a_template(self) -> None:
-        """`CREATE DATABASE ... TEMPLATE` is faster and unusable here.
+        """`CREATE DATABASE ... TEMPLATE` is faster and unusable here: it
+        refuses to run while any other session is connected to the source, and
+        with a daemon running that is most of the time."""
+        argv = postgres_copy_argv(_pg())
 
-        It refuses to run while any other session is connected to the source,
-        and with a daemon running or a `verdi shell` open that is most of the
-        time. `pg_dump` works against a database in use.
+        assert argv[0] == "pg_dump"
+        assert "TEMPLATE" not in " ".join(argv).upper()
+
+    def test_the_source_is_read_and_the_copy_is_written(self) -> None:
+        """Two programs, and the names must not be the wrong way round."""
+        assert _pg()["database_name"] in postgres_copy_argv(_pg())
+        assert "sandbox_db" in postgres_restore_argv(_pg(), "sandbox_db")
+
+
+class TestThePostgresSandboxStorage:
+    """What `sandbox init` registers for a PostgreSQL sandbox."""
+
+    REPOSITORY = Path("/data/agents-sandbox/repository")
+
+    def test_aiida_can_read_the_repository_it_writes(self) -> None:
+        """A plain path here made the registered profile unopenable.
+
+        `repository_uri` is a URL to aiida-core, not a path: given
+        `/data/...` rather than `file:///data/...`, `get_filepath_container`
+        raises `ConfigurationError` and the sandbox profile cannot be loaded,
+        which is the one thing it exists to be. Asserted against the function
+        that raised rather than against the string, so it stays true if
+        aiida-core changes how it reads the field.
         """
-        commands = " ".join(
-            command for _, command in postgres_copy_commands(_pg(), "s")
+        from aiida.manage.configuration.profile import Profile
+        from aiida.storage.psql_dos.backend import get_filepath_container
+
+        storage = postgres_sandbox_storage(
+            _pg(), database="aiida_db_sandbox", repository=self.REPOSITORY
+        )
+        profile = Profile(
+            "agents-sandbox",
+            {
+                "storage": {"backend": storage.backend, "config": storage.config},
+                "process_control": {"backend": None, "config": None},
+            },
         )
 
-        assert "pg_dump" in commands
-        assert "TEMPLATE" not in commands.upper()
+        assert get_filepath_container(profile) == self.REPOSITORY / "container"
 
-    def test_the_database_is_created_before_it_is_filled(self) -> None:
-        steps = [command for _, command in postgres_copy_commands(_pg(), "sandbox_db")]
-
-        assert "createdb" in steps[0]
-        assert "pg_dump" in steps[1]
-
-    def test_every_step_explains_itself(self) -> None:
-        """These are pasted into a terminal by hand; an unexplained one is a
-        command somebody runs without knowing what it does."""
-        assert all(explanation for explanation, _ in postgres_copy_commands(_pg(), "s"))
-
-    def test_awkward_database_names_are_quoted(self) -> None:
-        commands = " ".join(
-            command
-            for _, command in postgres_copy_commands(_pg(database="gsoc-psql"), "s-box")
+    def test_the_server_is_the_source_profile_s_and_the_database_is_not(self) -> None:
+        """The copy lives in the same server, under its own name."""
+        storage = postgres_sandbox_storage(
+            _pg(), database="aiida_db_sandbox", repository=self.REPOSITORY
         )
 
-        assert '"gsoc-psql"' in commands
-        assert '"s-box"' in commands
+        assert storage.config["database_name"] == "aiida_db_sandbox"
+        assert storage.config["database_hostname"] == "localhost"
+        assert storage.config["database_username"] == "aiida"
+
+    def test_it_does_not_share_storage_with_the_source(self) -> None:
+        source = _pg()
+        storage = postgres_sandbox_storage(
+            source, database="aiida_db_sandbox", repository=self.REPOSITORY
+        )
+
+        assert not _shares(POSTGRES, source, storage.backend, storage.config)
 
 
 class TestTheClonedProfile:
@@ -528,9 +620,11 @@ class TestTheClonedProfile:
     ) -> None:
         result = sandbox_profile_dictionary(source, storage)
 
-        assert not shares_storage(
-            ProfileStorage(SQLITE, {"filepath": "/data/real"}),
-            ProfileStorage(result["storage"]["backend"], result["storage"]["config"]),
+        assert not _shares(
+            SQLITE,
+            {"filepath": "/data/real"},
+            result["storage"]["backend"],
+            result["storage"]["config"],
         )
 
     def test_the_uuid_is_regenerated(

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 from click.testing import CliRunner
 
@@ -410,76 +412,6 @@ class TestSandboxCommands:
     def _patch(self, monkeypatch: pytest.MonkeyPatch, config: object) -> None:
         monkeypatch.setattr("aiida.manage.configuration.get_config", lambda: config)
 
-    def test_init_refuses_a_backend_it_cannot_copy(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Naming the limit beats a copy that half worked and looked contained."""
-        config = self._config(self._profile("real", backend="core.sqlite_zip"))
-        self._patch(monkeypatch, config)
-
-        result = CliRunner().invoke(cli, ["sandbox", "init", "--profile", "real"])
-
-        assert result.exit_code != 0
-        assert "cannot copy" in result.output
-
-    def test_init_refuses_to_overwrite_an_existing_sandbox(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Rebuilding is teardown then init, so nothing in use is copied over."""
-        config = self._config(self._profile("real"), self._profile("agents-sandbox"))
-        self._patch(monkeypatch, config)
-
-        result = CliRunner().invoke(cli, ["sandbox", "init", "--profile", "real"])
-
-        assert result.exit_code != 0
-        assert "refresh" in result.output
-
-    def test_teardown_refuses_a_sandbox_that_shares_storage(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """The last line of defence, for a sandbox registered before this
-        rule existed. Deleting it is what destroyed a real database."""
-        config = self._config(
-            self._profile("real", filepath="/data/shared"),
-            self._profile("agents-sandbox", filepath="/data/shared"),
-        )
-        self._patch(monkeypatch, config)
-
-        result = CliRunner().invoke(cli, ["sandbox", "teardown", "--yes"])
-
-        assert result.exit_code != 0
-        assert config.deleted == {}, "nothing may be deleted"  # type: ignore[attr-defined]
-
-    def test_teardown_never_asks_aiida_to_delete_the_storage(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """`delete_storage=True` is the call that did the damage in #73.
-
-        The copy's directory is removed here directly, so AiiDA is never asked
-        to delete storage on our behalf -- not even for a profile we believe is
-        self-contained.
-        """
-        config = self._config(
-            self._profile("real", filepath="/data/real"),
-            self._profile("agents-sandbox", filepath="/data/copy"),
-        )
-        self._patch(monkeypatch, config)
-
-        result = CliRunner().invoke(cli, ["sandbox", "teardown", "--yes"])
-
-        assert result.exit_code == 0
-        assert config.deleted["delete_storage"] is False  # type: ignore[attr-defined]
-
-    def test_teardown_on_a_missing_sandbox_is_not_an_error(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        self._patch(monkeypatch, self._config(self._profile("real")))
-
-        result = CliRunner().invoke(cli, ["sandbox", "teardown", "--yes"])
-
-        assert result.exit_code == 0
-        assert "nothing to tear down" in result.output
-
     @pytest.mark.parametrize(
         "others, code, expected, why",
         [
@@ -564,6 +496,300 @@ class TestSandboxCommands:
 
         assert "destroys" not in " ".join(result.output.split())
 
+    def test_init_refuses_a_backend_it_cannot_copy(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Naming the limit beats a copy that half worked and looked contained."""
+        config = self._config(self._profile("real", backend="core.sqlite_zip"))
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "init", "--profile", "real"])
+
+        assert result.exit_code != 0
+        assert "cannot copy" in result.output
+
+    def _real_storage(self, tmp_path: Path) -> Path:
+        """A storage directory with something in it worth counting."""
+        storage = tmp_path / "real-storage"
+        (storage / "container").mkdir(parents=True)
+        (storage / "database.sqlite").write_bytes(b"x" * 4096)
+        return storage
+
+    def test_init_says_what_the_copy_costs_and_waits_for_an_answer(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The copy is the whole repository, gigabytes on a real profile.
+
+        Finding that out from `df` afterwards is the behaviour this replaces,
+        so the size and the destination go out first and "n" stops it before
+        anything is written.
+        """
+        storage = self._real_storage(tmp_path)
+        config = self._config(self._profile("real", filepath=str(storage)))
+        self._patch(monkeypatch, config)
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.copy.sandbox_storage_root",
+            lambda name: tmp_path / "sandbox" / name,
+        )
+
+        result = CliRunner().invoke(
+            cli, ["sandbox", "init", "--profile", "real"], input="n\n"
+        )
+        output = " ".join(result.output.split())
+
+        assert result.exit_code == 0, "declining is an answer, not an error"
+        assert "4.1 kB" in output
+        assert str(tmp_path / "sandbox" / "agents-sandbox" / "storage") in output
+        assert not (tmp_path / "sandbox").exists(), "nothing may be copied on 'n'"
+
+    def test_init_yes_copies_without_asking(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Scripted use has to stay possible, the same way `teardown --yes` does."""
+        storage = self._real_storage(tmp_path)
+        config = self._config(self._profile("real", filepath=str(storage)))
+        self._patch(monkeypatch, config)
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.copy.sandbox_storage_root",
+            lambda name: tmp_path / "sandbox" / name,
+        )
+
+        result = CliRunner().invoke(
+            cli, ["sandbox", "init", "--profile", "real", "--yes"]
+        )
+
+        assert result.exit_code == 0
+        copy = tmp_path / "sandbox" / "agents-sandbox" / "storage"
+        assert (copy / "database.sqlite").read_bytes() == b"x" * 4096
+
+    def test_init_refuses_an_overlapping_target_before_copying_anything(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """A source that contains the sandbox root would be copied into itself.
+
+        The separation check used to run after the copy, so the refusal arrived
+        once the gigabytes were already on disk, and left them there.
+        """
+        storage = self._real_storage(tmp_path)
+        config = self._config(self._profile("real", filepath=str(storage)))
+        self._patch(monkeypatch, config)
+        # The sandbox root inside the source: the shape that copies into itself.
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.copy.sandbox_storage_root",
+            lambda name: storage / "agents-sandbox" / name,
+        )
+
+        result = CliRunner().invoke(
+            cli, ["sandbox", "init", "--profile", "real", "--yes"]
+        )
+
+        assert result.exit_code != 0
+        assert "shares storage" in result.output
+        assert not (storage / "agents-sandbox").exists(), "nothing may be copied"
+
+    def test_init_refuses_to_overwrite_an_existing_sandbox(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Rebuilding is teardown then init, so nothing in use is copied over.
+
+        Named in the message, because "already exists" without a way forward is
+        where a reader stops.
+        """
+        config = self._config(self._profile("real"), self._profile("agents-sandbox"))
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "init", "--profile", "real"])
+
+        assert result.exit_code != 0
+        assert "teardown" in result.output
+
+    def test_teardown_refuses_a_sandbox_that_shares_storage(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The last line of defence, for a sandbox registered before this
+        rule existed. Deleting it is what destroyed a real database."""
+        config = self._config(
+            self._profile("real", filepath="/data/shared"),
+            self._profile("agents-sandbox", filepath="/data/shared"),
+        )
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "teardown", "--yes"])
+
+        assert result.exit_code != 0
+        assert config.deleted == {}, "nothing may be deleted"  # type: ignore[attr-defined]
+
+    def test_teardown_asks_aiida_to_delete_the_storage(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`delete_storage=True` is the call that did the damage in #73.
+
+        It is the supported path, and it is the only one that drops a
+        PostgreSQL database rather than printing a `dropdb` whose password the
+        user does not have. What makes it safe is the check that runs
+        immediately before, which counts containment and fails closed; the test
+        above pins that nothing is deleted when it finds anything.
+        """
+        config = self._config(
+            self._profile("real", filepath="/data/real"),
+            self._profile("agents-sandbox", filepath="/data/copy"),
+        )
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "teardown", "--yes"])
+
+        assert result.exit_code == 0
+        assert config.deleted["delete_storage"] is True  # type: ignore[attr-defined]
+
+    @staticmethod
+    def _postgres_profile(name: str) -> object:
+        return TestSandboxCommands._profile(
+            name,
+            backend="core.psql_dos",
+            config={
+                "database_name": f"aiida_{name}",
+                "database_hostname": "localhost",
+                "database_port": 5432,
+                "database_username": "aiida",
+                "database_password": "pw",
+                "repository_uri": f"file:///data/{name}/repository",
+            },
+        )
+
+    def test_init_makes_the_postgres_copy_rather_than_printing_it(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Five commands and five GRANTs is a setup step nobody performs, and a
+        setup step nobody performs is a feature nobody has."""
+        self._patch(monkeypatch, self._config(self._postgres_profile("real")))
+        created: list[tuple[object, str]] = []
+        copied: list[object] = []
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.postgres.create_database",
+            lambda config, database: created.append((config, database)),
+        )
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.postgres.copy_database",
+            lambda config, database: copied.append(database),
+        )
+        monkeypatch.setattr(
+            "aiida_agents.cli.sandbox._database_exists", lambda config: False
+        )
+
+        result = CliRunner().invoke(
+            cli, ["sandbox", "init", "--profile", "real", "--yes"]
+        )
+
+        assert [database for _, database in created] == ["aiida_real_agents_sandbox"]
+        assert copied == ["aiida_real_agents_sandbox"]
+        assert "Copied into" in result.output
+
+    def test_init_copies_the_postgres_repository_as_well(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """`pg_dump` moves the database, which holds the hash of every file and
+        none of the files.
+
+        They live in a disk-objectstore container on disk, and the sandbox's
+        was only ever a path in a URI: nothing created it, so `sandbox check`
+        reported `UnreachableStorage: the container is not initialised yet` and
+        no node could ever have been opened.
+        """
+        files = tmp_path / "real-repository"
+        (files / "container").mkdir(parents=True)
+        (files / "container" / "config.json").write_text("{}")
+        source = self._postgres_profile("real")
+        source.storage_config["repository_uri"] = files.as_uri()  # type: ignore[attr-defined]
+        self._patch(monkeypatch, self._config(source))
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.copy.sandbox_storage_root",
+            lambda name: tmp_path / "sandbox" / name,
+        )
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.postgres.create_database", lambda config, name: None
+        )
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.postgres.copy_database", lambda config, database: None
+        )
+        monkeypatch.setattr(
+            "aiida_agents.cli.sandbox._database_exists", lambda config: False
+        )
+
+        result = CliRunner().invoke(
+            cli, ["sandbox", "init", "--profile", "real", "--yes"]
+        )
+
+        copied = tmp_path / "sandbox" / "agents-sandbox" / "repository"
+        assert result.exit_code == 0, result.output
+        assert (copied / "container" / "config.json").exists()
+
+    def test_init_says_what_the_postgres_repository_copy_costs(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The database question was asked and the repository was copied
+        unannounced, and the repository is the large half of a PostgreSQL
+        profile: gigabytes went with no size, no destination and no free-space
+        line, where the SQLite path reports all three."""
+        files = tmp_path / "real-repository"
+        (files / "container").mkdir(parents=True)
+        (files / "container" / "config.json").write_text("{}")
+        source = self._postgres_profile("real")
+        source.storage_config["repository_uri"] = files.as_uri()  # type: ignore[attr-defined]
+        config = self._config(source)
+        self._patch(monkeypatch, config)
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.copy.sandbox_storage_root",
+            lambda name: tmp_path / "sandbox" / name,
+        )
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.postgres.create_database", lambda config, name: None
+        )
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.postgres.copy_database", lambda config, database: None
+        )
+        monkeypatch.setattr(
+            "aiida_agents.cli.sandbox._database_exists", lambda config: False
+        )
+
+        # Yes to the database, no to the repository.
+        result = CliRunner().invoke(
+            cli, ["sandbox", "init", "--profile", "real"], input="y\nn\n"
+        )
+        output = " ".join(result.output.split())
+
+        assert result.exit_code == 0
+        assert str(files) in output, "the source it would read"
+        assert "free there" in output, "and whether it fits"
+        assert not (tmp_path / "sandbox" / "agents-sandbox" / "repository").exists()
+        registered = [profile.name for profile in config.profiles]  # type: ignore[attr-defined]
+        assert registered == ["real"], "nothing registered on 'n'"
+
+    def test_init_falls_back_to_printing_when_it_cannot(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A managed server, a remote host, no sudo. The printed commands were
+        the whole feature until now and are still the only road there."""
+        from aiida_agents.sandbox.postgres import PostgresUnavailableError
+
+        self._patch(monkeypatch, self._config(self._postgres_profile("real")))
+
+        def _refuse(config: object, database: str) -> None:
+            raise PostgresUnavailableError("no superuser connection here")
+
+        monkeypatch.setattr("aiida_agents.sandbox.postgres.create_database", _refuse)
+        monkeypatch.setattr(
+            "aiida_agents.cli.sandbox._database_exists", lambda config: False
+        )
+
+        result = CliRunner().invoke(
+            cli, ["sandbox", "init", "--profile", "real", "--yes"]
+        )
+        output = " ".join(result.output.split())
+
+        assert "no superuser connection here" in output
+        assert "aiida_real_agents_sandbox" in output, "name the database it needed"
+        assert "init" in output, "and how to carry on once it exists"
+
     def test_a_profile_named_like_rich_markup_survives_the_output(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
@@ -584,6 +810,70 @@ class TestSandboxCommands:
         )
 
         assert "aiida[test]" in result.output
+
+    def test_teardown_names_the_storage_it_is_about_to_remove(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """It asked "delete profile X and its copy?", which reads as a copy of
+        the profile: the one thing it does not delete. Both halves are named
+        now, and the storage half by size and path."""
+        storage = self._real_storage(tmp_path)
+        config = self._config(
+            self._profile("real", filepath="/data/real"),
+            self._profile("agents-sandbox", filepath=str(storage)),
+        )
+        self._patch(monkeypatch, config)
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.copy.sandbox_storage_root", lambda name: storage
+        )
+
+        result = CliRunner().invoke(cli, ["sandbox", "teardown"], input="n\n")
+        output = " ".join(result.output.split())
+
+        assert "4.1 kB" in output
+        assert str(storage) in output
+        assert storage.exists(), "nothing may be removed on 'n'"
+
+    def test_teardown_removes_the_profile_even_if_the_storage_will_not_go(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A database that cannot be reached, a directory already gone.
+
+        The profile still has to go, or the next `init` refuses because it
+        exists, and what was left behind has to be said rather than implied by
+        a traceback.
+        """
+
+        def _refuse(name: str, delete_storage: bool = True) -> None:
+            if delete_storage:
+                raise RuntimeError("could not connect to the server")
+
+        config = self._config(
+            self._profile("real", filepath="/data/real"),
+            self._profile("agents-sandbox", filepath="/data/copy"),
+        )
+        monkeypatch.setattr(config, "delete_profile", _refuse)
+        self._patch(monkeypatch, config)
+
+        result = CliRunner().invoke(cli, ["sandbox", "teardown", "--yes"])
+        output = " ".join(result.output.split())
+
+        assert result.exit_code == 0
+        assert "not its storage" in output
+        assert "could not connect to the server" in output
+        # It went on to claim the storage had gone, one line under the warning
+        # that it had not, and for PostgreSQL the database is still there.
+        assert "the storage it copied" not in output
+
+    def test_teardown_on_a_missing_sandbox_is_not_an_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        self._patch(monkeypatch, self._config(self._profile("real")))
+
+        result = CliRunner().invoke(cli, ["sandbox", "teardown", "--yes"])
+
+        assert result.exit_code == 0
+        assert "nothing to tear down" in result.output
 
 
 class TestRootOptionsWorkOnEitherSideOfTheCommand:

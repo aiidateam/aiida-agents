@@ -18,11 +18,14 @@ import enum
 import shutil
 import typing as t
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from urllib.parse import urlparse
 from urllib.request import url2pathname
 
+from rich.filesize import decimal
 from typing_extensions import assert_never
 
 __all__ = [
@@ -37,15 +40,24 @@ __all__ = [
     "StorageConfig",
     "ConfigLike",
     "ProfileLike",
+    "WritableConfigLike",
     "profile_storage",
     "profiles_sharing_storage",
     "register_profile",
+    "copy_storage_directory",
+    "postgres_copy_argv",
+    "postgres_restore_argv",
+    "postgres_sandbox_storage",
+    "repository_path",
+    "SOURCE_KEY",
     "sandbox_profile_dictionary",
     "sandbox_profile_exists",
+    "sandbox_source",
     "sandbox_storage_root",
     "shares_storage",
     "storage_locations",
     "storage_overlap",
+    "storage_size",
 ]
 
 # Backends this module knows how to copy. Anything else is refused by name
@@ -92,6 +104,19 @@ class ConfigLike(t.Protocol):
 
     @property
     def profiles(self) -> t.Sequence[ProfileLike]: ...
+
+
+class WritableConfigLike(ConfigLike, t.Protocol):
+    """A configuration that can also be added to, for :func:`register_profile`.
+
+    Separate from :class:`ConfigLike` so that reading does not demand a config
+    that can be written: the stubs the tests hand the read path have no reason
+    to grow an ``add_profile``.
+    """
+
+    def add_profile(self, profile: t.Any) -> None: ...
+
+    def store(self) -> None: ...
 
 
 @dataclass(frozen=True)
@@ -363,14 +388,9 @@ def profiles_sharing_storage(config: ConfigLike, name: str) -> list[SharingProfi
     return found
 
 
-#: Where the sandbox records which profile it was copied from. A profile
-#: called `agents-sandbox` says what it is and not what it holds, and with
-#: several real profiles in a configuration that is the question anybody
-#: reading `verdi profile list` actually has.
-SOURCE_KEY: t.Final = "agents_sandbox_source"
-
-
-def register_profile(config: t.Any, name: str, dictionary: dict[str, t.Any]) -> None:
+def register_profile(
+    config: WritableConfigLike, name: str, dictionary: StorageConfig
+) -> None:
     """Add a profile to the AiiDA configuration and persist it.
 
     Here rather than inline at the call sites so AiiDA's untyped configuration
@@ -382,8 +402,42 @@ def register_profile(config: t.Any, name: str, dictionary: dict[str, t.Any]) -> 
     config.store()
 
 
-def copy_sqlite_storage(source: Path, target: Path) -> None:
-    """Copy a ``core.sqlite_dos`` storage directory wholesale.
+def storage_size(path: Path) -> int:
+    """Total bytes of the files under ``path``.
+
+    What a copy of it will write, and so what the disk must have room for and
+    what a progress bar counts up to.
+
+    Raises:
+        FileNotFoundError: If ``path`` is not a directory.
+    """
+    if not path.is_dir():
+        msg = f"storage directory {path} does not exist"
+        raise FileNotFoundError(msg)
+    return sum(item.stat().st_size for item in path.rglob("*") if item.is_file())
+
+
+def _copy_file(
+    source: str, target: str, *, progress: Callable[[int], None] | None
+) -> None:
+    """``shutil.copy2`` in chunks, reporting each one as it lands.
+
+    ``copytree`` calls its copy function once per file, and a packed
+    disk-objectstore is two files of several gigabytes, so counting files would
+    leave the bar at nothing until it is nearly finished.
+    """
+    with open(source, "rb") as reader, open(target, "wb") as writer:
+        while chunk := reader.read(_COPY_CHUNK_BYTES):
+            writer.write(chunk)
+            if progress is not None:
+                progress(len(chunk))
+    shutil.copystat(source, target)
+
+
+def copy_storage_directory(
+    source: Path, target: Path, *, progress: Callable[[int], None] | None = None
+) -> None:
+    """Copy a storage directory wholesale.
 
     The whole directory, not just ``database.sqlite``: the disk-objectstore
     container beside it holds every file the nodes refer to, and a database
@@ -393,20 +447,29 @@ def copy_sqlite_storage(source: Path, target: Path) -> None:
     Args:
         source: The source profile's ``filepath``.
         target: Where the copy goes. Must not already exist.
+        progress: Called with the number of bytes as each chunk lands, for a
+            caller showing how far along the copy is.
 
     Raises:
         FileNotFoundError: If ``source`` is not a directory.
         FileExistsError: If ``target`` exists --- refreshing is an explicit
             teardown, never an overwrite of something already in use.
+        OSError: If the filesystem has less room than the source occupies.
     """
-    if not source.is_dir():
-        msg = f"storage directory {source} does not exist"
-        raise FileNotFoundError(msg)
+    required = storage_size(source)
     if target.exists():
         msg = f"{target} already exists; tear the sandbox down before rebuilding it"
         raise FileExistsError(msg)
 
     target.parent.mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(target.parent).free
+    if free < required:
+        msg = (
+            f"copying {source} needs {decimal(required)} and {target.parent} has "
+            f"{decimal(free)} free"
+        )
+        raise OSError(msg)
+
     # Everything, verbatim. The first version skipped disk-objectstore's
     # `sandbox/` scratch directory on the grounds that a copy which never writes
     # has no use for in-flight writes. That was true and it did not matter:
@@ -414,48 +477,96 @@ def copy_sqlite_storage(source: Path, target: Path) -> None:
     # loaded as an uninitialised container and every query raised
     # `UnreachableStorage`. Copy the layout as it is and let the backend decide
     # what it needs.
-    shutil.copytree(source, target)
+    try:
+        shutil.copytree(
+            source, target, copy_function=partial(_copy_file, progress=progress)
+        )
+    except OSError:
+        # A half-written copy is worse than none: it answers queries wrongly,
+        # and the next attempt refuses it as something already in use.
+        shutil.rmtree(target, ignore_errors=True)
+        raise
 
 
-def postgres_copy_commands(
-    config: dict[str, t.Any], sandbox_database: str
-) -> list[tuple[str, str]]:
-    """The shell commands that copy a Postgres database, with explanations.
-
-    Printed rather than run for the same reason the role SQL is: creating a
-    database needs a privilege the profile's own user usually does not have, and
-    asking for a superuser connection in order to configure a safety feature is
-    a worse bargain than showing somebody two commands they can read.
-
-    ``pg_dump | psql`` rather than ``CREATE DATABASE ... TEMPLATE ...``. The
-    template form is much faster, and fails outright while any other session is
-    connected to the source --- which, with a daemon running or a ``verdi
-    shell`` open, is most of the time.
-
-    Returns:
-        ``(explanation, command)`` pairs, in the order they must be run.
-    """
+def _connection_arguments(config: StorageConfig) -> tuple[str, ...]:
     host = config.get("database_hostname") or "localhost"
     port = config.get("database_port") or 5432
     user = config.get("database_username") or ""
-    source = config.get("database_name") or ""
-    connection = f"--host {host} --port {port} --username {user}"
+    return ("--host", str(host), "--port", str(port), "--username", str(user))
 
-    return [
-        (
-            "Create the database the copy will live in",
-            f'createdb {connection} "{sandbox_database}"',
-        ),
-        (
-            "Copy the data across (works while the source profile is in use)",
-            f'pg_dump {connection} --no-owner --no-privileges "{source}" '
-            f'| psql {connection} --quiet "{sandbox_database}"',
-        ),
-    ]
+
+def postgres_copy_argv(config: StorageConfig) -> tuple[str, ...]:
+    """``pg_dump`` reading the profile's own database, for the pipeline
+    that fills the sandbox's.
+
+    ``pg_dump`` rather than ``CREATE DATABASE ... TEMPLATE``: the template form
+    is much faster and refuses to run while any other session is connected to
+    the source, which with a daemon running is most of the time.
+    """
+    connection = _connection_arguments(config)
+    source = str(config.get("database_name") or "")
+    return ("pg_dump", *connection, "--no-owner", "--no-privileges", source)
+
+
+def postgres_restore_argv(config: StorageConfig, database: str) -> tuple[str, ...]:
+    """``psql`` writing into the copy, reading what :func:`postgres_copy_argv` sends."""
+    return ("psql", *_connection_arguments(config), "--quiet", database)
+
+
+def repository_path(config: StorageConfig) -> Path | None:
+    """Where a Postgres profile keeps its files, or ``None`` if it does not say.
+
+    The other half of copying such a profile. ``pg_dump`` moves the database,
+    which holds the *hashes* of every file; the objects those hashes name live
+    in a disk-objectstore container on the filesystem, and a copy without it
+    raises ``UnreachableStorage`` on the first node anybody opens.
+    """
+    return _storage_path(config.get("repository_uri"))
+
+
+def postgres_sandbox_storage(
+    source_config: StorageConfig, *, database: str, repository: Path
+) -> ProfileStorage:
+    """The sandbox's own Postgres storage, cloned from the source profile's.
+
+    Server, port and credentials come across because the copy lives in the same
+    server; only the database and the repository are its own.
+
+    The repository is written as a ``file://`` URL because that is what
+    aiida-core requires of ``repository_uri``: given a plain path,
+    ``get_filepath_container`` raises ``ConfigurationError`` and the registered
+    profile cannot be opened at all.
+    """
+    return ProfileStorage(
+        "core.psql_dos",
+        {
+            **source_config,
+            "database_name": database,
+            "repository_uri": repository.as_uri(),
+        },
+    )
+
+
+#: Where the sandbox records which profile it was copied from. A profile
+#: called `agents-sandbox` says what it is and not what it holds, and with
+#: several real profiles in a configuration that is the question anybody
+#: reading `verdi profile list` actually has.
+SOURCE_KEY: t.Final = "agents_sandbox_source"
+
+
+def sandbox_source(profile: ProfileLike) -> str | None:
+    """The profile a sandbox was copied from, if it recorded one.
+
+    ``None`` for a sandbox built before this was written down, which is why
+    every caller has to phrase it as an addition rather than an assumption.
+    """
+    dictionary = getattr(profile, "dictionary", None) or {}
+    source = dictionary.get(SOURCE_KEY)
+    return source if isinstance(source, str) else None
 
 
 def sandbox_profile_dictionary(
-    source: dict[str, t.Any], storage: ProfileStorage
+    source: StorageConfig, storage: ProfileStorage, *, source_name: str = ""
 ) -> dict[str, t.Any]:
     """A profile configuration for the sandbox, cloned from the source profile's.
 
@@ -477,6 +588,10 @@ def sandbox_profile_dictionary(
     ``options`` are dropped. They configure a working profile --- polling
     intervals, daemon timeouts --- and none of it applies to something that only
     answers queries.
+
+    One field is added: the name of the profile this was copied from, so that
+    everything downstream can say *which* profile the sandbox mirrors rather
+    than leaving somebody with four profiles to guess.
     """
     return {
         "storage": {"backend": storage.backend, "config": dict(storage.config)},
@@ -485,4 +600,5 @@ def sandbox_profile_dictionary(
         "PROFILE_UUID": uuid.uuid4().hex,
         "test_profile": False,
         "options": {},
+        SOURCE_KEY: source_name,
     }
