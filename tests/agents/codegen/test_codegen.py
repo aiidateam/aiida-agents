@@ -104,7 +104,7 @@ class TestExecutionToolSafety:
         from aiida_agents.tools.codegen import execution
 
         monkeypatch.setattr(
-            "aiida_agents.sandbox.setup.sandbox_profile_exists",
+            "aiida_agents.sandbox.copy.sandbox_profile_exists",
             lambda profile: False,
         )
         ran: list[str] = []
@@ -124,11 +124,70 @@ class TestExecutionToolSafety:
         from aiida_agents.tools.codegen import execution
 
         monkeypatch.setattr(
-            "aiida_agents.sandbox.setup.sandbox_profile_exists",
+            "aiida_agents.sandbox.copy.sandbox_profile_exists",
             lambda profile: False,
         )
 
         assert "do NOT claim to have run it" in execution.run_aiida_code("print(1)")
+
+    def test_it_refuses_a_profile_that_is_not_separate(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`sandbox check` proves separation; this proves it again when it counts.
+
+        The setting is a profile name and nothing stops it naming the user's
+        own profile, which is issue #73 with one extra step.
+        """
+        from aiida_agents.sandbox.copy import Overlap, SharingProfile
+        from aiida_agents.tools.codegen import execution
+
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.copy.sandbox_profile_exists",
+            lambda profile: True,
+        )
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.copy.profiles_sharing_storage",
+            lambda config, name: [
+                SharingProfile(
+                    name="real", backend="core.sqlite_dos", overlap=Overlap.SHARED
+                )
+            ],
+        )
+        ran: list[str] = []
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.run_in_sandbox",
+            lambda *a, **k: ran.append("ran"),
+        )
+
+        result = execution.run_aiida_code("print(1)")
+
+        assert ran == []
+        assert "shares storage" in result
+        assert "do NOT claim to have run it" in result
+
+    def test_a_check_that_cannot_be_made_refuses_too(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Whatever went wrong, separation was not proved."""
+        from aiida_agents.tools.codegen import execution
+
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.copy.sandbox_profile_exists",
+            lambda profile: True,
+        )
+
+        def _boom(config: object, name: str) -> list[object]:
+            raise RuntimeError("no config here")
+
+        monkeypatch.setattr("aiida_agents.sandbox.copy.profiles_sharing_storage", _boom)
+        ran: list[str] = []
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.run_in_sandbox",
+            lambda *a, **k: ran.append("ran"),
+        )
+
+        assert "not run" in execution.run_aiida_code("print(1)")
+        assert ran == []
 
     def test_it_runs_against_the_configured_profile(
         self, monkeypatch: pytest.MonkeyPatch
@@ -138,8 +197,12 @@ class TestExecutionToolSafety:
 
         monkeypatch.setenv("AIIDA_AGENTS_SANDBOX_PROFILE", "my-readonly")
         monkeypatch.setattr(
-            "aiida_agents.sandbox.setup.sandbox_profile_exists",
+            "aiida_agents.sandbox.copy.sandbox_profile_exists",
             lambda profile: True,
+        )
+        monkeypatch.setattr(
+            "aiida_agents.sandbox.copy.profiles_sharing_storage",
+            lambda config, name: [],
         )
         seen: dict[str, t.Any] = {}
 

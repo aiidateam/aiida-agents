@@ -1,9 +1,11 @@
 """Tools owned by the Codegen agent: running the Python it just wrote.
 
 One tool, and the interesting thing about it is what it is *not*. It is not
-approval-gated, because it cannot write: it runs against a profile whose
-database role has no INSERT privilege, in a subprocess, behind a static guard
-(see :mod:`aiida_agents.sandbox`).
+approval-gated, because nothing it does to the profile reaches the user's own:
+it runs against a disposable copy of their storage, in a subprocess, behind a
+static guard (see :mod:`aiida_agents.sandbox`). That containment covers the
+AiiDA storage and stops there --- the filesystem and the network the subprocess
+sees are the real ones.
 
 That is the point of the whole arrangement. An approval prompt showing twenty
 lines of unexecuted Python asks the user to review something they cannot

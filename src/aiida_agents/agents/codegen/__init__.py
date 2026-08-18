@@ -17,8 +17,8 @@ agent that did neither well.
 What it does *not* have is a write tool, and that is deliberate. Executing
 generated code sounds like the most dangerous thing in this project, and it
 would be if it ran against the user's live profile. It does not: it runs
-against one whose database role has no INSERT privilege, so the danger is
-handled at the database rather than by asking a user to vet Python at a prompt.
+against a disposable copy of their storage, so the danger is handled by what
+the code can reach rather than by asking a user to vet Python at a prompt.
 Approving twenty lines of unexecuted code is a weak check. Reading what the
 code actually returned is a real one --- which is why this agent is not gated
 and every tool that genuinely writes still is, on the Execution agent, where

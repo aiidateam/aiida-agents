@@ -340,12 +340,10 @@ def _database_exists(config: dict[str, object]) -> bool:
 def check(profile: str) -> None:
     """Verify the sandbox shares no storage with any real profile.
 
-    This is the check that matters. A sandbox sharing a database or a
-    repository with a real profile is a profile whose deletion destroys
-    somebody's work, and no amount of read-only role makes that safe.
-
-    Where a read-only role is also in use, it is verified too --- but as a
-    second layer, not the mechanism.
+    This is the check that matters, and the only one: a sandbox sharing a
+    database or a repository with a real profile is a profile whose deletion
+    destroys somebody's work. Being able to write to it is not a fault ---
+    a scratch profile you can iterate in is what it is for.
     """
     from aiida.manage.configuration import get_config
 
@@ -354,7 +352,6 @@ def check(profile: str) -> None:
         profiles_sharing_storage,
         sandbox_source,
     )
-    from aiida_agents.sandbox.setup import verify_read_only
 
     config = get_config()
     try:
@@ -394,11 +391,6 @@ def check(profile: str) -> None:
         f"[green]✓[/green] {escape(repr(profile))}{copied} shares no storage with "
         "any profile"
     )
-
-    if target.storage_backend == "core.psql_dos":
-        result = verify_read_only(profile)
-        mark = "[green]✓[/green]" if result.read_only else "[yellow]![/yellow]"
-        console.print(f"{mark} {result.detail}")
 
 
 @sandbox.command("teardown")

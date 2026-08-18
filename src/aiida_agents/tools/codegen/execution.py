@@ -12,29 +12,43 @@ __all__ = ["run_aiida_code"]
 
 _NOT_CONFIGURED = (
     "No sandbox profile is configured, so this code cannot be run. Tell the "
-    "user to run `aiida-agents sandbox init` once to create a read-only "
-    "profile, then `aiida-agents sandbox check` to confirm it. Do NOT run the "
+    "user to run `aiida-agents sandbox init` once to copy their storage into "
+    "one, then `aiida-agents sandbox check` to confirm it. Do NOT run the "
     "code any other way, and do NOT claim to have run it: show them the "
     "snippet and say it is unverified."
 )
 
+_NOT_SEPARATE = (
+    "The configured sandbox profile shares storage with another profile, so "
+    "this code was not run: anything it did would land in data that is not the "
+    "sandbox's. Tell the user to run `aiida-agents sandbox check`, which names "
+    "the profile it overlaps with. Do NOT run the code any other way, and do "
+    "NOT claim to have run it: show them the snippet and say it is unverified."
+)
+
 
 def run_aiida_code(code: str) -> str:
-    """Run Python against the user's AiiDA data and return what it printed.
+    """Run Python against a copy of the user's AiiDA data and return what it printed.
 
     Use this to **check the code you just wrote before showing it to the
-    user**. It runs against their real database, so the output is a real
-    answer --- and if the snippet is wrong you get the traceback instead of
-    them getting a broken snippet.
+    user**. It runs against a copy of their database, made when they set the
+    sandbox up, so the output is a real answer over their real provenance ---
+    and if the snippet is wrong you get the traceback instead of them getting a
+    broken snippet.
 
     Always ``print()`` what you want to see; a bare expression on the last line
     produces nothing, exactly as in a script.
 
-    The profile this runs against **cannot write**. Its database role has no
-    INSERT privilege, so anything that stores, deletes or submits will be
-    refused --- by Postgres, not by politeness. Do not attempt writes here: to
-    submit a workflow or import a structure, say so and let the Execution agent
+    **Nothing you do to this profile reaches the user's own.** Writes are
+    refused before the code runs, and one that slips past that check lands in
+    the copy, where nobody but you will ever see it. So never report having
+    stored, submitted, deleted or changed anything, however plainly the output
+    says you did: to change the user's data, say so and let the Execution agent
     do it behind its approval prompt.
+
+    That covers the AiiDA profile and nothing else. The filesystem and the
+    network are the user's real ones, so code that reads their files or reaches
+    out over the network is not made harmless by the copy.
 
     If the code is refused or raises, read the reason, fix the snippet and try
     again. Show the user code that has run, not code you hope works.
@@ -47,8 +61,13 @@ def run_aiida_code(code: str) -> str:
         What the code printed, or the reason it was refused, timed out or
         raised.
     """
+    from aiida.manage.configuration import get_config
+
     from aiida_agents.sandbox import run_in_sandbox
-    from aiida_agents.sandbox.setup import sandbox_profile_exists
+    from aiida_agents.sandbox.copy import (
+        profiles_sharing_storage,
+        sandbox_profile_exists,
+    )
 
     settings = SandboxSettings()
     profile = settings.sandbox_profile
@@ -59,6 +78,25 @@ def run_aiida_code(code: str) -> str:
     if not sandbox_profile_exists(profile):
         logger.warning("sandbox profile %r is not configured", profile)
         return _NOT_CONFIGURED
+
+    # `sandbox check` proves separation; this proves it again at the moment it
+    # matters. The setting is a profile name, and nothing stops it naming the
+    # user's own profile --- which is issue #73 with an extra step.
+    try:
+        sharing = profiles_sharing_storage(get_config(), profile)
+    except Exception:
+        # Deliberately broad, and deliberately fails closed: whatever went
+        # wrong, separation was not proved, and the answer to "I could not
+        # tell" here has to be the same as the answer to "they share".
+        logger.warning("could not verify sandbox profile %r", profile, exc_info=True)
+        return _NOT_SEPARATE
+    if sharing:
+        logger.warning(
+            "sandbox profile %r is not separate: %s",
+            profile,
+            ", ".join(entry.name for entry in sharing),
+        )
+        return _NOT_SEPARATE
 
     result = run_in_sandbox(code, profile=profile, timeout=settings.sandbox_timeout)
     logger.info(

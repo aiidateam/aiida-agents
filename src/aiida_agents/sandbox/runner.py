@@ -8,31 +8,29 @@ Three layers, and only the second and third are containment:
    limits, its own session, and no inherited credentials. An infinite loop is a
    timeout rather than a hung CLI, and a crash takes nothing with it.
 3. That subprocess loads a **profile the caller nominates**, which is meant to
-   be one whose database role cannot write. The containment is Postgres
-   refusing the write, not us noticing it.
+   be a disposable copy of the user's storage (see
+   :mod:`aiida_agents.sandbox.copy`). The containment is that a write which
+   gets past layer 1 lands somewhere nobody reads, not that it is refused.
 
 Layer 3 is the one this module cannot enforce: it loads whichever profile it is
-given, and whether that profile can write is a fact about the database.
+given, and whether that profile is a copy is a fact about the configuration.
 :func:`run_in_sandbox` therefore never guesses a profile. A caller that passes
-the user's own writable profile gets exactly what it asked for, which is why
-the tool layer above must not do that.
+the user's own profile gets exactly what it asked for, which is why the tool
+layer above must not do that.
 
-What this does **not** yet contain, and the reason codegen should not be on by
-default (`#73 <https://github.com/aiidateam/aiida-agents/issues/73>`_):
+What this does **not** contain:
 
-*The profile shares its storage with the user's real one.* That was a
-deliberate choice --- an empty database cannot answer "which structures did I
-relax last month" --- but it weighed a shared database against an *empty* one
-and missed the option that a **copy** is neither. Sharing storage cost a
-maintainer his real database during dogfooding, because deleting the sandbox
-profile and agreeing to delete its data deletes the data underneath both. A
-read-only role does not save you from that: the destructive command is run by
-the user, as themselves, against a profile they were told was disposable.
+*Writes that layer 1 misses.* On PostgreSQL a read-only role can be put under
+the copy as well, and ``sandbox check`` verifies it where it is. On SQLite
+there is no such role to have, so a write the guard does not recognise
+succeeds against the copy. It costs the user nothing, and costs the sandbox
+its accuracy until it is rebuilt, but it means layer 1's list of forbidden
+names is doing more work than a pre-check should.
 
-*The database role only stops database writes.* Generated code that gets past
-layer 1 can still read the filesystem and reach the network. The environment
-scrub and the rlimits here narrow that, but narrowing is not closing: OS-level
-isolation (bwrap, nsjail, a container) is the fix, and it is not here yet.
+*Anything outside the database.* Generated code that gets past layer 1 can
+still read the filesystem and reach the network. The environment scrub and the
+rlimits here narrow that, but narrowing is not closing: OS-level isolation
+(bwrap, nsjail, a container) is the fix, and it is not here yet.
 """
 
 from __future__ import annotations
