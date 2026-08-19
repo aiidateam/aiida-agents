@@ -30,6 +30,7 @@ from aiida_agents._settings import (
     ModelSettings,
     OllamaSettings,
     RagSettings,
+    SandboxSettings,
     ServerSettings,
     _Base,
     _EmbedBackend,
@@ -474,6 +475,39 @@ def test_every_settings_group_is_exported_from_the_package_root() -> None:
     assert not unreachable, (
         f"listed in __all__ but never imported: {sorted(unreachable)}"
     )
+
+
+def test_snippet_timeout_matches_the_runner() -> None:
+    """The setting's default and ceiling are the runner's own.
+
+    ``run_in_sandbox`` clamps whatever it is handed, so a value the setting
+    accepts but the runner would clamp is one ``config show`` reports and the
+    sandbox then ignores. The two are separate constants, because
+    ``aiida_agents/__init__`` promises the settings depend on nothing beyond
+    pydantic and importing the sandbox package would break that, so pin them
+    against each other here.
+    """
+    from aiida_agents.sandbox.runner import DEFAULT_TIMEOUT_SECONDS, MAX_TIMEOUT_SECONDS
+
+    assert SandboxSettings().snippet_timeout == DEFAULT_TIMEOUT_SECONDS
+    at_ceiling = SandboxSettings(snippet_timeout=MAX_TIMEOUT_SECONDS)
+    assert at_ceiling.snippet_timeout == MAX_TIMEOUT_SECONDS
+
+
+@pytest.mark.parametrize("value", ["0.5", "10000"], ids=["below-floor", "above-cap"])
+def test_out_of_range_snippet_timeout_is_rejected_not_clamped(
+    value: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """An unusable timeout fails at load rather than being quietly corrected.
+
+    The runner clamps to ``[1, 300]``. Without bounds on the field a user who
+    set 10000 saw 10000 in ``config show``, got killed at 300, and had nothing
+    to connect the two.
+    """
+    monkeypatch.setenv("AIIDA_AGENTS_SNIPPET_TIMEOUT", value)
+    with pytest.raises(ValidationError) as excinfo:
+        SandboxSettings()
+    assert "snippet_timeout" in _format_validation_error(excinfo.value)
 
 
 @pytest.mark.parametrize("settings_cls", _SETTINGS_GROUPS, ids=lambda c: c.__name__)

@@ -302,3 +302,25 @@ def test_a_sharing_sandbox_is_not_sent_to_a_command_that_would_refuse(
     row = _rows_by_label()["Codegen sandbox (disposable copy)"]
 
     assert "refresh" not in row.detail
+
+
+def test_an_invalid_sandbox_setting_names_the_setting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The row says which setting is wrong, and the report still prints.
+
+    Left to the broad ``except Exception`` this rendered as "1 validation error
+    for SandboxSettings", naming neither the setting nor the fix. It stays a row
+    rather than becoming a raised error because diagnosing a broken setup is the
+    whole job: the other checks are still worth seeing.
+    """
+    from aiida_agents.cli.doctor import _check_sandbox
+
+    monkeypatch.setenv("AIIDA_AGENTS_SNIPPET_TIMEOUT", "10000")
+
+    row = _check_sandbox()
+
+    assert row.ok is False
+    assert "snippet_timeout" in row.detail
+    assert "less than or equal to 300" in row.detail
+    assert "\n" not in row.detail  # one table cell, one line

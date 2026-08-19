@@ -12,10 +12,11 @@ from __future__ import annotations
 from typing import NamedTuple
 
 import rich_click as click
+from pydantic import ValidationError
 from rich.markup import escape
 from typing_extensions import assert_never
 
-from aiida_agents._settings import ModelSettings
+from aiida_agents._settings import ModelSettings, _format_validation_error
 from aiida_agents.cli._guards import _needs_recognized_settings
 from aiida_agents.cli.agent import _resolve_settings_or_fail
 from aiida_agents.cli.output import console
@@ -152,6 +153,13 @@ def _check_sandbox() -> _DiagnosticRow:
                 + "; `aiida-agents sandbox check` spells out what to do",
             )
         return _DiagnosticRow(label, True, "own copy, shared with nothing")
+    except ValidationError as exc:
+        # Named before the broad except below, which would render this as "1
+        # validation error for SandboxSettings": neither the setting nor the
+        # fix. One red row rather than a raised error, so the rest of the
+        # report still prints; diagnosing a broken setup is the whole job.
+        reason = "; ".join(_format_validation_error(exc).splitlines())
+        return _DiagnosticRow(label, False, reason)
     except Exception as exc:
         return _DiagnosticRow(label, False, _short_reason(exc))
 

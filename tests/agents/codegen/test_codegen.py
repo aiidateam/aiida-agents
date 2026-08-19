@@ -222,3 +222,24 @@ class TestExecutionToolSafety:
 
         assert execution.run_aiida_code("print(42)") == "42"
         assert seen["profile"] == "my-readonly"
+
+    def test_invalid_settings_refuse_rather_than_raise(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bad setting is refused in words, never handed over as a traceback.
+
+        ``snippet_timeout`` is bounded, so an out-of-range value now fails at
+        load. Letting that escape would put a pydantic ``ValidationError`` in
+        front of the model, which would set about debugging a snippet that was
+        never the problem.
+        """
+        from aiida_agents.tools.codegen import execution
+
+        monkeypatch.setenv("AIIDA_AGENTS_SNIPPET_TIMEOUT", "10000")
+
+        result = execution.run_aiida_code("print(42)")
+
+        assert "snippet_timeout" in result
+        assert "less than or equal to 300" in result
+        # The standing rule for every refusal path: never claim it ran.
+        assert "do NOT claim to have run it" in result

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from aiida_agents._settings import SandboxSettings
+from pydantic import ValidationError
+
+from aiida_agents._settings import SandboxSettings, _format_validation_error
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +26,14 @@ _NOT_SEPARATE = (
     "sandbox's. Tell the user to run `aiida-agents sandbox check`, which names "
     "the profile it overlaps with. Do NOT run the code any other way, and do "
     "NOT claim to have run it: show them the snippet and say it is unverified."
+)
+
+_MISCONFIGURED = (
+    "The sandbox settings are invalid, so this code was not run: {reason}. "
+    "Tell the user to fix that setting (`aiida-agents config show` lists it "
+    "with its env var) and try again. Do NOT run the code any other way, and "
+    "do NOT claim to have run it: show them the snippet and say it is "
+    "unverified."
 )
 
 
@@ -69,7 +79,15 @@ def run_aiida_code(code: str) -> str:
         sandbox_profile_exists,
     )
 
-    settings = SandboxSettings()
+    # Same reasoning as the profile check below: a settings error is the user's
+    # to fix, and reaching the model as a traceback only invites it to debug the
+    # snippet, which was never the problem.
+    try:
+        settings = SandboxSettings()
+    except ValidationError as exc:
+        reason = _format_validation_error(exc)
+        logger.warning("sandbox settings are invalid: %s", reason)
+        return _MISCONFIGURED.format(reason=reason)
     profile = settings.sandbox_profile
 
     # Checked before running rather than letting ``load_profile`` fail inside
@@ -98,7 +116,7 @@ def run_aiida_code(code: str) -> str:
         )
         return _NOT_SEPARATE
 
-    result = run_in_sandbox(code, profile=profile, timeout=settings.sandbox_timeout)
+    result = run_in_sandbox(code, profile=profile, timeout=settings.snippet_timeout)
     logger.info(
         "sandbox run: ok=%s refused=%s timed_out=%s in %.1fs",
         result.ok,

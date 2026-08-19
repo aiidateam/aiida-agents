@@ -201,9 +201,15 @@ class SandboxSettings(_Base):
     AiiDA data. Outside the database it only narrows: a snippet that gets past
     the import guard can still read the filesystem and reach the network."""
 
-    sandbox_timeout: float = Field(default=30.0, gt=0)
-    """Seconds a snippet may run before it is killed. A query over a large
-    provenance graph is slow; an accidental ``while True`` is forever."""
+    # Bounds and default mirror ``sandbox.runner``'s own, which clamps whatever
+    # it is handed. Duplicated rather than imported: ``aiida_agents/__init__``
+    # promises the settings depend on nothing beyond pydantic, and
+    # ``test_snippet_timeout_matches_the_runner`` pins the two together.
+    snippet_timeout: float = Field(default=30.0, ge=1.0, le=300.0)
+    """Seconds one generated snippet may run before it is killed. A query over
+    a large provenance graph is slow; an accidental ``while True`` is forever.
+    Bounds only ``run_aiida_code``: ``sandbox init`` copies the user's storage
+    and is deliberately allowed to take as long as that takes."""
 
 
 class ReplSettings(_Base):
