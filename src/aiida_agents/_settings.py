@@ -334,9 +334,13 @@ def _format_validation_error(exc: ValidationError) -> str:
 # stray ``AIIDA_AGENTS_*`` key at startup.
 # ---------------------------------------------------------------------------
 
+# Every ``_Base`` subclass in this module belongs here; a group left out is
+# invisible to ``config show``, ``config init`` and the typo detector alike,
+# and its correctly spelled env var is then reported as a typo.
 _SETTINGS_GROUPS: tuple[type[_Base], ...] = (
     ModelSettings,
     AgentSettings,
+    SandboxSettings,
     ReplSettings,
     OllamaSettings,
     RagSettings,

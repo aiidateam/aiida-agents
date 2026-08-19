@@ -12,8 +12,8 @@ you need them.
 
 Public API
 ----------
-ModelSettings, OllamaSettings, RagSettings, AgentSettings, ReplSettings,
-ServerSettings, LoggingSettings
+ModelSettings, OllamaSettings, RagSettings, AgentSettings, SandboxSettings,
+ReplSettings, ServerSettings, LoggingSettings
     Typed pydantic-settings groups, one per subsystem. Construct and inject
     them (e.g. ``get_model(model_settings=ModelSettings(...))``) rather than
     reaching into the private ``_settings`` module.
@@ -28,6 +28,7 @@ from aiida_agents._settings import (
     OllamaSettings,
     RagSettings,
     ReplSettings,
+    SandboxSettings,
     ServerSettings,
 )
 
@@ -38,5 +39,6 @@ __all__ = [
     "OllamaSettings",
     "RagSettings",
     "ReplSettings",
+    "SandboxSettings",
     "ServerSettings",
 ]

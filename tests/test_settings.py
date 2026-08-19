@@ -21,6 +21,7 @@ import pathlib
 import pytest
 from pydantic import ValidationError
 
+from aiida_agents import _settings
 from aiida_agents._settings import (
     _default_vector_db_path,
     _SETTINGS_GROUPS,
@@ -38,7 +39,6 @@ from aiida_agents._settings import (
     _format_validation_error,
     warn_on_unrecognized_settings,
 )
-
 
 # Shared default data, (settings_cls, env_keys, expected): the env var names a
 # group reads and the values it falls back to. Reused below to assert the
@@ -426,6 +426,54 @@ def test_warns_on_mistyped_prefix_with_suggestion(
         warn_on_unrecognized_settings()
     assert typo in caplog.text
     assert suggestion in caplog.text
+
+
+def test_every_settings_group_is_registered() -> None:
+    """Every settings class in the module is listed in ``_SETTINGS_GROUPS``.
+
+    The surrounding coverage pins ``config show``, ``config init`` and the typo
+    detector against ``_known_env_var_names()``, but all four derive from this
+    tuple, so they agree with each other even when a class is missing from it.
+    A group left out is invisible to every one of them at once: its env var is
+    unknown, so ``_classify_present_keys`` reads a correctly spelled setting as
+    a typo and the guarded commands exit 2 rather than running.
+    """
+    defined = {
+        obj
+        for obj in vars(_settings).values()
+        if isinstance(obj, type) and issubclass(obj, _Base) and obj is not _Base
+    }
+    # One direction only: a registered class is by construction bound in the
+    # module namespace too, so the reverse comparison is vacuous.
+    unregistered = defined - set(_SETTINGS_GROUPS)
+    assert not unregistered, (
+        "add to _SETTINGS_GROUPS, or its env var is reported as a typo: "
+        f"{sorted(cls.__name__ for cls in unregistered)}"
+    )
+
+
+def test_every_settings_group_is_exported_from_the_package_root() -> None:
+    """Every group is re-exported from ``aiida_agents``, the second registry.
+
+    The package docstring promises the settings types live at the root so
+    callers can inject them without reaching into the private module. A group
+    missing from ``__all__`` breaks that promise silently: the class exists and
+    is documented, and ``from aiida_agents import X`` is an ImportError.
+    """
+    import aiida_agents
+
+    names = {cls.__name__ for cls in _SETTINGS_GROUPS}
+    unexported = names - set(aiida_agents.__all__)
+    assert not unexported, (
+        f"add to aiida_agents.__all__ and its import list: {sorted(unexported)}"
+    )
+    # Reachability, not just membership: a name in ``__all__`` that nobody
+    # imported passes the check above and still fails ``from aiida_agents
+    # import X``, which is the thing the docstring promises.
+    unreachable = {name for name in names if not hasattr(aiida_agents, name)}
+    assert not unreachable, (
+        f"listed in __all__ but never imported: {sorted(unreachable)}"
+    )
 
 
 @pytest.mark.parametrize("settings_cls", _SETTINGS_GROUPS, ids=lambda c: c.__name__)
