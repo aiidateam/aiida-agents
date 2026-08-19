@@ -14,7 +14,7 @@ def test_cli_exposes_expected_commands() -> None:
     """The top-level group lists every subcommand we ship."""
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
-    for command in ("ask", "chat", "check", "config", "doctor", "mcp", "rag", "warm"):
+    for command in ("ask", "chat", "config", "doctor", "mcp", "rag"):
         assert command in result.output
 
 
@@ -34,35 +34,6 @@ def test_dash_h_is_a_help_alias(args: list[str]) -> None:
     assert "Show this message and exit" in result.output
 
 
-@pytest.mark.parametrize(
-    "command, expected_calls",
-    [
-        pytest.param("check", ["reachable"], id="check-probes-never-generates"),
-        pytest.param("warm", ["generate"], id="warm-generates"),
-    ],
-)
-def test_check_and_warm_use_distinct_probes(
-    monkeypatch: pytest.MonkeyPatch, command: str, expected_calls: list[str]
-) -> None:
-    """`check` probes reachability and never generates; `warm` runs the generation
-    probe that loads the model. Pins the deliberate split (a check stays cheap and
-    side-effect-free): both probes are stubbed, so the recorded calls prove which
-    one each command drives.
-    """
-    calls: list[str] = []
-    monkeypatch.setattr(
-        "aiida_agents.cli.commands._check_reachable",
-        lambda settings: calls.append("reachable"),
-    )
-    monkeypatch.setattr(
-        "aiida_agents.cli.commands._probe_model",
-        lambda settings: calls.append("generate"),
-    )
-    result = CliRunner().invoke(cli, [command])
-    assert result.exit_code == 0
-    assert calls == expected_calls
-
-
 def test_version_option_prints_version() -> None:
     """`--version` reports the installed package version and exits cleanly."""
     from importlib.metadata import version
@@ -72,19 +43,19 @@ def test_version_option_prints_version() -> None:
     assert version("aiida-agents") in result.output
 
 
-def test_check_reports_invalid_setting_value_cleanly(
+def test_doctor_reports_invalid_setting_value_cleanly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A bad setting *value* is a clean CLI error, not a raw pydantic traceback.
 
-    Regression: `check`/`warm`/`doctor` build settings outside their try, so an
-    invalid `AIIDA_AGENTS_*` value used to surface as an uncaught
-    `ValidationError`; now `_resolve_settings_or_fail` converts it.
+    Regression: `doctor` builds settings outside its try, so an invalid
+    `AIIDA_AGENTS_*` value used to surface as an uncaught `ValidationError`;
+    now `_resolve_settings_or_fail` converts it.
     """
     from pydantic import ValidationError
 
     monkeypatch.setenv("AIIDA_AGENTS_PROVIDER", "bogus")
-    result = CliRunner().invoke(cli, ["check"])
+    result = CliRunner().invoke(cli, ["doctor"])
     assert result.exit_code == 1
     assert "Invalid configuration" in result.output
     assert "provider" in result.output
@@ -96,42 +67,10 @@ def test_provider_flag_rejects_unknown_choice() -> None:
     bad value is a clean 'invalid choice' usage error listing the real providers
     (complements the env-var path above, which pydantic validates).
     """
-    result = CliRunner().invoke(cli, ["--provider", "bogus", "check"])
+    result = CliRunner().invoke(cli, ["--provider", "bogus", "doctor"])
     assert result.exit_code == 2  # Click usage error, before any work
     assert "bogus" in result.output
     assert "ollama" in result.output  # the derived choices are listed
-
-
-@pytest.mark.parametrize(
-    "command, probe",
-    [
-        pytest.param("check", "_check_reachable", id="check"),
-        pytest.param("warm", "_probe_model", id="warm"),
-    ],
-)
-def test_probe_failure_is_diagnosed_and_exits(
-    monkeypatch: pytest.MonkeyPatch, command: str, probe: str
-) -> None:
-    """A probe failure routes through `_diagnose_probe_failure` and exits 1,
-    never a raw traceback.
-    """
-    from aiida_agents.cli import commands
-
-    def _boom(settings: object) -> None:
-        raise RuntimeError("endpoint down")
-
-    diagnosed: list[str] = []
-    monkeypatch.setattr(f"aiida_agents.cli.commands.{probe}", _boom)
-    monkeypatch.setattr(
-        commands,
-        "_diagnose_probe_failure",
-        lambda settings, exc: diagnosed.append(str(exc)),
-    )
-
-    result = CliRunner().invoke(cli, [command])
-
-    assert result.exit_code == 1
-    assert diagnosed == ["endpoint down"]
 
 
 class _FakeResult:

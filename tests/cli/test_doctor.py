@@ -118,11 +118,13 @@ def _patch_all_checks_passing(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(doctor, "_module_missing", lambda name: False)
 
 
-def _rows_by_label(profile: str | None = None) -> dict[str, _DiagnosticRow]:
+def _rows_by_label(
+    profile: str | None = None, *, warm: bool = False
+) -> dict[str, _DiagnosticRow]:
     from aiida_agents.cli.doctor import _run_diagnostics
 
     settings = ModelSettings(provider="ollama", model="m")
-    return {row.label: row for row in _run_diagnostics(settings, profile)}
+    return {row.label: row for row in _run_diagnostics(settings, profile, warm=warm)}
 
 
 @pytest.mark.parametrize(
@@ -401,7 +403,7 @@ def test_doctor_exit_code_reflects_health(
     monkeypatch.setattr(
         doctor,
         "_run_diagnostics",
-        lambda settings, profile: [_DiagnosticRow(*row) for row in rows],
+        lambda settings, profile, *, warm=False: [_DiagnosticRow(*row) for row in rows],
     )
     result = CliRunner().invoke(cli, ["doctor"])
 
@@ -471,3 +473,134 @@ def test_an_invalid_sandbox_setting_names_the_setting(
     assert "snippet_timeout" in row.detail
     assert "less than or equal to 300" in row.detail
     assert "\n" not in row.detail  # one table cell, one line
+
+
+class TestWarm:
+    """``--warm`` is the old ``warm`` command, folded in as one more row."""
+
+    def test_the_default_report_never_generates(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`doctor` is free to run: no row spends a token unless asked.
+
+        The old `check`/`warm` split existed to keep a diagnostic cheap, and
+        folding both into `doctor` has to keep that property or every run bills
+        a generation against a paid provider.
+        """
+        _patch_all_checks_passing(monkeypatch)
+        generated: list[object] = []
+        monkeypatch.setattr("aiida_agents.cli.agent._probe_model", generated.append)
+
+        result = CliRunner().invoke(cli, ["doctor"])
+
+        assert result.exit_code == 0
+        assert generated == []
+        assert "Model generates" not in result.output
+
+    def test_warm_generates_and_reports_the_duration(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`--warm` runs the generation probe and times it."""
+        _patch_all_checks_passing(monkeypatch)
+        generated: list[object] = []
+        monkeypatch.setattr("aiida_agents.cli.agent._probe_model", generated.append)
+
+        result = CliRunner().invoke(cli, ["doctor", "--warm"])
+
+        assert result.exit_code == 0
+        assert len(generated) == 1
+        assert "Model generates" in result.output
+        assert "warmed in" in result.output
+
+    def test_a_failed_generation_is_a_failed_row_not_a_traceback(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """An endpoint that advertises a model it cannot serve fails one row.
+
+        Reachability said yes and generation said no, which is the whole reason
+        `--warm` exists; it must still report, and still exit 1.
+
+        A serving failure rather than a connection one on purpose: a connection
+        error would route through `_probe_failure_hint`, which
+        `test_probe_failure_hint_routes_message` already covers exhaustively.
+        This is the only test that takes the `_short_reason` fallback all the way
+        to a rendered row.
+        """
+        _patch_all_checks_passing(monkeypatch)
+
+        def _boom(settings: ModelSettings) -> None:
+            raise RuntimeError("model runner has unexpectedly stopped")
+
+        monkeypatch.setattr("aiida_agents.cli.agent._probe_model", _boom)
+
+        result = CliRunner().invoke(cli, ["doctor", "--warm"])
+
+        assert result.exit_code == 1
+        assert "model runner has unexpectedly stopped" in result.output
+        # Not redundant with the exit code: an escaping RuntimeError also exits
+        # 1, and this is what tells the two apart.
+        assert result.exception is None or isinstance(result.exception, SystemExit)
+
+    def test_an_unreachable_model_is_not_warmed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """One problem prints as one red row, not two.
+
+        Warming a model the reachability row already failed on would fail again
+        for the same reason, and a report that says the same thing twice reads
+        as two separate faults.
+        """
+        _patch_all_checks_passing(monkeypatch)
+
+        def _unreachable(settings: ModelSettings) -> None:
+            raise RuntimeError("connection refused")
+
+        generated: list[object] = []
+        monkeypatch.setattr("aiida_agents.cli.agent._probe_reachable", _unreachable)
+        monkeypatch.setattr("aiida_agents.cli.agent._probe_model", generated.append)
+
+        rows = _rows_by_label(warm=True)
+
+        assert generated == []
+        assert rows["Model generates"].ok is False
+        assert rows["Model generates"].detail == (
+            "not attempted; the model is unreachable"
+        )
+
+
+@pytest.mark.parametrize(
+    "message, expected",
+    [
+        pytest.param(
+            "model 'm' not found (status 404)",
+            "model not pulled (ollama pull m)",
+            id="not-pulled",
+        ),
+        pytest.param(
+            "401 Unauthorized",
+            "authentication failed; check the provider's API key",
+            id="bad-key",
+        ),
+        pytest.param("some novel failure", "some novel failure", id="falls-back"),
+    ],
+)
+def test_a_failed_model_probe_says_what_to_do(
+    monkeypatch: pytest.MonkeyPatch, message: str, expected: str
+) -> None:
+    """The model row names the fix, not just the provider SDK's wording.
+
+    This is what the removed `check` command used to print through
+    `_diagnose_probe_failure`; folding it into the row keeps the advice and drops
+    the interactive prompt, which has no place in a report.
+    """
+    from aiida_agents.cli.doctor import _check_model
+
+    def _boom(settings: ModelSettings) -> None:
+        raise RuntimeError(message)
+
+    monkeypatch.setattr("aiida_agents.cli.agent._probe_reachable", _boom)
+
+    row = _check_model(ModelSettings(provider="ollama", model="m"))
+
+    assert row.ok is False
+    assert row.detail == expected

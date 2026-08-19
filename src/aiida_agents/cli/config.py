@@ -114,7 +114,7 @@ def _invalid_fields(exc: ValidationError) -> dict[str, str]:
 
     Whole-model errors (a cross-field ``model_validator``, which carry no field
     location) are omitted; those fields still render as ``(invalid)`` and the
-    full reason is available from ``aiida-agents check``.
+    full reason is available from ``aiida-agents doctor``.
     """
     return {
         str(err["loc"][-1]): err["msg"].removeprefix("Value error, ")

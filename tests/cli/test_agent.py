@@ -5,7 +5,6 @@ from __future__ import annotations
 import asyncio
 
 import pytest
-import rich_click
 from click.testing import CliRunner
 
 from aiida_agents._settings import _Provider
@@ -152,109 +151,71 @@ def test_probe_reachable_reports_endpoint_and_model_availability(
         pytest.param(
             "openrouter",
             "API key not set for the provider",
-            "API key not set",
+            "API key not set; set the provider's API key",
             id="key-not-set",
         ),
         pytest.param(
-            "openrouter", "401 Unauthorized", "Authentication failed", id="auth-failed"
+            "openrouter",
+            "401 Unauthorized",
+            "authentication failed; check the provider's API key",
+            id="auth-failed",
         ),
         pytest.param(
             "ollama",
             "connection refused",
-            "Could not reach the endpoint",
+            "could not reach the endpoint; is the server running?",
             id="unreachable",
         ),
         pytest.param(
-            "openrouter", "something odd", "something odd", id="generic-passthrough"
+            "ollama",
+            "model 'qwen3' not found (status 404)",
+            "model not pulled (ollama pull qwen3)",
+            id="ollama-not-pulled",
         ),
+        pytest.param("openrouter", "something odd", None, id="unrecognised-is-none"),
     ],
 )
-def test_diagnose_probe_failure_routes_message(
-    capsys: pytest.CaptureFixture[str], provider: _Provider, message: str, expected: str
+def test_probe_failure_hint_routes_message(
+    provider: _Provider, message: str, expected: str | None
 ) -> None:
-    """A probe failure is turned into an actionable message routed by its text:
-    a missing key, an auth failure, an unreachable endpoint, or a passed-through
-    fallback for anything unrecognised.
+    """A probe failure the user can fix is phrased as the fix, routed by its text.
+
+    ``None`` for anything unrecognised, so the caller falls back to the
+    exception's own words instead of inventing advice for a failure nobody
+    classified.
     """
     from aiida_agents._settings import ModelSettings
-    from aiida_agents.cli.agent import _diagnose_probe_failure
+    from aiida_agents.cli.agent import _probe_failure_hint
 
-    _diagnose_probe_failure(
-        ModelSettings(provider=provider, model="m"), RuntimeError(message)
-    )
-    assert expected in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("accept, pulled", [(True, ["qwen3"]), (False, [])])
-def test_diagnose_probe_failure_offers_ollama_pull(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    accept: bool,
-    pulled: list[str],
-) -> None:
-    """A missing Ollama model offers a pull; accepting runs it, declining does not."""
-    from aiida_agents._settings import ModelSettings
-    from aiida_agents.cli import agent
-
-    ran: list[str] = []
-    monkeypatch.setattr(rich_click, "confirm", lambda *a, **k: accept)
-    monkeypatch.setattr(agent, "_ollama_pull", lambda model: ran.append(model))
-
-    agent._diagnose_probe_failure(
-        ModelSettings(provider="ollama", model="qwen3"),
-        RuntimeError("model 'qwen3' not found (status 404)"),
+    hint = _probe_failure_hint(
+        ModelSettings(provider=provider, model="qwen3"), RuntimeError(message)
     )
 
-    assert ran == pulled
-    assert "is not pulled" in capsys.readouterr().err
+    assert hint == expected
 
 
 @pytest.mark.parametrize(
-    "provider, model_ok, raises, expected",
+    "provider, model_ok, expected",
     [
-        pytest.param("ollama", True, False, "is available", id="available"),
-        pytest.param("ollama", False, True, "is not pulled", id="ollama-missing-fatal"),
-        pytest.param(
-            "openrouter",
-            False,
-            False,
-            "not in this endpoint's list",
-            id="cloud-unlisted-warns",
-        ),
+        pytest.param("ollama", True, "available", id="available"),
+        pytest.param("ollama", False, "not_pulled", id="ollama-missing-is-fatal"),
+        pytest.param("openrouter", False, "unlisted", id="cloud-missing-is-a-note"),
     ],
 )
-def test_check_reachable_availability_policy(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    provider: _Provider,
-    model_ok: bool,
-    raises: bool,
-    expected: str,
+def test_model_availability_policy(
+    provider: _Provider, model_ok: bool, expected: str
 ) -> None:
-    """A model the endpoint doesn't advertise is fatal for Ollama (its listing is
-    authoritative) but only a warning for a cloud endpoint (its listing may be
-    partial); an advertised model just reports available.
+    """A model the endpoint doesn't advertise is "not pulled" for Ollama (its
+    listing is authoritative) but only "unlisted" for a cloud endpoint (whose
+    listing may be partial); an advertised model is available either way.
     """
-    from aiida_agents._settings import ModelSettings
-    from aiida_agents.cli import agent
-    from aiida_agents.cli.agent import _Reachability
+    from aiida_agents.cli.agent import _model_availability, _Reachability
 
-    monkeypatch.setattr(
-        agent,
-        "_probe_reachable",
-        lambda settings: _Reachability("http://endpoint", 2, model_ok),
+    availability = _model_availability(
+        _Reachability("http://endpoint", 2, model_ok), provider
     )
-    settings = ModelSettings(provider=provider, model="m")
 
-    if raises:
-        with pytest.raises(SystemExit) as exc_info:
-            agent._check_reachable(settings)
-        assert exc_info.value.code == 1
-    else:
-        agent._check_reachable(settings)
-
-    captured = capsys.readouterr()
-    assert expected in captured.out + captured.err
+    assert availability == expected
 
 
 @pytest.mark.parametrize("name", _SPECIALISTS)

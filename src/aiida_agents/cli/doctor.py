@@ -2,13 +2,14 @@
 
 Each subsystem (AiiDA profile, daemon, model reachability, RAG index, codegen
 sandbox, docs toolchain) is probed in its own ``try`` so one failure never
-aborts the rest of the report. Only ``doctor`` runs these checks (``check``/``warm`` probe the model
-through ``agent.py``), so the command lives here with its logic rather than in
-``commands.py``.
+aborts the rest of the report. This is the only command that diagnoses a setup:
+the model probes live in ``agent.py`` and are rendered here, so the logic sits
+with the command rather than in ``commands.py``.
 """
 
 from __future__ import annotations
 
+import time
 from typing import NamedTuple
 
 import rich_click as click
@@ -19,7 +20,7 @@ from typing_extensions import assert_never
 from aiida_agents._settings import ModelSettings, _format_validation_error
 from aiida_agents.cli._guards import _needs_recognized_settings
 from aiida_agents.cli.agent import _resolve_settings_or_fail
-from aiida_agents.cli.output import console
+from aiida_agents.cli.output import _format_duration, console
 from aiida_agents.cli.rag import _module_missing
 
 
@@ -42,6 +43,20 @@ def _short_reason(exc: Exception) -> str:
     """
     lines = [line for line in str(exc).splitlines() if line.strip()]
     return lines[0][:100] if lines else ""
+
+
+def _probe_reason(settings: ModelSettings, exc: Exception) -> str:
+    """A failed model probe as a row detail: the actionable hint, or the message.
+
+    An unpulled model, a bad key and a dead endpoint are the failures a user can
+    fix, and :func:`~aiida_agents.cli.agent._probe_failure_hint` phrases those as
+    the fix. Anything else has no known remedy, so the exception speaks for
+    itself rather than being dressed up as advice.
+    """
+    from aiida_agents.cli.agent import _probe_failure_hint
+
+    hint = _probe_failure_hint(settings, exc)
+    return hint if hint is not None else _short_reason(exc)
 
 
 def _check_profile(profile: str | None) -> _DiagnosticRow:
@@ -131,12 +146,16 @@ def _check_daemon() -> _DiagnosticRow:
 def _check_model(settings: ModelSettings) -> _DiagnosticRow:
     """Whether the configured model is reachable and advertised (no generation).
 
-    Uses the no-generation reachability probe, so ``doctor`` never warms the
-    model. An unadvertised model is fatal for Ollama (its listing is
-    authoritative) but only a note for a cloud endpoint (its listing may be
-    partial).
+    Uses the no-generation reachability probe, so the default report never
+    generates; ``--warm`` adds the row that does. An unadvertised model is fatal
+    for Ollama (its listing is authoritative) but only a note for a cloud
+    endpoint (its listing may be partial).
     """
-    from aiida_agents.cli.agent import _model_availability, _probe_reachable
+    from aiida_agents.cli.agent import (
+        _model_availability,
+        _not_pulled_detail,
+        _probe_reachable,
+    )
 
     label = f"Model reachable ({settings.provider}:{settings.model})"
     try:
@@ -145,16 +164,43 @@ def _check_model(settings: ModelSettings) -> _DiagnosticRow:
         if availability == "available":
             return _DiagnosticRow(label, True, reach.endpoint)
         if availability == "not_pulled":
-            return _DiagnosticRow(
-                label, False, f"model not pulled (ollama pull {settings.model})"
-            )
+            return _DiagnosticRow(label, False, _not_pulled_detail(settings))
         if availability == "unlisted":
             return _DiagnosticRow(
                 label, True, "reachable; model not listed (may still work)"
             )
         assert_never(availability)  # pragma: no cover
     except Exception as exc:
-        return _DiagnosticRow(label, False, _short_reason(exc))
+        return _DiagnosticRow(label, False, _probe_reason(settings, exc))
+
+
+# Written twice, like the daemon label: by the check below, and by the skip that
+# stands in for it when the model is unreachable.
+_WARM_LABEL = "Model generates"
+
+
+def _warm_model(settings: ModelSettings) -> _DiagnosticRow:
+    """Whether the model actually generates, and how long the first call takes.
+
+    Reachability is not generation: an endpoint can advertise a model it then
+    fails to serve, and only a real call finds that out. For a local Ollama model
+    the call also loads it into memory, so the first query of a session is not a
+    cold start.
+
+    The only check that spends tokens, which is why it is behind ``--warm``
+    instead of part of the default report: running ``doctor`` against a paid
+    provider should not cost anything.
+    """
+    from aiida_agents.cli.agent import _probe_model
+
+    label = _WARM_LABEL
+    start = time.monotonic()
+    try:
+        _probe_model(settings)
+    except Exception as exc:
+        return _DiagnosticRow(label, False, _probe_reason(settings, exc))
+    elapsed = _format_duration(time.monotonic() - start)
+    return _DiagnosticRow(label, True, f"warmed in {elapsed}")
 
 
 def _check_rag_index() -> _DiagnosticRow:
@@ -247,32 +293,59 @@ def _check_docs_toolchain() -> _DiagnosticRow:
 
 
 def _run_diagnostics(
-    settings: ModelSettings, profile: str | None
+    settings: ModelSettings, profile: str | None, *, warm: bool = False
 ) -> list[_DiagnosticRow]:
     """Run each health check, one :class:`_DiagnosticRow` per check.
 
     Each check catches its own failure and reports it as a failed row, so one
     broken check (an unreachable model, an unloadable profile) never aborts the
     rest of the report.
+
+    ``warm`` appends the generation check. It is skipped when the model is not
+    reachable in the first place: the call would fail for the reason already on
+    the row above it, and one problem should not print as two.
     """
-    return [
+    model = _check_model(settings)
+    rows = [
         _check_profile(profile),
         _check_daemon(),
-        _check_model(settings),
+        model,
         _check_rag_index(),
         _check_sandbox(),
         _check_docs_toolchain(),
     ]
+    if warm:
+        rows.append(
+            _warm_model(settings)
+            if model.ok
+            else _DiagnosticRow(
+                _WARM_LABEL, False, "not attempted; the model is unreachable"
+            )
+        )
+    return rows
 
 
 @click.command()
+@click.option(
+    "--warm",
+    is_flag=True,
+    help=(
+        "Also send one tiny generation, which proves the model serves and "
+        "pre-loads a local Ollama model so the first query is not a cold start. "
+        "Costs a request on a paid provider, so it is off by default."
+    ),
+)
 @click.pass_context
 @_needs_recognized_settings
-def doctor(ctx: click.Context) -> None:
-    """Diagnose the setup: profile, daemon, model, RAG index, sandbox, docs toolchain."""
+def doctor(ctx: click.Context, warm: bool) -> None:
+    """Diagnose the setup: profile, daemon, model, RAG index, sandbox, docs toolchain.
+
+    Read-only and free by default: nothing here generates. Pass `--warm` to
+    also check that the model serves, and to pre-load a local one.
+    """
     settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
     click.echo("Running diagnostics ...\n")
-    rows = _run_diagnostics(settings, ctx.obj["profile"])
+    rows = _run_diagnostics(settings, ctx.obj["profile"], warm=warm)
     for row in rows:
         # escape() the dynamic label/detail (a model name, or an error message
         # from _short_reason) so a stray bracket can't be swallowed as Rich

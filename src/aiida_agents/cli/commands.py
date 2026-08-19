@@ -4,14 +4,12 @@ The surface is split by concern: the ``config``, ``rag``, and ``mcp`` groups
 and the ``doctor`` command live in their own modules and are registered onto
 the root group at the bottom of this file. What stays here is the root group
 (the global ``--provider`` / ``--model`` / ``--profile`` overrides and logging
-setup) plus the small model-facing commands: ``chat``, ``ask``, ``check``, and
-``warm``.
+setup) plus the two model-facing commands: ``chat`` and ``ask``.
 """
 
 from __future__ import annotations
 
 import asyncio
-import time
 
 import rich_click as click
 from pydantic_ai.tools import DeferredToolRequests
@@ -26,7 +24,6 @@ from aiida_agents.cli.doctor import doctor
 from aiida_agents.cli.mcp import mcp
 from aiida_agents.cli.output import (
     _warn_ungrounded,
-    _format_duration,
     _print_reply,
     _render_tool_calls,
     console,
@@ -40,9 +37,6 @@ from aiida_agents.cli.agent import (
     _StepResult,
     _AGENT_CHOICES,
     _build_agent,
-    _check_reachable,
-    _diagnose_probe_failure,
-    _probe_model,
     _resolve_settings_or_fail,
     ask,
 )
@@ -187,44 +181,6 @@ def ask_cmd(ctx: click.Context, question: str, raw: bool) -> None:
             result.output,
             node_references_from_messages(result.all_messages()),
         )
-
-
-@cli.command()
-@click.pass_context
-@_needs_recognized_settings
-def check(ctx: click.Context) -> None:
-    """Verify config, endpoint reachability, and model availability.
-
-    Fast and read-only: it never loads or runs the model. Use `warm` to
-    pre-load a local model before an interactive session.
-    """
-    settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
-    click.echo(f"Checking {settings.provider}:{settings.model} ...")
-    try:
-        _check_reachable(settings)
-    except Exception as exc:
-        _diagnose_probe_failure(settings, exc)
-        raise SystemExit(1) from exc
-
-
-@cli.command()
-@click.pass_context
-@_needs_recognized_settings
-def warm(ctx: click.Context) -> None:
-    """Warm the model with one tiny generation, so the first query isn't cold.
-
-    Mainly useful for a local Ollama model before a session; for a cloud model
-    it is just a round-trip that also confirms generation works.
-    """
-    settings = _resolve_settings_or_fail(ctx.obj["provider"], ctx.obj["model"])
-    click.echo(f"Warming {settings.provider}:{settings.model} ...")
-    start = time.monotonic()
-    try:
-        _probe_model(settings)
-    except Exception as exc:
-        _diagnose_probe_failure(settings, exc)
-        raise SystemExit(1) from exc
-    click.echo(f"✓ warmed in {_format_duration(time.monotonic() - start)}")
 
 
 # Register the commands and groups that live in their own modules onto the root.
