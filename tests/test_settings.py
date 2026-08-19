@@ -38,8 +38,14 @@ from aiida_agents._settings import (
     _Provider,
     _choices,
     _format_validation_error,
+    _known_env_var_names,
     warn_on_unrecognized_settings,
 )
+
+# Resolved from ``__file__``, not the working directory: the autouse
+# ``_isolate_cwd`` fixture runs every test from a temp directory.
+_ENV_EXAMPLE = pathlib.Path(__file__).resolve().parent.parent / ".env.example"
+
 
 # Shared default data, (settings_cls, env_keys, expected): the env var names a
 # group reads and the values it falls back to. Reused below to assert the
@@ -508,6 +514,27 @@ def test_out_of_range_snippet_timeout_is_rejected_not_clamped(
     with pytest.raises(ValidationError) as excinfo:
         SandboxSettings()
     assert "snippet_timeout" in _format_validation_error(excinfo.value)
+
+
+def test_env_example_covers_exactly_the_recognised_settings() -> None:
+    """The shipped ``.env.example`` names every recognised setting and nothing else.
+
+    It is the file a user copies to ``.env``, so a key missing from it is a knob
+    nobody discovers and a leftover key is a typo the project taught. The
+    ``config init`` template gets this for free by generating from
+    ``_SETTINGS_GROUPS`` (pinned in ``tests/cli/test_config.py``); this file is
+    hand-written and needs the guard spelled out.
+    """
+    keys = {
+        key
+        for line in _ENV_EXAMPLE.read_text(encoding="utf-8").splitlines()
+        if line.startswith("# ") and "=" in line
+        # Env-var lines are ``# NAME=...``; a prose line that happens to contain
+        # an ``=`` is excluded because a key token has no spaces.
+        for key in [line[2:].split("=", 1)[0]]
+        if " " not in key
+    }
+    assert keys == _known_env_var_names()
 
 
 @pytest.mark.parametrize("settings_cls", _SETTINGS_GROUPS, ids=lambda c: c.__name__)
