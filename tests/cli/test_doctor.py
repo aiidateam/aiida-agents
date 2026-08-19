@@ -7,6 +7,12 @@ from collections.abc import Callable
 import pytest
 from click.testing import CliRunner
 
+from aiida.engine.daemon.client import (
+    DaemonNotRunningException,
+    DaemonStalePidException,
+    DaemonTimeoutException,
+)
+
 from aiida_agents._settings import ModelSettings, _Provider
 from aiida_agents.cli import cli
 from aiida_agents.cli.doctor import _DiagnosticRow
@@ -46,6 +52,49 @@ class _Index:
         self.stale = stale
 
 
+# Verbatim from ``aiida.engine.daemon.client.call_client``. 162 characters, with
+# the remedy in the second sentence, so ``_short_reason``'s 100-char cut lands
+# mid-word and drops it. Copied rather than imported because AiiDA builds it
+# inline at the raise site.
+_STALE_PID_MSG = (
+    "The daemon could not be reached, seemingly because of a stale PID file. "
+    "Either stop or start the daemon to remove it and restore the daemon to a "
+    "functional state."
+)
+
+
+class _DaemonClient:
+    """Stub AiiDA daemon client exposing what the doctor check reads."""
+
+    def __init__(
+        self,
+        *,
+        running: bool = True,
+        workers: int = 1,
+        raises: Exception | None = None,
+        response: dict[str, object] | None = None,
+    ) -> None:
+        self._running = running
+        self._workers = workers
+        self._raises = raises
+        self._response = response
+
+    @property
+    def is_daemon_running(self) -> bool:
+        return self._running
+
+    # Widened from AiiDA's own `dict[str, t.Any]`: a case returns an error
+    # payload, which carries no int at all.
+    def get_numprocesses(self) -> dict[str, object]:
+        # Running is not reachable: mid-restart the circus endpoint can be down
+        # while the daemon is alive, which the check reports as a failed row.
+        if self._raises is not None:
+            raise self._raises
+        if self._response is not None:
+            return self._response
+        return {"numprocesses": self._workers}
+
+
 def _patch_all_checks_passing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Stub every subsystem probe to succeed, so a test can then break exactly
     one and assert the others are unaffected.
@@ -54,6 +103,9 @@ def _patch_all_checks_passing(monkeypatch: pytest.MonkeyPatch) -> None:
     from aiida_agents.cli.agent import _Reachability
 
     monkeypatch.setattr("aiida.load_profile", lambda profile: _Profile())
+    monkeypatch.setattr(
+        "aiida.engine.daemon.client.get_daemon_client", lambda: _DaemonClient()
+    )
     monkeypatch.setattr(
         "aiida_agents.cli.agent._probe_reachable",
         lambda settings: _Reachability("http://endpoint", 3, model_ok=True),
@@ -101,12 +153,107 @@ def test_run_diagnostics_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert list(rows) == [
         "AiiDA profile loads",
+        "Daemon running and reachable",
         "Model reachable (ollama:m)",
         "RAG index built",
         "Codegen sandbox (disposable copy)",
         "Docs toolchain (sphinx)",
     ]
     assert all(row.ok for row in rows.values())
+
+
+@pytest.mark.parametrize(
+    "client, expected_ok, needle",
+    [
+        pytest.param(
+            _DaemonClient(running=True, workers=2), True, "2 worker(s)", id="reachable"
+        ),
+        pytest.param(
+            _DaemonClient(running=False), False, "verdi daemon start", id="not-running"
+        ),
+        pytest.param(
+            _DaemonClient(running=True, workers=0),
+            False,
+            "verdi daemon incr",
+            id="zero-workers",
+        ),
+        pytest.param(
+            _DaemonClient(running=True, raises=RuntimeError("circus unreachable")),
+            False,
+            "circus unreachable",
+            id="running-but-unreachable",
+        ),
+        # AiiDA's own exception types carrying AiiDA's own wording, because what
+        # is being pinned is that the remedy survives the row. `is_daemon_running`
+        # reads the PID file, so a stale one is precisely how it says yes while
+        # the round-trip fails: this row's main real failure, not an edge case.
+        pytest.param(
+            _DaemonClient(running=True, raises=DaemonStalePidException(_STALE_PID_MSG)),
+            False,
+            "stale PID file; run `verdi daemon start`",
+            id="stale-pid-file",
+        ),
+        # One condition, one sentence: the daemon can stop between the PID-file
+        # read and the round-trip, and that must not become a second wording.
+        pytest.param(
+            _DaemonClient(
+                running=True,
+                raises=DaemonNotRunningException("The daemon is not running."),
+            ),
+            False,
+            "not running; run `verdi daemon start`",
+            id="stopped-mid-check",
+        ),
+        pytest.param(
+            _DaemonClient(
+                running=True,
+                raises=DaemonTimeoutException("Connection to the daemon timed out."),
+            ),
+            False,
+            "verdi daemon restart",
+            id="timed-out",
+        ),
+        # circus answers a command-level failure in the payload instead of
+        # raising (circus.commands.base.error), and that payload has no
+        # `numprocesses`. Reading the count off it finds nothing, which must not
+        # read as a healthy daemon. Caught by CodeRabbit on the PR.
+        pytest.param(
+            _DaemonClient(
+                running=True,
+                response={"status": "error", "reason": "command not supported"},
+            ),
+            False,
+            "command not supported",
+            id="error-payload",
+        ),
+        pytest.param(
+            _DaemonClient(running=True, response={"status": "ok"}),
+            False,
+            "verdi daemon restart",
+            id="no-worker-count",
+        ),
+    ],
+)
+def test_check_daemon(
+    monkeypatch: pytest.MonkeyPatch,
+    client: _DaemonClient,
+    expected_ok: bool,
+    needle: str,
+) -> None:
+    """The daemon check separates running-and-reachable from every way it is not:
+    stopped, zero workers, or up but with an unreachable circus endpoint.
+    """
+    from aiida_agents.cli.doctor import _check_daemon
+
+    monkeypatch.setattr("aiida.engine.daemon.client.get_daemon_client", lambda: client)
+    row = _check_daemon()
+
+    assert row.ok is expected_ok
+    assert needle in row.detail
+    # AiiDA phrases the stale-PID remedy in a second sentence, 162 characters in,
+    # so routing it through `_short_reason` (which truncates at 100) used to cut
+    # the row off mid-word with the fix still to come.
+    assert len(row.detail) < 100
 
 
 @pytest.mark.parametrize(
