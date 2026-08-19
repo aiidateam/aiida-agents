@@ -353,7 +353,7 @@ def test_ensure_docs_toolchain_declined_raises_actionable(
     with pytest.raises(rich_click.ClickException) as exc_info:
         rag._ensure_docs_toolchain()
 
-    assert "aiida-agents[rag-build]" in str(exc_info.value)
+    assert "aiida-agents[rag]" in str(exc_info.value)
 
 
 def test_ensure_docs_toolchain_installs_on_accept(

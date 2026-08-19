@@ -66,13 +66,11 @@ pre-commit = [
     { name = "types-docutils" },
 ]
 rag = [
-    { name = "chromadb" },
-]
-rag-build = [
     { name = "aiida-core", extra = ["docs"] },
     { name = "chromadb" },
 ]
 rag-fallback = [
+    { name = "aiida-core", extra = ["docs"] },
     { name = "chromadb" },
     { name = "sentence-transformers" },
 ]
@@ -105,13 +103,13 @@ vasp = [
 [package.metadata]
 requires-dist = [
     { name = "aiida-core", specifier = "~=2.9" },
-    { name = "aiida-core", extras = ["docs"], marker = "extra == 'rag-build'" },
+    { name = "aiida-core", extras = ["docs"], marker = "extra == 'rag'", specifier = "~=2.9" },
+    { name = "aiida-core", extras = ["docs"], marker = "extra == 'rag-fallback'", specifier = "~=2.9" },
     { name = "aiida-pseudo", marker = "extra == 'tests'", specifier = "~=1.8" },
     { name = "aiida-restapi", git = "https://github.com/edan-bainglass/aiida-restapi?rev=deps" },
     { name = "ase", marker = "extra == 'structures'", specifier = "~=3.21" },
     { name = "ase", marker = "extra == 'tests'", specifier = "~=3.21" },
     { name = "chromadb", marker = "extra == 'rag'", specifier = ">=1.5.9" },
-    { name = "chromadb", marker = "extra == 'rag-build'", specifier = ">=1.5.9" },
     { name = "chromadb", marker = "extra == 'rag-fallback'", specifier = ">=1.5.9" },
     { name = "click", specifier = ">=8" },
     { name = "fastmcp", specifier = ">=3.0.0" },
@@ -136,7 +134,7 @@ requires-dist = [
     { name = "typing-extensions", specifier = ">=4.12" },
     { name = "uvicorn", specifier = ">=0.33" },
 ]
-provides-extras = ["docs", "lint", "pre-commit", "rag", "rag-build", "rag-fallback", "structures", "tests"]
+provides-extras = ["docs", "lint", "pre-commit", "rag", "rag-fallback", "structures", "tests"]
 
 [package.metadata.requires-dev]
 dev = [

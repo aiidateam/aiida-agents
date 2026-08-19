@@ -62,16 +62,12 @@ aiida-agents = "aiida_agents.cli:cli"
 docs = [
   "mystmd"
 ]
+# The vector store, plus the sphinx toolchain `rag build` shells out to
+# (rag._textbuild renders the corpus). Both, because no index ships prebuilt:
+# whoever installs this extra has to run `rag build` before a query works.
 rag = [
   "chromadb>=1.5.9",
-]
-# The sphinx toolchain `rag build` shells out to (rag._textbuild renders the
-# corpus). Separate from `rag` because querying an already-built index does not
-# need it, and it is heavy; but it must be installable non-interactively --
-# without it `rag build` stops to prompt, which blocks any scripted setup.
-rag-build = [
-  "aiida-agents[rag]",
-  "aiida-core[docs]",
+  "aiida-core[docs]~=2.9",
 ]
 # In-process CPU fallback embedder, used only when no Ollama server is reachable.
 # (The default `rag` extra is already local: it embeds via the local Ollama
@@ -161,8 +157,8 @@ vasp = [
 # resolves from PyPI rather than through the fork's branch.
 # Both spellings: an override replaces every requirement for the package, so
 # listing only the bare one silently dropped the `[docs]` extra that
-# `aiida-agents[rag-build]` asks for -- taking sphinx and 50 other packages out
-# of the lockfile, and `rag build` with them.
+# `aiida-agents[rag]` asks for -- taking sphinx and 50 other packages out of
+# the lockfile, and `rag build` with them.
 override-dependencies = [
   "aiida-core~=2.9",
   "aiida-core[docs]~=2.9",

@@ -2,7 +2,8 @@
 
 The heavy indexing/retrieval logic lives in the ``aiida_agents.rag`` package;
 this module is the Click surface plus the docs-toolchain provisioning helpers
-(``sphinx`` is an opt-in dependency, offered on demand before a build).
+(``sphinx`` ships with the ``rag`` extra, and is offered on demand to an
+environment that installed the package without it).
 """
 
 from __future__ import annotations
@@ -66,7 +67,7 @@ def _ensure_docs_toolchain() -> None:
     ):
         raise click.ClickException(
             "Docs toolchain not installed. Run "
-            "`uv pip install 'aiida-agents[rag-build]'` and retry `aiida-agents rag build`."
+            "`uv pip install 'aiida-agents[rag]'` and retry `aiida-agents rag build`."
         )
     try:
         _pip_install("aiida-core[docs]")
