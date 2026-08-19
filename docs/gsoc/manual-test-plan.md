@@ -19,7 +19,7 @@ ______________________________________________________________________
 ## Phase 0: setup and sanity
 
 ```bash
-aiida-agents doctor          # profile, daemon, model reachability, RAG index, sandbox, docs toolchain
+aiida-agents doctor          # profile, daemon, model reachability, docs toolchain, RAG index, sandbox
 aiida-agents doctor --warm   # the same, plus one generation to prove the model serves
 aiida-agents config show     # every setting, its env var, and where the value came from
 aiida-agents --help

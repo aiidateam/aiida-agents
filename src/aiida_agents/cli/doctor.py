@@ -1,7 +1,7 @@
 """The ``aiida-agents doctor`` command and the health checks behind it.
 
-Each subsystem (AiiDA profile, daemon, model reachability, RAG index, codegen
-sandbox, docs toolchain) is probed in its own ``try`` so one failure never
+Each subsystem (AiiDA profile, daemon, model reachability, docs toolchain, RAG
+index, codegen sandbox) is probed in its own ``try`` so one failure never
 aborts the rest of the report. This is the only command that diagnoses a setup:
 the model probes live in ``agent.py`` and are rendered here, so the logic sits
 with the command rather than in ``commands.py``.
@@ -71,16 +71,27 @@ def _check_profile(profile: str | None) -> _DiagnosticRow:
         return _DiagnosticRow(label, False, _short_reason(exc))
 
 
-def _check_daemon() -> _DiagnosticRow:
-    """Whether the AiiDA daemon is running and reachable.
+# Written twice: by the check below, and by the skip that stands in for it when
+# the profile it needs did not load. Named, so the two cannot drift into looking
+# like two different rows.
+_DAEMON_LABEL = "Daemon running and reachable"
+
+
+def _check_daemon(profile: str | None) -> _DiagnosticRow:
+    """Whether the AiiDA daemon for ``profile`` is running and reachable.
 
     A loading profile is not enough: a submitted process only progresses if the
     daemon is up *and* its workers can be reached. The two differ, the circus
     endpoint can be briefly unreachable mid-restart while the daemon is
     technically alive, so this asks for the worker count to confirm reachability
     rather than trusting liveness alone.
+
+    There is one daemon per profile, so the name is passed through rather than
+    left to whichever profile happens to be loaded: this row and the profile row
+    above it must be talking about the same profile. ``None`` means the default,
+    which by then ``_check_profile`` has loaded.
     """
-    label = "Daemon running and reachable"
+    label = _DAEMON_LABEL
     # Two ways to reach one condition (see the handler below), so one sentence.
     stopped = "not running; run `verdi daemon start`"
     try:
@@ -91,7 +102,7 @@ def _check_daemon() -> _DiagnosticRow:
             get_daemon_client,
         )
 
-        client = get_daemon_client()
+        client = get_daemon_client(profile)
         if not client.is_daemon_running:
             return _DiagnosticRow(label, False, stopped)
         # Running is not reachable. get_numprocesses() round-trips to the daemon,
@@ -303,16 +314,36 @@ def _run_diagnostics(
 
     ``warm`` appends the generation check. It is skipped when the model is not
     reachable in the first place: the call would fail for the reason already on
-    the row above it, and one problem should not print as two.
+    the row above it, so the row still appears and says it was not attempted,
+    rather than repeating that reason or paying for a call that cannot work.
+
+    The checks run in the order they are displayed. Only ``_check_profile``
+    calls ``load_profile``, and ``_check_daemon`` and ``_check_sandbox`` need a
+    loaded profile, so evaluating the rows out of order would break them; the
+    model row is bound to a name because ``warm`` branches on it, not to move it.
     """
+    profile_row = _check_profile(profile)
+    # A profile that would not load leaves nothing to ask about: the daemon is
+    # per profile, and probing anyway reported AiiDA's "consider loading a
+    # profile using `aiida.load_profile()`" at a researcher, as a second red row
+    # for the one fault the row above already names.
+    daemon_row = (
+        _check_daemon(profile)
+        if profile_row.ok
+        else _DiagnosticRow(
+            _DAEMON_LABEL, False, "not attempted; the profile did not load"
+        )
+    )
     model = _check_model(settings)
     rows = [
-        _check_profile(profile),
-        _check_daemon(),
+        profile_row,
+        daemon_row,
         model,
+        # Before the index it builds: with neither present, a report that asks
+        # for `rag build` first sends the user at a command that cannot run yet.
+        _check_docs_toolchain(),
         _check_rag_index(),
         _check_sandbox(),
-        _check_docs_toolchain(),
     ]
     if warm:
         rows.append(
@@ -338,7 +369,7 @@ def _run_diagnostics(
 @click.pass_context
 @_needs_recognized_settings
 def doctor(ctx: click.Context, warm: bool) -> None:
-    """Diagnose the setup: profile, daemon, model, RAG index, sandbox, docs toolchain.
+    """Diagnose the setup: profile, daemon, model, docs toolchain, RAG index, sandbox.
 
     Read-only and free by default: nothing here generates. Pass `--warm` to
     also check that the model serves, and to pre-load a local one.

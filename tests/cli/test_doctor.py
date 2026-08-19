@@ -104,7 +104,8 @@ def _patch_all_checks_passing(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setattr("aiida.load_profile", lambda profile: _Profile())
     monkeypatch.setattr(
-        "aiida.engine.daemon.client.get_daemon_client", lambda: _DaemonClient()
+        "aiida.engine.daemon.client.get_daemon_client",
+        lambda profile_name=None: _DaemonClient(),
     )
     monkeypatch.setattr(
         "aiida_agents.cli.agent._probe_reachable",
@@ -157,9 +158,11 @@ def test_run_diagnostics_all_checks_pass(monkeypatch: pytest.MonkeyPatch) -> Non
         "AiiDA profile loads",
         "Daemon running and reachable",
         "Model reachable (ollama:m)",
+        # The docs toolchain precedes the index it builds: `rag build` needs
+        # sphinx, so a user missing both should read the cause before the effect.
+        "Docs toolchain (sphinx)",
         "RAG index built",
         "Codegen sandbox (disposable copy)",
-        "Docs toolchain (sphinx)",
     ]
     assert all(row.ok for row in rows.values())
 
@@ -247,8 +250,11 @@ def test_check_daemon(
     """
     from aiida_agents.cli.doctor import _check_daemon
 
-    monkeypatch.setattr("aiida.engine.daemon.client.get_daemon_client", lambda: client)
-    row = _check_daemon()
+    monkeypatch.setattr(
+        "aiida.engine.daemon.client.get_daemon_client",
+        lambda profile_name=None: client,
+    )
+    row = _check_daemon(None)
 
     assert row.ok is expected_ok
     assert needle in row.detail
@@ -259,29 +265,43 @@ def test_check_daemon(
 
 
 @pytest.mark.parametrize(
-    "target, failing_label",
+    "target, failing_label, dependent",
     [
-        pytest.param("aiida.load_profile", "AiiDA profile loads", id="profile"),
+        # The daemon is per profile, so it is the one row a failed profile takes
+        # with it. Named rather than tolerated, so a future check that quietly
+        # starts depending on another shows up here.
+        pytest.param(
+            "aiida.load_profile",
+            "AiiDA profile loads",
+            ("Daemon running and reachable",),
+            id="profile",
+        ),
         pytest.param(
             "aiida_agents.cli.agent._probe_reachable",
             "Model reachable (ollama:m)",
+            (),
             id="model",
         ),
         pytest.param(
-            "aiida_agents.rag.store.index_status", "RAG index built", id="rag"
+            "aiida_agents.rag.store.index_status", "RAG index built", (), id="rag"
         ),
         pytest.param(
             "aiida_agents.sandbox.copy.profiles_sharing_storage",
             "Codegen sandbox (disposable copy)",
+            (),
             id="sandbox",
         ),
     ],
 )
 def test_run_diagnostics_isolates_one_failure(
-    monkeypatch: pytest.MonkeyPatch, target: str, failing_label: str
+    monkeypatch: pytest.MonkeyPatch,
+    target: str,
+    failing_label: str,
+    dependent: tuple[str, ...],
 ) -> None:
     """One failing check yields a failed row carrying the reason, and never
-    aborts the report: every other check still runs and passes.
+    aborts the report: every check that does not depend on it still runs and
+    passes, and every one that does says so rather than inventing a reason.
     """
     _patch_all_checks_passing(monkeypatch)
 
@@ -293,9 +313,13 @@ def test_run_diagnostics_isolates_one_failure(
 
     assert rows[failing_label].ok is False
     assert "kaboom" in rows[failing_label].detail
+    for label in dependent:
+        assert rows[label].ok is False
+        assert rows[label].detail.startswith("not attempted;")
+        assert "kaboom" not in rows[label].detail
+    expected_failures = {failing_label, *dependent}
     for label, row in rows.items():
-        if label != failing_label:
-            assert row.ok is True
+        assert row.ok is (label not in expected_failures), label
 
 
 @pytest.mark.parametrize(
@@ -566,6 +590,40 @@ class TestWarm:
         assert rows["Model generates"].detail == (
             "not attempted; the model is unreachable"
         )
+
+
+def test_the_daemon_is_not_probed_when_the_profile_did_not_load(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A profile that will not load makes the daemon row unanswerable, not red.
+
+    The daemon is per profile: ``get_daemon_client()`` resolves through the
+    *loaded* one. With no profile loaded it raises "Could not determine the
+    current profile. Consider loading a profile using `aiida.load_profile()`",
+    which told a researcher to call a Python API and made one fault print as two
+    red rows, the second of them about something they never asked about.
+    """
+    from aiida_agents.cli.doctor import _DAEMON_LABEL
+
+    _patch_all_checks_passing(monkeypatch)
+    probed: list[object] = []
+
+    def _no_such_profile(profile: str | None) -> object:
+        msg = "profile `nope` does not exist"
+        raise ValueError(msg)
+
+    def _record(profile_name: str | None = None) -> _DaemonClient:
+        probed.append(profile_name)
+        return _DaemonClient()
+
+    monkeypatch.setattr("aiida.load_profile", _no_such_profile)
+    monkeypatch.setattr("aiida.engine.daemon.client.get_daemon_client", _record)
+
+    rows = _rows_by_label()
+
+    assert probed == []
+    assert rows[_DAEMON_LABEL].ok is False
+    assert rows[_DAEMON_LABEL].detail == "not attempted; the profile did not load"
 
 
 @pytest.mark.parametrize(
