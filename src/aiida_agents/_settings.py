@@ -195,9 +195,11 @@ class SandboxSettings(_Base):
 
     sandbox_profile: str = "agents-sandbox"
     """AiiDA profile generated code runs against. Must be a disposable copy of
-    the user's storage --- ``aiida-agents sandbox init`` makes one, and
-    ``sandbox check`` proves it shares nothing. Nothing downstream can tell a
-    copy from the real thing, so this setting is the whole safety boundary."""
+    the user's storage: ``aiida-agents sandbox init`` makes one, and ``sandbox
+    check`` proves it shares nothing. Nothing downstream can tell a copy from
+    the real thing, so this setting is the whole boundary around the user's
+    AiiDA data. Outside the database it only narrows: a snippet that gets past
+    the import guard can still read the filesystem and reach the network."""
 
     sandbox_timeout: float = Field(default=30.0, gt=0)
     """Seconds a snippet may run before it is killed. A query over a large
