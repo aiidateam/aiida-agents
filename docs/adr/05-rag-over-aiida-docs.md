@@ -41,7 +41,7 @@ The correct approach, confirmed with the project mentor, is to run
 `sphinx-build -b text` on the `docs/source/` directory. This produces clean
 `.txt` files: plain prose with `Note:`/`Warning:` labels preserved, all
 directives resolved, all includes expanded. The text corpus is version-matched
-to `aiida-core v2.8.0` (pinned via `--branch v2.8.0` sparse clone).
+to `aiida-core v2.9.0` (pinned via `--branch v2.9.0` sparse clone).
 
 Notebook execution is disabled during the build (`-D nb_execution_mode=off`)
 so the corpus can be rebuilt quickly without a full AiiDA installation.
@@ -148,7 +148,7 @@ so it uses the environment that has `aiida` installed, not a stray system
 `sphinx-build`.
 
 The result is embedded into a ChromaDB collection keyed by
-`(aiida-docs-version, embedding-model)` (e.g. `aiida_docs__v2.8.0__mxbai`).
+`(aiida-docs-version, embedding-model)` (e.g. `aiida_docs__v2.9.0__mxbai`).
 Keying on both is required because index-time and query-time embeddings must
 match: a collection built with mxbai (1024-dim) cannot be queried with MiniLM
 (384-dim). A version bump or a backend change therefore triggers a rebuild

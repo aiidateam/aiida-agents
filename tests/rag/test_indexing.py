@@ -227,9 +227,9 @@ def test_index_status_reports_built_collection(
     embed = _FakeEmbed()
     client = _get_client(RagSettings())
     client.create_collection(
-        "aiida_docs__v2.8.0__fenced1__ollama_mxbai-embed-large",
+        "aiida_docs__v2.9.0__fenced1__ollama_mxbai-embed-large",
         embedding_function=embed,
-        metadata={"docs_version": "v2.8.0", "embedding": "ollama/mxbai-embed-large"},
+        metadata={"docs_version": "v2.9.0", "embedding": "ollama/mxbai-embed-large"},
     ).add(ids=["a"], documents=["x"], metadatas=[{"source": "s", "section": "S"}])
 
     status = index_status()
@@ -237,7 +237,7 @@ def test_index_status_reports_built_collection(
     assert len(status.collections) == 1
     info = status.collections[0]
     assert info.chunks == 1
-    assert info.docs_version == "v2.8.0"
+    assert info.docs_version == "v2.9.0"
     assert info.embedding == "ollama/mxbai-embed-large"
 
 

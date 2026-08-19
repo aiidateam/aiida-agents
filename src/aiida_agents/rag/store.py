@@ -19,7 +19,7 @@ from aiida_agents.rag.embeddings import EmbeddingFunction, configured_embedding_
 
 _COLLECTION_PREFIX = "aiida_docs"
 _PLUGIN_COLLECTION_PREFIX = "aiida_agents_plugin_docs"
-_DOCS_TAG = "v2.8.0"  # pinned aiida-core docs version; part of the index identity
+_DOCS_TAG = "v2.9.0"  # pinned aiida-core docs version; part of the index identity
 
 # Corpus rendering format; bump when the text-build output changes shape
 # (e.g. "fenced1" = code blocks carry ```lang fences, see rag._textbuild), so

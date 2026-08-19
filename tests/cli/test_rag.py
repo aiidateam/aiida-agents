@@ -211,7 +211,7 @@ def test_rag_status_reports_built_index(
     name = _core_name_for("ollama/mxbai-embed-large")
     collection = chromadb.PersistentClient(path=str(store)).create_collection(
         name,
-        metadata={"docs_version": "v2.8.0", "embedding": "ollama/mxbai-embed-large"},
+        metadata={"docs_version": "v2.9.0", "embedding": "ollama/mxbai-embed-large"},
     )
     collection.add(ids=["1"], documents=["hello"], embeddings=[[0.1, 0.2, 0.3]])
 
@@ -222,7 +222,7 @@ def test_rag_status_reports_built_index(
     # A narrow terminal may wrap the (long) embedding name across lines, so check
     # a prefix short enough to always land on one line rather than the full string.
     assert "aiida_docs__" in result.output
-    assert "v2.8.0" in result.output
+    assert "v2.9.0" in result.output
     assert "ollama/mxbai" in result.output
     # No "corpus" metadata was set on this collection; it reads as the core docs.
     assert "aiida-core" in result.output

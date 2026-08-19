@@ -10,7 +10,7 @@ say is hardest about the documentation in the first place.
 Both halves of a URL are already on hand, so this builds one:
 
     howto/query  §  Constructing a query
-    -> https://aiida-core.readthedocs.io/en/v2.8.0/howto/query.html#constructing-a-query
+    -> https://aiida-core.readthedocs.io/en/v2.9.0/howto/query.html#constructing-a-query
 
 The version segment is the *same tag the corpus was rendered from*, not
 ``latest``. A citation that silently pointed at a newer page would be the worst
@@ -75,7 +75,7 @@ def page_url(template: str, source: str, version: str) -> str:
     Args:
         template: A URL with ``{version}`` and ``{page}`` placeholders.
         source: The extensionless sphinx doc id, e.g. ``howto/query``.
-        version: The docs ref the corpus was built at, e.g. ``v2.8.0``.
+        version: The docs ref the corpus was built at, e.g. ``v2.9.0``.
     """
     return template.format(version=version, page=source)
 
