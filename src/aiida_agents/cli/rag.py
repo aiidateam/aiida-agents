@@ -2,7 +2,8 @@
 
 The heavy indexing/retrieval logic lives in the ``aiida_agents.rag`` package;
 this module is the Click surface plus the docs-toolchain provisioning helpers
-(``sphinx`` is an opt-in dependency, offered on demand before a build).
+(``sphinx`` ships with the ``rag`` extra, and is offered on demand to an
+environment that installed that extra before it carried the toolchain).
 """
 
 from __future__ import annotations
@@ -30,6 +31,10 @@ from aiida_agents.cli.output import console
 
 if TYPE_CHECKING:
     from aiida_agents.rag import IndexOutcome
+
+# One spec, named once: the prompt, the install call, and the failure messages
+# must agree, or declining sends the user somewhere other than accepting would.
+_DOCS_TOOLCHAIN_SPEC = "aiida-core[docs]"
 
 
 def _module_missing(name: str) -> bool:
@@ -62,23 +67,26 @@ def _ensure_docs_toolchain() -> None:
         return
     click.echo("Building the RAG index needs the AiiDA docs toolchain (sphinx).")
     if not click.confirm(
-        "Install aiida-core[docs] into the current environment now?", default=True
+        f"Install {_DOCS_TOOLCHAIN_SPEC} into the current environment now?",
+        default=True,
     ):
         raise click.ClickException(
             "Docs toolchain not installed. Run "
-            "`uv pip install 'aiida-agents[rag-build]'` and retry `aiida-agents rag build`."
+            f"`uv pip install '{_DOCS_TOOLCHAIN_SPEC}'` and retry "
+            "`aiida-agents rag build`."
         )
     try:
-        _pip_install("aiida-core[docs]")
+        _pip_install(_DOCS_TOOLCHAIN_SPEC)
     except subprocess.CalledProcessError as exc:
         raise click.ClickException(
-            f"Install failed ({exc}). Install `aiida-core[docs]` manually and retry."
+            f"Install failed ({exc}). Install `{_DOCS_TOOLCHAIN_SPEC}` "
+            "manually and retry."
         ) from exc
     importlib.invalidate_caches()
     if _module_missing("sphinx"):
         raise click.ClickException(
             "Installed, but sphinx is still not importable here; "
-            "install `aiida-core[docs]` manually and retry."
+            f"install `{_DOCS_TOOLCHAIN_SPEC}` manually and retry."
         )
 
 

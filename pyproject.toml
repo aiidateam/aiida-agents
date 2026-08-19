@@ -36,7 +36,6 @@ dependencies = [
     # unbounded floor could pull a 3.0 into the base install that CI never
     # exercises. Within 2.x, uv.lock still pins the exact version.
     "aiida-core~=2.9",
-    "aiida-restapi @ git+https://github.com/edan-bainglass/aiida-restapi@deps",
     # Reached only through rich_click (which itself requires click>=8); no
     # speculative upper bound. Reproducibility comes from uv.lock, and a ceiling
     # is added reactively (with the breaking version noted) if CI ever hits one.
@@ -62,15 +61,13 @@ aiida-agents = "aiida_agents.cli:cli"
 docs = [
   "mystmd"
 ]
+# The vector store, plus the sphinx toolchain `rag build` shells out to
+# (rag._textbuild renders the corpus). Both, because no index ships prebuilt:
+# whoever installs this extra has to run `rag build` before a query works.
 rag = [
   "chromadb>=1.5.9",
-]
-# The sphinx toolchain `rag build` shells out to (rag._textbuild renders the
-# corpus). Separate from `rag` because querying an already-built index does not
-# need it, and it is heavy; but it must be installable non-interactively --
-# without it `rag build` stops to prompt, which blocks any scripted setup.
-rag-build = [
-  "aiida-agents[rag]",
+  # No specifier: the base `aiida-core~=2.9` dependency above already carries
+  # the version policy (and the reasoning for it); this only adds the extra.
   "aiida-core[docs]",
 ]
 # In-process CPU fallback embedder, used only when no Ollama server is reachable.
@@ -153,29 +150,11 @@ vasp = [
   "vasp-rag-stub",
 ]
 
-[tool.uv]
-# `aiida-restapi` still requires `aiida-core` from a git URL (its `@deps`
-# fork), and a bare `aiida-core~=2.9` in our own dependencies would lose to
-# that URL: uv prefers a URL requirement over a version one. The override
-# replaces *every* requirement for the package with our own spec, so aiida-core
-# resolves from PyPI rather than through the fork's branch.
-# Both spellings: an override replaces every requirement for the package, so
-# listing only the bare one silently dropped the `[docs]` extra that
-# `aiida-agents[rag-build]` asks for -- taking sphinx and 50 other packages out
-# of the lockfile, and `rag build` with them.
-override-dependencies = [
-  "aiida-core~=2.9",
-  "aiida-core[docs]~=2.9",
-]
-
 [tool.uv.sources]
 # The stubs live in this repository; installing them editable means a change to
 # dev/*_rag_stub takes effect without reinstalling.
 qe-rag-stub = { path = "dev/qe_rag_stub", editable = true }
 vasp-rag-stub = { path = "dev/vasp_rag_stub", editable = true }
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.version]
 path = "src/aiida_agents/__about__.py"
@@ -287,18 +266,19 @@ module = "sentence_transformers.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-# sphinx is an opt-in, indexing-only dependency: rag._textbuild imports it lazily
-# (see indexing._clone_and_build_text) and it is absent from the lint env. Its
-# types are only visible when it is installed (dev/indexing env), so don't fail
-# on the missing import in the lint env.
+# sphinx is an indexing-only dependency: rag._textbuild imports it lazily (see
+# indexing._clone_and_build_text). The `rag` extra ships it, so the lint env
+# (which installs that extra) sees its real types; the override is what keeps
+# mypy usable in an environment that installed the package without the extra.
 module = ["sphinx.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # rag._textbuild subclasses sphinx's TextTranslator and returns app.statuscode.
-# With sphinx absent from the lint env (above) both resolve to Any, so relax the
-# Any-subclass and Any-return checks for this one module. With sphinx installed
-# they are real types and these relaxations are inert (full checking still applies).
+# Wherever sphinx is missing (an environment without the `rag` extra, above)
+# both resolve to Any, so relax the Any-subclass and Any-return checks for this
+# one module. With sphinx installed, as in the lint env, they are real types and
+# these relaxations are inert (full checking still applies).
 module = "aiida_agents.rag._textbuild"
 disallow_subclassing_any = false
 warn_return_any = false

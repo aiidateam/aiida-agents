@@ -82,12 +82,12 @@ def _clone_and_build_text(
     """
     # Fail fast, before the (slow) clone: the docs toolchain must be present in
     # THIS interpreter. We do not pip-install at runtime (it mutates the user's
-    # env and fails on uv venvs with no bundled pip); it is an opt-in dependency.
+    # env and fails on uv venvs with no bundled pip); the `rag` extra ships it.
     if importlib.util.find_spec("sphinx") is None:
         msg = (
             "Building the docs corpus needs the AiiDA docs toolchain, which "
             "is not installed in this environment. Install it with:\n"
-            "    uv pip install 'aiida-agents[rag-build]'\n"
+            "    uv pip install 'aiida-core[docs]'\n"
             "then re-run indexing."
         )
         raise RuntimeError(msg)

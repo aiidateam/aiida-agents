@@ -344,7 +344,12 @@ def test_ensure_docs_toolchain_noop_when_sphinx_present(
 def test_ensure_docs_toolchain_declined_raises_actionable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Declining the install gives a clean error naming the manual command."""
+    """Declining the install gives a clean error naming the manual command.
+
+    Asserts the whole command, because it has to name what the accept path
+    installs (``aiida-core[docs]``, pinned below); the two drifted apart once
+    before.
+    """
     from aiida_agents.cli import rag
 
     monkeypatch.setattr(rag, "_module_missing", lambda name: True)
@@ -353,7 +358,7 @@ def test_ensure_docs_toolchain_declined_raises_actionable(
     with pytest.raises(rich_click.ClickException) as exc_info:
         rag._ensure_docs_toolchain()
 
-    assert "aiida-agents[rag-build]" in str(exc_info.value)
+    assert "uv pip install 'aiida-core[docs]'" in str(exc_info.value)
 
 
 def test_ensure_docs_toolchain_installs_on_accept(

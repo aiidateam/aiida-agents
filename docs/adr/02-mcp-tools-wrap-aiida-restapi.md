@@ -20,9 +20,13 @@ We retain that read vs. write split to gate agent permissions: read-only tools r
 
 "Wrap `aiida-restapi`" applies where it earns its place: the collection/query surface, where the service layer centralises filtering, projection, and pagination (e.g. `list_processes`, `query_nodes`). For simple single-node operations addressed by a known identifier (load one node, then read its attributes or traverse its links), use `aiida-core`'s ORM directly (`orm.load_node`, `node.base.links`). That is the canonical AiiDA access path, not a re-implementation, and it avoids the round-trips the service layer incurs for a single node: resolving the identifier to a uuid, then an N+1 follow-up query per linked node. Rule of thumb: `NodeService` for queries over many nodes; plain ORM where you already hold, or load, a single node.
 
+### Status of the dependency (2026-08-19)
+
+The decision stands, but nothing in `src/` imports `aiida_restapi` yet: the tools that exist read through `aiida-core`'s ORM, which the refinement above sanctions for single-node access. `aiida-restapi` is therefore not declared as a dependency, because declaring it costs real breakage: it is unpublished, so it can only be required by git URL, and it in turn requires `aiida-core` by git URL, which silently replaced a released `aiida-core` with a development build in every fresh install. It gets declared again with the first commit that imports it, by which point it should resolve from PyPI.
+
 ## Consequences
 
-- The agent tool layer depends on `aiida-restapi` (a deliberate, well-scoped dependency) instead of touching `aiida-core` internals.
+- The agent tool layer wraps `aiida-restapi` where the query surface earns it (see the status note above for when the dependency returns) instead of touching `aiida-core` internals.
 - The concrete tool list, request/response schemas, and the wrapping boundary are still to be specified when this ADR is fleshed out.
 
 ## Alternatives considered

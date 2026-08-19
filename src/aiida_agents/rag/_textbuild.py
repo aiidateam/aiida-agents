@@ -29,8 +29,9 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     srcdir, outdir = args
 
-    # Imported here: sphinx is an opt-in, indexing-only dependency
-    # (see the toolchain check in ``indexing._clone_and_build_text``).
+    # Imported here: sphinx is an indexing-only dependency, shipped by the
+    # `rag` extra (see the check in ``indexing._clone_and_build_text``), so
+    # importing this module never requires the docs toolchain.
     from docutils import nodes
     from sphinx.application import Sphinx
     from sphinx.writers.text import TextTranslator

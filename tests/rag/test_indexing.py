@@ -39,7 +39,7 @@ def test_build_requires_docs_toolchain(monkeypatch: pytest.MonkeyPatch) -> None:
         "importlib.util.find_spec",
         lambda name, package=None: None,
     )
-    with pytest.raises(RuntimeError, match=r"aiida-agents\[rag-build\]"):
+    with pytest.raises(RuntimeError, match=r"uv pip install 'aiida-core\[docs\]'"):
         _clone_and_build_text("/tmp/unused")
 
 
