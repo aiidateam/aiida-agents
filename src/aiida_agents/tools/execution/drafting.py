@@ -58,6 +58,7 @@ from typing_extensions import TypedDict
 from aiida_agents.tools.execution._spec import (
     is_reference,
     load_process_class,
+    port_accepts_node,
     resolve_reference,
     to_spec_value,
     valid_type_names,
@@ -108,7 +109,7 @@ def _default_of(port: t.Any) -> t.Any:
         return _UNSET
 
 
-def _supplied_value(path: str, value: t.Any) -> t.Any:
+def _supplied_value(path: str, value: t.Any, port: t.Any) -> t.Any:
     """Validate one caller-supplied value and return it in spec form.
 
     A reference dict is resolved to prove the node exists --- raising here, while
@@ -116,8 +117,12 @@ def _supplied_value(path: str, value: t.Any) -> t.Any:
     back unchanged, so the draft stays a plain document. Anything else passes
     through: a nested plain dict is a ``Dict`` port's contents, and a bare value
     is wrapped by ``submit_workflow`` against the port's own type.
+
+    Reference *shape* is not enough: only a port that accepts a node can hold
+    one, so in a dict-valued port such as ``metadata.options.environment_variables``
+    a key called ``label`` is the user's own data rather than a code to load.
     """
-    if is_reference(value):
+    if port_accepts_node(port) and is_reference(value):
         resolve_reference(value, path)
         return value
     return to_spec_value(value)
@@ -187,7 +192,7 @@ def _draft_namespace(
             continue
 
         if value is not _UNSET:
-            drafted[name] = _supplied_value(full, value)
+            drafted[name] = _supplied_value(full, value, port)
             continue
 
         default = _default_of(port) if fill_defaults else _UNSET
@@ -208,7 +213,7 @@ def _draft_namespace(
     # does not constrain; anything else raised above.
     for name in unknown:
         full = f"{path}.{name}" if path else name
-        drafted[name] = _supplied_value(full, supplied[name])
+        drafted[name] = _supplied_value(full, supplied[name], namespace)
 
     return drafted
 

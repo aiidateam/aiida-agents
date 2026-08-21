@@ -25,6 +25,7 @@ from aiida.plugins.entry_point import load_entry_point
 __all__ = [
     "is_reference",
     "load_process_class",
+    "port_accepts_node",
     "resolve_reference",
     "to_spec_value",
     "valid_type_names",
@@ -43,8 +44,42 @@ def load_process_class(entry_point: str) -> type[Process]:
 
 
 def is_reference(value: t.Any) -> bool:
-    """True for a bare ``{"pk"|"uuid"|"label"}`` node-reference dict."""
+    """True for a bare ``{"pk"|"uuid"|"label"}`` node-reference dict.
+
+    Shape only. Whether the value *means* a reference also depends on where it
+    sits, so pair this with :func:`port_accepts_node` wherever a port is known.
+    """
     return isinstance(value, dict) and bool({"pk", "uuid", "label"} & value.keys())
+
+
+def _port_valid_types(port: t.Any) -> tuple[type, ...]:
+    """A port's ``valid_type`` as a tuple, with ``NoneType`` dropped.
+
+    ``valid_type`` is a single type, a tuple of them, or ``None``; ``NoneType``
+    appears for an optional port and says nothing about what to supply.
+    """
+    valid_type = getattr(port, "valid_type", None)
+    if isinstance(valid_type, (tuple, list)):
+        return tuple(vt for vt in valid_type if vt is not type(None))
+    if valid_type is None or valid_type is type(None):
+        return ()
+    return (valid_type,)
+
+
+def port_accepts_node(port: t.Any) -> bool:
+    """Whether a node can go on this port, so a reference dict means something.
+
+    The missing half of :func:`is_reference`: a ``{"pk"|"uuid"|"label"}`` dict
+    names a node only where a node can be supplied. In a dict-*valued* port such
+    as ``metadata.options.environment_variables`` a key called ``label`` is the
+    user's own data, and reading it as a reference reports a missing *code* the
+    user never mentioned. An unconstrained port counts as accepting one, since a
+    reference is the only way to name a node there.
+    """
+    valid_types = _port_valid_types(port)
+    if not valid_types:
+        return True
+    return any(isinstance(vt, type) and issubclass(vt, orm.Node) for vt in valid_types)
 
 
 def resolve_reference(ref: dict[str, t.Any], context: str) -> orm.Node:
@@ -107,23 +142,9 @@ def to_spec_value(value: t.Any) -> t.Any:
 
 
 def valid_type_names(port: t.Any) -> list[str]:
-    """The names of the node types a port accepts, ``["Any"]`` if unconstrained.
-
-    ``valid_type`` is a single type, a tuple of them, or ``None``; ``NoneType``
-    appears in the tuple for an optional port and carries no information about
-    what to supply, so it is dropped.
-    """
-    valid_type = getattr(port, "valid_type", None)
-    if isinstance(valid_type, (tuple, list)):
-        names = [
-            vt.__name__ if hasattr(vt, "__name__") else str(vt)
-            for vt in valid_type
-            if vt is not type(None)
-        ]
-    elif valid_type is not None and valid_type is not type(None):
-        names = [
-            valid_type.__name__ if hasattr(valid_type, "__name__") else str(valid_type)
-        ]
-    else:
-        names = []
+    """The names of the node types a port accepts, ``["Any"]`` if unconstrained."""
+    names = [
+        vt.__name__ if hasattr(vt, "__name__") else str(vt)
+        for vt in _port_valid_types(port)
+    ]
     return names or ["Any"]

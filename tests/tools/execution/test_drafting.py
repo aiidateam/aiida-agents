@@ -253,6 +253,30 @@ class TestReferences:
 
         assert spec["inputs"]["structure"] == ref
 
+    def test_a_reference_key_inside_a_dict_valued_port_is_data(self) -> None:
+        """``environment_variables`` takes a plain dict, so no node can go there
+        and nothing inside it can be a node reference. Reading its ``label`` key
+        as one failed the draft with a missing-*code* error naming a code the
+        user never mentioned.
+        """
+        environment = {"label": "run-42", "OMP_NUM_THREADS": "4"}
+
+        spec = draft_workflow_inputs(
+            ADD_EP, {"metadata": {"options": {"environment_variables": environment}}}
+        )
+
+        assert spec["inputs"]["metadata"]["options"]["environment_variables"] == (
+            environment
+        )
+
+    def test_a_reference_on_a_node_port_still_resolves_eagerly(self) -> None:
+        """The gate narrows *where* a reference is looked for, not whether an
+        unresolvable one is caught: a bad reference on a node port must still
+        fail during drafting, while the agent can act on it.
+        """
+        with pytest.raises(ValueError, match=r"No node found with pk=.*'code'"):
+            draft_workflow_inputs(ADD_EP, {"code": {"pk": 10**9}})
+
 
 class TestRoundTrip:
     """The claim that matters: a completed draft actually submits."""
