@@ -107,7 +107,7 @@ def _resolve_settings_or_fail(provider: str | None, model: str | None) -> ModelS
 def _build_agent(
     settings: ModelSettings, profile: str | None, agent_type: str = "analysis"
 ) -> Agent:  # pragma: no cover
-    """Load the profile and build the requested agent from resolved settings.
+    """Load the profile, open its storage, and build the requested agent.
 
     ``agent_type`` selects which agent to build (``"analysis"`` or
     ``"execution"``); the value is already constrained by the ``--agent`` choice
@@ -119,6 +119,9 @@ def _build_agent(
     traceback.
     """
     from aiida import load_profile
+    from aiida.common.exceptions import AiidaException
+
+    from aiida_agents._profile import open_profile_storage
     from aiida_agents.agents import get_agent
 
     if agent_type not in _SPECIALISTS:
@@ -131,12 +134,19 @@ def _build_agent(
     try:
         _ensure_ollama_model(settings)
         load_profile(profile)
+        # The agent's tools run on worker threads, so the storage has to be open
+        # before the first one does; see ``open_profile_storage``.
+        open_profile_storage()
         agent = get_agent(agent_type=agent_type, model_settings=settings)
-    except (UserError, ValueError) as exc:
+    except (UserError, ValueError, AiidaException) as exc:
+        # Every one of these is "fix your config", not a bug, so the message is
+        # worth far more in the error box than at the bottom of a traceback.
         # UserError: pydantic-ai, for a missing cloud API key. ValueError:
-        # get_model for an openai-compatible endpoint without a base_url. Both
-        # are "fix your config", not bugs (a bad provider/setting value is
-        # already caught upstream at resolution), so show a clean error.
+        # get_model for an openai-compatible endpoint without a base_url (a bad
+        # provider/setting value is already caught upstream at resolution).
+        # AiidaException: a profile that does not exist, a storage still on an
+        # older schema, an unreachable database -- AiiDA's own message names the
+        # command that fixes each.
         raise click.ClickException(str(exc)) from exc
     return agent
 

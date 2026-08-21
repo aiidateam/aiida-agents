@@ -9,12 +9,16 @@ node identity (the pk/uuid they created) rather than against global counts.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 from aiida import orm
 from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
+from aiida.common.exceptions import IncompatibleStorageSchema
 from aiida.engine import run_get_node
+from aiida.manage import get_manager
 from aiida.workflows.arithmetic.multiply_add import MultiplyAddWorkChain
 
 # Pull in AiiDA's test fixtures (``aiida_profile``, ``aiida_localhost``, ...).
@@ -22,6 +26,9 @@ from aiida.workflows.arithmetic.multiply_add import MultiplyAddWorkChain
 # ``core.sqlite_dos`` profile that needs no external services, so the MCP tools
 # run against a real database, not mocks.
 pytest_plugins = ["aiida.tools.pytest_fixtures"]
+
+if TYPE_CHECKING:
+    from aiida.manage.manager import Manager
 
 
 @pytest.fixture(autouse=True)
@@ -172,3 +179,42 @@ def without_plugins(monkeypatch: pytest.MonkeyPatch) -> None:
     from aiida_agents.agents import analysis
 
     monkeypatch.setattr(analysis, "discover_plugins", lambda: ())
+
+
+@pytest.fixture
+def unopened_profile_storage(monkeypatch: pytest.MonkeyPatch) -> Iterator[Manager]:
+    """Put the manager back in the lazy state a fresh process starts in.
+
+    The session ``aiida_profile`` fixture has opened the storage long before any
+    test runs, so "does this entry point open it?" is otherwise unaskable.
+    ``Manager.reset_profile_storage`` would *close* the backend, and the
+    session-scoped node fixtures above hold ORM objects bound to it, so the rest
+    of the suite would fail on a dead engine. Detaching it instead leaves the
+    original intact for ``monkeypatch`` to reattach on teardown; whatever the
+    test opened in its place is closed here first.
+
+    :return: The manager, detached from its storage backend.
+    """
+    manager = get_manager()
+    monkeypatch.setattr(manager, "_profile_storage", None)
+    yield manager
+    if manager.profile_storage_loaded:
+        manager.get_profile_storage().close()
+
+
+@pytest.fixture
+def unmigrated_storage_error() -> IncompatibleStorageSchema:
+    """AiiDA's real wording for a profile an ``aiida-core`` upgrade left behind.
+
+    Quoted rather than paraphrased because its shape is what the error handling
+    under test has to survive: it opens with a blank line, and the command that
+    resolves it sits indented on a line of its own.
+
+    :return: The exception a storage on an older schema raises when opened.
+    """
+    return IncompatibleStorageSchema(
+        "\nDatabase schema version `main_0001` is incompatible with the "
+        "required schema version `main_0002`.\nTo migrate the database schema "
+        "version to the current one, run the following command:\n\n"
+        "    verdi -p test storage migrate\n"
+    )

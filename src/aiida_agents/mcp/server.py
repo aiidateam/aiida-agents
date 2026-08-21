@@ -2,14 +2,17 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 from aiida import load_profile
+from aiida.common.exceptions import AiidaException
 from aiida.manage import get_manager
 from fastmcp import FastMCP
 
 from aiida_agents._logging import _configure_logging
+from aiida_agents._profile import open_profile_storage
 from aiida_agents._settings import (
     LoggingSettings,
     ServerSettings,
@@ -17,10 +20,12 @@ from aiida_agents._settings import (
 )
 from aiida_agents.mcp.tools import register_all
 
+logger = logging.getLogger(__name__)
+
 
 @asynccontextmanager
 async def _lifespan(_: FastMCP) -> AsyncGenerator[None]:
-    """Configure logging and load the default AiiDA profile on startup.
+    """Configure logging, load the default AiiDA profile and open its storage.
 
     Runs on every launch path (``main()``, ``fastmcp run``, ``fastmcp dev``),
     unlike a ``main()``-only setup. Logging is configured here rather than at
@@ -35,6 +40,17 @@ async def _lifespan(_: FastMCP) -> AsyncGenerator[None]:
     warn_on_unrecognized_settings()
     if get_manager().get_profile() is None:
         load_profile()
+    try:
+        # The tools run on worker threads, so the storage has to be open before
+        # the first request does; see ``open_profile_storage``.
+        open_profile_storage()
+    except AiidaException as exc:
+        # Refusing to start beats serving tools that all fail the same way. Log
+        # the message first: AiiDA's names the command that fixes it, and the
+        # startup traceback would otherwise bury it. Stripped so the record's
+        # first line carries the failure -- AiiDA's open with a blank one.
+        logger.error("cannot open the profile storage: %s", str(exc).strip())
+        raise
     yield
 
 

@@ -5,10 +5,13 @@ from __future__ import annotations
 import asyncio
 import importlib
 import inspect
+import logging
 import pkgutil
 
 import pytest
-from aiida.common.exceptions import NotExistent
+from aiida.common.exceptions import IncompatibleStorageSchema, NotExistent
+from aiida.manage import get_manager
+from aiida.manage.manager import Manager
 from fastmcp import Client, FastMCP
 from fastmcp.exceptions import ToolError
 
@@ -104,3 +107,72 @@ def test_register_tool_surfaces_tool_error() -> None:
 
     with pytest.raises(ToolError, match="987654321"):
         asyncio.run(_call())
+
+
+def test_lifespan_opens_the_storage_before_serving_tools(
+    unopened_profile_storage: Manager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No tool may be the first thing to open the storage.
+
+    fastmcp runs a sync tool on a worker thread and AiiDA opens storage lazily,
+    so two tool threads taking that first open together race the PID-named temp
+    move in ``ProfileAccessManager`` and one raises ``FileNotFoundError``. The
+    assertion is *inside* the context manager: opening the storage on the way
+    out would leave the race exactly as it was.
+    """
+    from aiida_agents.mcp import server as server_mod
+
+    # The lifespan resets root logging handlers; keep that out of the test session.
+    monkeypatch.setattr(server_mod, "_configure_logging", lambda *_a, **_k: None)
+
+    manager = unopened_profile_storage
+    assert not manager.profile_storage_loaded
+
+    async def _enter() -> None:
+        async with server_mod._lifespan(server_mod.mcp):
+            assert manager.profile_storage_loaded, (
+                "the lifespan must open the profile storage before serving tools"
+            )
+
+    asyncio.run(_enter())
+
+
+def test_a_storage_that_cannot_be_opened_is_reported_before_the_traceback(
+    unmigrated_storage_error: IncompatibleStorageSchema,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """Startup fails, but the operator reads the fix instead of hunting for it.
+
+    An unmigrated storage is the ordinary case here (any ``aiida-core`` upgrade
+    puts a profile there), and AiiDA's own message ends with the ``verdi``
+    command that resolves it.
+    """
+    from aiida_agents.mcp import server as server_mod
+
+    monkeypatch.setattr(server_mod, "_configure_logging", lambda *_a, **_k: None)
+
+    def _unmigrated() -> None:
+        raise unmigrated_storage_error
+
+    # Injected where AiiDA opens the storage, so the code under test runs whole.
+    monkeypatch.setattr(get_manager(), "get_profile_storage", _unmigrated)
+
+    async def _enter() -> None:
+        async with server_mod._lifespan(server_mod.mcp):
+            pass
+
+    with (
+        caplog.at_level(logging.ERROR, logger=server_mod.__name__),
+        pytest.raises(IncompatibleStorageSchema),
+    ):
+        asyncio.run(_enter())
+
+    assert "verdi -p test storage migrate" in caplog.text
+    # Not just present: on the record's first line, so a log search finds the
+    # failure rather than a prefix followed by a blank.
+    assert (
+        caplog.records[0]
+        .getMessage()
+        .startswith("cannot open the profile storage: Database schema version")
+    )

@@ -5,12 +5,20 @@ from __future__ import annotations
 import asyncio
 
 import pytest
+import rich_click as click
+from aiida.common.exceptions import IncompatibleStorageSchema
+from aiida.manage import get_manager
+from aiida.manage.manager import Manager
 from click.testing import CliRunner
 
-from aiida_agents._settings import _Provider
+from aiida_agents._settings import ModelSettings, _Provider
 from aiida_agents.cli import cli
 from aiida_agents.agents.planner import _SPECIALISTS, Specialist, Step
-from aiida_agents.cli.agent import _AGENT_CHOICES, _resolve_model_settings
+from aiida_agents.cli.agent import (
+    _AGENT_CHOICES,
+    _build_agent,
+    _resolve_model_settings,
+)
 
 
 @pytest.mark.parametrize(
@@ -33,6 +41,54 @@ def test_resolve_model_settings_precedence(
     else:
         monkeypatch.setenv("AIIDA_AGENTS_MODEL", env_model)
     assert _resolve_model_settings(None, flag_model).model == expected
+
+
+def test_build_agent_opens_the_profile_storage(
+    unopened_profile_storage: Manager, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The agent's tools must never be the first thing to open the storage.
+
+    pydantic-ai runs a sync tool on a worker thread and AiiDA opens storage
+    lazily, so two tool threads taking that first open together race the
+    PID-named temp move in ``ProfileAccessManager`` and one raises
+    ``FileNotFoundError``.
+    """
+    monkeypatch.setattr("aiida_agents.agents.get_agent", lambda **_kw: object())
+
+    manager = unopened_profile_storage
+    assert not manager.profile_storage_loaded
+
+    settings = ModelSettings(provider="openrouter", model="openrouter/free")
+    _build_agent(settings, None, "analysis")
+
+    assert manager.profile_storage_loaded
+
+
+def test_build_agent_reports_an_unopenable_storage_cleanly(
+    unmigrated_storage_error: IncompatibleStorageSchema,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A storage AiiDA refuses to open is a config problem, not a crash.
+
+    Any ``aiida-core`` upgrade leaves profiles on an older schema, and AiiDA's
+    message for that ends with the ``verdi`` command that migrates them, which
+    has to survive into the ``ClickException`` rather than reaching the user as
+    a traceback. Asserted on the exception rather than on rendered output: how
+    ``rich`` breaks the error panel across lines depends on the terminal, so a
+    substring match on the rendering passes locally and fails in CI.
+    """
+
+    def _unmigrated() -> None:
+        raise unmigrated_storage_error
+
+    # Injected where AiiDA opens the storage, so the code under test runs whole.
+    monkeypatch.setattr(get_manager(), "get_profile_storage", _unmigrated)
+    settings = ModelSettings(provider="openrouter", model="openrouter/free")
+
+    with pytest.raises(click.ClickException) as excinfo:
+        _build_agent(settings, None, "analysis")
+
+    assert "verdi -p test storage migrate" in excinfo.value.message
 
 
 def test_build_agent_reports_missing_api_key_cleanly(
