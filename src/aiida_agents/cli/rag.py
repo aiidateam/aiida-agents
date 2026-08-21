@@ -318,6 +318,45 @@ def rag_search(query: str, limit: int, refs_only: bool) -> None:
         )
 
 
+@rag.command("serve")
+@click.option(
+    "--host", default="127.0.0.1", show_default=True, help="Host interface to bind."
+)
+@click.option("--port", default=8000, show_default=True, type=int, help="Port to bind.")
+@click.option(
+    "--cors-origin",
+    "cors_origins",
+    multiple=True,
+    metavar="ORIGIN",
+    help="Browser origin allowed to call the API directly (repeatable), e.g. "
+    "https://aiida.net. Omit when reached only through a same-origin proxy.",
+)
+@_needs_recognized_settings
+def rag_serve(
+    host: str, port: int, cors_origins: tuple[str, ...]
+) -> None:  # pragma: no cover
+    """Serve the docs index as a read-only HTTP API (retrieval only, no model).
+
+    Exposes ``POST /search`` ({query, limit} -> ranked chunks with links) and
+    ``GET /health``. No LLM, no API key, no AiiDA profile: retrieval hits
+    ChromaDB and the embedder only. Put a proxy or rate limiter in front for
+    public traffic; this serves plain, unauthenticated HTTP.
+    """
+    import uvicorn
+
+    from aiida_agents.rag.retriever import docs_index_available
+    from aiida_agents.rag.server import create_app
+
+    if not docs_index_available():
+        raise click.ClickException(
+            "No RAG index found. Build it with `aiida-agents rag build` before serving."
+        )
+    click.echo(
+        f"Serving docs search on http://{host}:{port}  (POST /search, GET /health)"
+    )
+    uvicorn.run(create_app(cors_origins=list(cors_origins)), host=host, port=port)
+
+
 @rag.command("clear")
 @click.option(
     "-f",
