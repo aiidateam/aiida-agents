@@ -170,11 +170,11 @@ def _resolve_port_value(name: str, value: Any, port: Any) -> Any:
     if isinstance(value, orm.Node):
         return value
 
-    # Explicit node reference dict — resolve and use directly
-    if isinstance(value, dict) and {"pk", "uuid", "label"} & value.keys():
-        return _resolve_node_reference(value, name)
-
-    # If port is a PortNamespace and value is a dict without node reference keys:
+    # A namespace holds ports, never a node, so a dict here is always that
+    # namespace's own inputs. This has to be settled before the reference-dict
+    # shortcut below: ``metadata`` declares a ``label`` port on every process
+    # spec, so {"metadata": {"label": "my run"}} would otherwise be read as a
+    # reference and reported as a missing *code* named "my run".
     if isinstance(port, PortNamespace) and isinstance(value, dict):
         return _resolve_namespace_inputs(value, port)
 
@@ -187,6 +187,19 @@ def _resolve_port_value(name: str, value: Any, port: Any) -> Any:
         expected_types = tuple(t for t in valid_type if t is not type(None))
     else:
         expected_types = (valid_type,) if valid_type is not type(None) else ()
+
+    # Explicit node reference dict — resolve and use directly, but only where a
+    # node can actually go: in a dict-*valued* port such as environment_variables
+    # a key called "label" is the user's own data, not a reference. An
+    # unconstrained port counts as accepting one, since a reference is the only
+    # way to name a node there.
+    accepts_a_node = not expected_types or bool(_node_types(expected_types))
+    if (
+        isinstance(value, dict)
+        and {"pk", "uuid", "label"} & value.keys()
+        and accepts_a_node
+    ):
+        return _resolve_node_reference(value, name)
 
     # Ports that can't be built from a bare value require an explicit reference
     if _is_reference_type(expected_types):

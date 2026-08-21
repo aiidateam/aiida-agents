@@ -9,7 +9,7 @@ Covers the value/reference convention in ``_resolve_inputs``:
   failure leaves no orphan in the database;
 - a reference-only port (``code`` → ``AbstractCode``) rejects a bare value;
 - a port that names no node (the ``metadata.options`` settings) takes its plain
-  value as given.
+  value as given, and a namespace dict is never mistaken for a reference.
 
 plus the resolve → validate → (submit-only) path.
 
@@ -119,6 +119,19 @@ class TestReferenceResolution:
         with pytest.raises(SubmissionInputError, match=match):
             _resolve_inputs(MULTIPLY_ADD_EP, {"code": bad_ref})
 
+    def test_reference_still_resolves_on_an_unconstrained_port(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """Where nothing constrains the port, a reference dict is still the only
+        way to name a node, so it keeps resolving. Reference resolution is
+        otherwise gated on the port accepting a node, to stop a plain dict whose
+        contents happen to carry a ``label`` key being read as one.
+        """
+        resolved = _resolve_inputs(
+            MULTIPLY_ADD_EP, {"undeclared": {"pk": arithmetic_add_code.pk}}
+        )
+        assert resolved["undeclared"].uuid == arithmetic_add_code.uuid
+
 
 class TestReferenceOnlyPorts:
     def test_code_port_rejects_bare_value(self) -> None:
@@ -198,6 +211,29 @@ class TestPlainValuePorts:
         resolved_option = resolved["metadata"]["options"][option]
         assert resolved_option == value
         assert type(resolved_option) is type(value)
+
+    def test_metadata_label_is_a_label_not_a_code_reference(self) -> None:
+        """``metadata.label`` is a declared ``str`` port, so a namespace dict
+        containing ``label`` is namespace contents, not a ``{"label": ...}`` node
+        reference. Reading it as one made every labelled submission fail with a
+        missing-code error naming a code the user never mentioned.
+        """
+        resolved = _resolve_inputs(
+            "core.arithmetic.add", {"metadata": {"label": "my run"}}
+        )
+        assert resolved["metadata"]["label"] == "my run"
+
+    def test_dict_valued_option_may_contain_a_reference_key(self) -> None:
+        """A key called ``label`` inside a dict-*valued* port is the user's data.
+        ``environment_variables`` takes a plain dict, so no node can go there and
+        nothing in it can be a node reference.
+        """
+        environment = {"label": "run-42", "OMP_NUM_THREADS": "4"}
+        resolved = _resolve_inputs(
+            "core.arithmetic.add",
+            {"metadata": {"options": {"environment_variables": environment}}},
+        )
+        assert resolved["metadata"]["options"]["environment_variables"] == environment
 
 
 class TestNoStoreDuringResolution:
