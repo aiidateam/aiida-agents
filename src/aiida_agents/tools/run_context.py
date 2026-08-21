@@ -43,6 +43,15 @@ _UNITS = {
     "kpoints_distance": "1/A (aiida-quantumespresso convention)",
 }
 
+#: What the pseudopotential notes tell the user to run when the profile has no
+#: usable family. Named here because three of the four notes end in it.
+_INSTALL_SSSP_COMMAND = "aiida-pseudo install sssp -v 1.3 -x PBE -p efficiency"
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    """``count`` and the noun agreeing with it, e.g. ``"2 families"``."""
+    return f"{count} {singular if count == 1 else plural}"
+
 
 def _inputs_named(node: t.Any, port_name: str) -> t.Iterator[t.Any]:
     """Input nodes bound to ``port_name``, at any namespace depth.
@@ -514,14 +523,17 @@ def _query_failed_attempts(filters: dict[str, t.Any]) -> dict[str, t.Any]:
 
 
 def _query_available_pseudos(filters: dict[str, t.Any]) -> dict[str, t.Any]:
-    """Query real AiiDA database for installed pseudopotential families (UpfData groups)."""
+    """Query real AiiDA database for installed pseudopotential families and pseudos."""
     from aiida import orm
 
     try:
         qb = orm.QueryBuilder()
         qb.append(
             orm.Group,
-            filters={"type_string": {"like": "aiida_pseudo%"}},
+            # aiida-pseudo family groups are ``pseudo.family`` and its subtypes,
+            # never anything starting ``aiida_pseudo``. No trailing dot in the
+            # pattern: the base ``pseudo.family`` is a usable family type too.
+            filters={"type_string": {"like": "pseudo.family%"}},
             project=["label", "type_string", "description"],
         )
         all_groups = qb.all()
@@ -535,30 +547,63 @@ def _query_available_pseudos(filters: dict[str, t.Any]) -> dict[str, t.Any]:
             {
                 "label": str(label),
                 "type_string": str(type_str),
-                "description": str(desc) if desc else "",
+                # First line only: aiida-pseudo appends two md5 checksums that
+                # the caller can neither act on nor verify, and they dominate
+                # the payload once several families are installed.
+                "description": str(desc).splitlines()[0] if desc else "",
             }
         )
 
     try:
-        upf_count = orm.QueryBuilder().append(orm.UpfData).count()
+        # aiida-pseudo stores every format it supports under ``data.pseudo.``,
+        # a hierarchy aiida-core's deprecated ``orm.UpfData``
+        # (``data.core.upf.UpfData.``) is not part of.
+        #
+        # Filtered on node_type rather than via ``DataFactory("pseudo")``: that
+        # entry point ships with aiida-pseudo, a test dependency here and not a
+        # runtime one, so where it is absent the count would read 0 next to a
+        # list of installed families.
+        pseudo_count = (
+            orm.QueryBuilder()
+            .append(orm.Data, filters={"node_type": {"like": "data.pseudo.%"}})
+            .count()
+        )
     except Exception as exc:
-        logger.debug("Could not count UpfData nodes: %s", exc)
-        upf_count = 0
+        logger.debug("Could not count pseudopotential nodes: %s", exc)
+        pseudo_count = 0
 
-    if not pseudo_families and upf_count == 0:
+    families = _plural(
+        len(pseudo_families), "pseudopotential family", "pseudopotential families"
+    )
+    pseudos = _plural(pseudo_count, "pseudopotential", "pseudopotentials")
+    if not pseudo_families and pseudo_count == 0:
         note = (
-            "No pseudopotential families or UpfData nodes are currently installed "
-            "in the active AiiDA profile. To install the recommended SSSP family, run:\n"
-            "  aiida-pseudo install sssp -v 1.3 -x PBE -p efficiency"
+            "No pseudopotential families or pseudopotentials are installed in "
+            "the active AiiDA profile. To install the recommended SSSP family, "
+            f"run:\n  {_INSTALL_SSSP_COMMAND}"
         )
     elif not pseudo_families:
-        note = f"Found {upf_count} UpfData node(s), but no named pseudo family groups."
+        note = (
+            f"Found {pseudos} in the active AiiDA profile, but no pseudopotential "
+            "family group. Workflows take a family label, so install one with:\n"
+            f"  {_INSTALL_SSSP_COMMAND}"
+        )
+    elif pseudo_count == 0:
+        # Reachable through an empty family, and through an archive import that
+        # brought the group but not its nodes. Reporting the family alone would
+        # hand back a label whose workflow then fails at input validation.
+        note = (
+            f"Found {families} in the active AiiDA profile, but no "
+            "pseudopotentials at all, and an empty family cannot be used as a "
+            "workflow input. To install the recommended SSSP family, run:\n"
+            f"  {_INSTALL_SSSP_COMMAND}"
+        )
     else:
-        note = f"Found {len(pseudo_families)} pseudopotential family/families installed in active AiiDA profile."
+        note = f"Found {families} ({pseudos}) in the active AiiDA profile."
 
     return {
         "query_type": "available_pseudos",
         "installed_families": pseudo_families,
-        "upf_data_count": upf_count,
+        "pseudo_count": pseudo_count,
         "note": note,
     }

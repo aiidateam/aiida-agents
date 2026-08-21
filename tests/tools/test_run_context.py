@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-import pytest
+from pathlib import Path
 from typing import Any
+
+import pytest
 
 from aiida_agents.tools.run_context import query_run_context
 
@@ -364,7 +366,9 @@ class TestTheToolStatesNothingItCannotSupport:
         assert res["codes"], "fixture code should be found"
         assert "recommended_version" not in res
 
-    def test_no_pseudo_family_is_named_when_none_is_installed(self) -> None:
+    def test_no_pseudo_family_is_named_when_none_is_installed(
+        self, aiida_profile_clean: Any
+    ) -> None:
         """The worst of them: it returned "SSSP/1.3/PBE/efficiency (needs installation)".
 
         A family label for something not in the profile, in a field a model
@@ -375,6 +379,145 @@ class TestTheToolStatesNothingItCannotSupport:
         res = query_run_context(query_type="available_pseudos", filters={})
 
         assert "recommended_family" not in res
-        assert "installed_families" in res
-        if not res["installed_families"]:
-            assert "aiida-pseudo install" in res["note"]
+        assert res["installed_families"] == []
+        assert "aiida-pseudo install" in res["note"]
+
+
+def _write_upf(directory: Path, element: str) -> None:
+    """A UPF file aiida-pseudo can parse, minimal enough to build a family."""
+    (directory / f"{element}.upf").write_text(
+        f'<UPF version="2.0.1">\n'
+        f'<PP_HEADER element="{element}" pseudo_type="NC" z_valence="4.0"/>\n'
+        "</UPF>\n"
+    )
+
+
+class TestInstalledPseudosAreFound:
+    """A stocked profile must not report as empty.
+
+    Both queries looked in the wrong place, so the execution agent refused to
+    submit any PW workflow while the protocol builder resolved a pseudo fine.
+    Family groups are ``pseudo.family`` and its subtypes, and the pseudos are
+    aiida-pseudo's own classes under ``data.pseudo.``, which is not where
+    aiida-core's deprecated ``UpfData`` lives.
+    """
+
+    def test_an_installed_family_and_its_pseudos_are_reported(
+        self, aiida_profile_clean: Any, tmp_path: Path
+    ) -> None:
+        """The family label reaches the caller, and so does the pseudo count."""
+        from aiida_pseudo.groups.family.sssp import SsspFamily
+
+        _write_upf(tmp_path, "Si")
+        _write_upf(tmp_path, "Ge")
+        SsspFamily.create_from_folder(tmp_path, "SSSP/1.3/PBE/efficiency")
+
+        res = query_run_context(query_type="available_pseudos", filters={})
+
+        labels = [family["label"] for family in res["installed_families"]]
+        assert labels == ["SSSP/1.3/PBE/efficiency"]
+        assert res["pseudo_count"] == 2
+        assert "Found 1 pseudopotential family (2 pseudopotentials)" in res["note"]
+        assert "aiida-pseudo install" not in res["note"]
+
+    def test_a_non_upf_format_counts_too(
+        self, aiida_profile_clean: Any, tmp_path: Path
+    ) -> None:
+        """The count is of pseudopotentials, in any of the six formats.
+
+        Naming it after UPF was the other half of the original bug: a PSF
+        family must not read as "no pseudopotentials installed" either.
+        """
+        from aiida_pseudo.data.pseudo.psf import PsfData
+        from aiida_pseudo.groups.family.pseudo import PseudoPotentialFamily
+
+        # PsfData reads the element off the first whitespace-delimited token.
+        (tmp_path / "Si.psf").write_text(" Si  pseudopotential\n")
+        PseudoPotentialFamily.create_from_folder(
+            tmp_path, "psf-family", pseudo_type=PsfData
+        )
+
+        res = query_run_context(query_type="available_pseudos", filters={})
+
+        assert res["pseudo_count"] == 1
+        assert "(1 pseudopotential)" in res["note"]
+        assert "aiida-pseudo install" not in res["note"]
+
+    def test_an_empty_family_does_not_read_as_stocked(
+        self, aiida_profile_clean: Any
+    ) -> None:
+        """A family holding no pseudos is a label a workflow would reject.
+
+        Reporting it as installed, next to a count of 0, is the same
+        families-say-yes/count-says-no contradiction this query is fixed for.
+        """
+        from aiida_pseudo.groups.family.pseudo import PseudoPotentialFamily
+
+        PseudoPotentialFamily(label="empty-family").store()
+        PseudoPotentialFamily(label="another-empty-family").store()
+
+        res = query_run_context(query_type="available_pseudos", filters={})
+
+        assert res["pseudo_count"] == 0
+        assert "Found 2 pseudopotential families" in res["note"]
+        assert "no pseudopotentials at all" in res["note"]
+        assert "aiida-pseudo install" in res["note"]
+
+    def test_family_descriptions_drop_the_checksums(
+        self, aiida_profile_clean: Any, tmp_path: Path
+    ) -> None:
+        """Only the human-readable first line of a description is passed on.
+
+        aiida-pseudo appends two md5 lines the caller can neither act on nor
+        verify, and they dominate the payload once several families exist.
+        """
+        from aiida_pseudo.groups.family.sssp import SsspFamily
+
+        _write_upf(tmp_path, "Si")
+        family = SsspFamily.create_from_folder(tmp_path, "SSSP/1.3/PBE/efficiency")
+        family.description = (
+            "SSSP v1.3 PBE efficiency installed with aiida-pseudo v1.5.0\n"
+            "Archive pseudos md5: a58f1b3373f330179fd0832c48bb9a52\n"
+            "Pseudo metadata md5: 3153c4b20fc90a44fba0236627525644"
+        )
+
+        res = query_run_context(query_type="available_pseudos", filters={})
+
+        (reported,) = res["installed_families"]
+        assert reported["description"] == (
+            "SSSP v1.3 PBE efficiency installed with aiida-pseudo v1.5.0"
+        )
+
+    def test_the_count_survives_aiida_pseudo_being_absent(
+        self, aiida_profile_clean: Any, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """No entry point is resolved to run the count.
+
+        The families come back from a raw ``type_string`` filter, which holds
+        whether or not aiida-pseudo is importable -- an archive import is
+        enough to have them. A count going through ``DataFactory("pseudo")``
+        would not, so the payload would name families beside zero pseudos.
+        """
+        import aiida.plugins
+        from aiida.common.exceptions import MissingEntryPointError
+        from aiida_pseudo.groups.family.sssp import SsspFamily
+
+        _write_upf(tmp_path, "Si")
+        SsspFamily.create_from_folder(tmp_path, "SSSP/1.3/PBE/efficiency")
+
+        # Signature matched to the real DataFactory, so a future arity change
+        # fails here rather than being swallowed by ``*args``.
+        def no_such_entry_point(entry_point_name: str, load: bool = True) -> Any:
+            msg = f"Entry point '{entry_point_name}' not found in group 'aiida.data'"
+            raise MissingEntryPointError(msg)
+
+        monkeypatch.setattr(aiida.plugins, "DataFactory", no_such_entry_point)
+        with pytest.raises(MissingEntryPointError):
+            aiida.plugins.DataFactory("pseudo")  # the patch is live
+
+        res = query_run_context(query_type="available_pseudos", filters={})
+
+        assert res["pseudo_count"] == 1
+        assert [family["label"] for family in res["installed_families"]] == [
+            "SSSP/1.3/PBE/efficiency"
+        ]
