@@ -13,7 +13,12 @@ import typing as t
 
 import pytest
 
-EXPECTED_TOOLS = {"search_aiida_examples", "run_python_snippet", "search_aiida_docs"}
+EXPECTED_TOOLS = {
+    "search_aiida_examples",
+    "run_python_snippet",
+    "search_aiida_docs",
+    "hand_off_to",  # the cross-agent hand-off signal (see agents/reroute.py)
+}
 
 
 @pytest.fixture
@@ -30,10 +35,21 @@ def codegen_agent(monkeypatch: pytest.MonkeyPatch) -> t.Any:
 
 class TestToolSurface:
     def test_it_exposes_exactly_the_expected_tools(self, codegen_agent: t.Any) -> None:
-        """Pinned, so widening this surface is a deliberate edit."""
-        from aiida_agents.agents.codegen import _TOOLS
+        """The agent's tool surface, pinned so widening it is a deliberate edit.
 
-        assert {tool.__name__ for tool in _TOOLS} == EXPECTED_TOOLS
+        Checked on the built agent, not ``_TOOLS``: ``hand_off_to`` joins the
+        toolset at construction, not the list, so only the agent shows the full
+        surface.
+        """
+        from pydantic_ai.models.test import TestModel
+
+        fake = TestModel(call_tools=[])
+        with codegen_agent.override(model=fake):
+            codegen_agent.run_sync("ping")
+        params = fake.last_model_request_parameters
+        assert params is not None
+        registered = {tool.name for tool in params.function_tools}
+        assert registered == EXPECTED_TOOLS
 
     def test_it_holds_no_write_tool(self, codegen_agent: t.Any) -> None:
         """Its safety rests on having nothing that can write, not on a prompt."""

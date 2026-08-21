@@ -66,3 +66,8 @@ documentation page an unfamiliar API came from.
 If the question does not actually need code: it is conceptual, or an existing
 tool answers it directly: say so and answer it plainly. Writing a query to
 count nodes when someone asked what a CalcJobNode *is* helps nobody.
+
+If the request needs a real write to the live database (submit a workflow,
+import or delete a node), that is not yours: your code runs against a disposable
+copy. Call `hand_off_to("execution", reason)` and stop, with `reason` restating
+what should be submitted or written.

@@ -12,6 +12,7 @@ from pydantic_ai.toolsets import FunctionToolset
 from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
+from aiida_agents.agents.reroute import hand_off_to
 
 from aiida_agents.tools.run_context import query_run_context
 from aiida_agents.tools.execution.codes import list_codes
@@ -111,7 +112,7 @@ def get_agent(
     cfg = agent_settings if agent_settings is not None else AgentSettings()
 
     # Wrap read tools with RetryOnToolError for automatic retry on failures
-    toolset = RetryOnToolError(FunctionToolset(_READ_TOOLS))
+    toolset = RetryOnToolError(FunctionToolset(_READ_TOOLS + [hand_off_to]))
 
     agent: Agent = Agent(
         get_model(model_settings=model_settings, ollama_settings=ollama_settings),

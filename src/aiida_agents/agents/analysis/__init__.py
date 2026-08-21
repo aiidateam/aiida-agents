@@ -24,6 +24,7 @@ from pydantic_ai.toolsets import FunctionToolset
 from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
+from aiida_agents.agents.reroute import hand_off_to
 from aiida_agents.plugins import LoadedPlugin, discover_plugins
 from aiida_agents.tools import (
     diagnose_process_failure,
@@ -130,7 +131,9 @@ def get_agent(
     plugins = discover_plugins()
     plugin_reads = [tool.fn for p in plugins for tool in p.tools if not tool.writes]
     plugin_writes = [tool.fn for p in plugins for tool in p.tools if tool.writes]
-    toolset = RetryOnToolError(FunctionToolset(_READ_TOOLS + plugin_reads))
+    toolset = RetryOnToolError(
+        FunctionToolset(_READ_TOOLS + plugin_reads + [hand_off_to])
+    )
 
     # ``output_type=(str, DeferredToolRequests)`` makes the real type
     # ``Agent[None, str | DeferredToolRequests]``, but agents are annotated as the

@@ -113,6 +113,7 @@ EXPECTED_EXECUTION_TOOLS = {
     "search_aiida_docs",
     "submit_process_spec",
     "import_structure",
+    "hand_off_to",  # the cross-agent hand-off signal (see agents/reroute.py)
 }
 
 

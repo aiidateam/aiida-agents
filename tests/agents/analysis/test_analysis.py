@@ -41,6 +41,10 @@ EXPECTED_TOOLS = {
     "search_structures",
     "search_aiida_docs",
     "search_aiida_examples",
+    # A control-flow signal, not a read tool: hands a request this agent has no
+    # tool for (a write, or custom code) to the right specialist, which the CLI
+    # re-routes the turn to.
+    "hand_off_to",
 }
 
 

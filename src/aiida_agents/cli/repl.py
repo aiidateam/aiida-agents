@@ -25,6 +25,8 @@ from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents._settings import ModelSettings, ReplSettings
 from aiida_agents.agents.handoff import NodeReference, node_references_from_messages
+from aiida_agents.agents.planner import Step
+from aiida_agents.agents.reroute import HandoffRequest, handoff_request
 from aiida_agents.cli.agent import (
     _AGENT_CHOICES,
     _build_agent,
@@ -160,7 +162,7 @@ def _run_turn(
     history: list[ModelMessage],
     repl_cfg: ReplSettings,
 ) -> tuple[
-    list[ModelMessage], str | None, tuple[NodeReference, ...]
+    list[ModelMessage], str | None, tuple[NodeReference, ...], HandoffRequest | None
 ]:  # pragma: no cover
     """Run one query, render its reply, and return history, answer and references.
 
@@ -184,10 +186,10 @@ def _run_turn(
             )
     except KeyboardInterrupt:
         click.echo("(interrupted)")
-        return history, None, ()
+        return history, None, (), None
     except Exception as exc:
         click.echo(f"❌ Error: {exc}")
-        return history, None, ()
+        return history, None, (), None
     elapsed = time.monotonic() - start
 
     # Render the run's tool-call trace now that the spinner has stopped: the
@@ -200,15 +202,20 @@ def _run_turn(
     # earlier questions, and handing those to a later step as "what this step
     # found" would be false.
     references = node_references_from_messages(result.new_messages())
+    handoff = handoff_request(result.new_messages())
     if isinstance(result.output, DeferredToolRequests):
         history = _handle_deferred(agent, result, history)
+    elif handoff is not None:
+        # The agent handed the turn off; its own reply is a stub, so don't print
+        # it. The caller re-runs this turn on the named specialist.
+        history = result.all_messages()
     else:
         _print_agent(result.output)
         _warn_ungrounded(result.output, result.all_messages(), question)
         history = result.all_messages()
         answer = result.output
     console.print(f"[dim]⏱ {_format_duration(elapsed)}[/]")
-    return history, answer, references
+    return history, answer, references, handoff
 
 
 def _parse_agent_switch(question: str, current: str) -> str | None:
@@ -327,12 +334,37 @@ def _run_repl(
             if len(steps) > 1:
                 click.echo(f"— step {index}/{len(steps)} ({active}) —")
 
-            histories[active], answer, references = _run_turn(
+            histories[active], answer, references, handoff = _run_turn(
                 agents[active],
                 _step_prompt(step, question, previous),
                 histories.get(active, []),
                 repl_cfg,
             )
+            if handoff is not None and handoff.specialist != active:
+                # A specialist hit a request it has no tool for and handed it to
+                # another. In auto mode, re-run the same turn there once, with no
+                # re-prompt; a pinned agent is left as the user chose, with a
+                # pointer to switch. One hop only: the re-routed turn's own
+                # handoff, if any, is not chased.
+                target = handoff.specialist
+                if agent_type == "auto":
+                    console.print(f"[dim]→ handing off to the {target} agent[/dim]")
+                    if target not in agents:
+                        agents[target] = _build_agent(settings, profile, target)
+                    prior = _StepResult(active, handoff.reason, references)
+                    histories[target], answer, references, _ = _run_turn(
+                        agents[target],
+                        _step_prompt(Step(target, ""), question, prior),
+                        histories.get(target, []),
+                        repl_cfg,
+                    )
+                    active = target
+                else:
+                    click.echo(
+                        f"This needs the {target} agent. Switch with "
+                        f"`/agent {target}`, or use auto mode to hand off "
+                        "automatically.\n"
+                    )
             if answer is None:
                 # The step errored, was interrupted, or ended in an approval
                 # flow. Continuing would hand the next specialist a premise

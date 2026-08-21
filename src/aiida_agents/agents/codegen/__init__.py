@@ -36,6 +36,7 @@ from pydantic_ai.toolsets import FunctionToolset
 from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
+from aiida_agents.agents.reroute import hand_off_to
 from aiida_agents.rag import search_aiida_docs, search_aiida_examples
 from aiida_agents.tools.codegen import run_python_snippet
 
@@ -81,7 +82,7 @@ def get_agent(
     # to the model as a recoverable error rather than aborting the run. That
     # matters more here than elsewhere -- fixing its own snippet from the error
     # is the agent's normal working loop, not an exceptional path.
-    toolset = RetryOnToolError(FunctionToolset(_TOOLS))
+    toolset = RetryOnToolError(FunctionToolset(_TOOLS + [hand_off_to]))
 
     return Agent(
         get_model(model_settings=model_settings, ollama_settings=ollama_settings),
