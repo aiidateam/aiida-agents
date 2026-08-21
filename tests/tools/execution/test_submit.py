@@ -7,7 +7,9 @@ Covers the value/reference convention in ``_resolve_inputs``:
   reference;
 - wrapped nodes are *not* stored during resolution, so a later validation
   failure leaves no orphan in the database;
-- a reference-only port (``code`` → ``AbstractCode``) rejects a bare value.
+- a reference-only port (``code`` → ``AbstractCode``) rejects a bare value;
+- a port that names no node (the ``metadata.options`` settings) takes its plain
+  value as given.
 
 plus the resolve → validate → (submit-only) path.
 
@@ -138,18 +140,64 @@ class TestReferenceOnlyPorts:
             pytest.param((orm.RemoteData,), True, id="remote-data"),
             pytest.param((orm.Int, orm.StructureData), False, id="mixed-has-primitive"),
             pytest.param((), False, id="unconstrained"),
+            # A port naming no node at all takes its value directly: the plain
+            # Python types of metadata.options are the common case, and
+            # orm.Computer is a non-node entity that lands here too.
+            pytest.param((int,), False, id="python-int-option"),
+            pytest.param((bool,), False, id="python-bool-option"),
+            pytest.param((dict,), False, id="python-dict-option"),
+            pytest.param((orm.Computer,), False, id="computer-entity"),
         ],
     )
-    def test_only_non_primitive_ports_need_a_reference(
+    def test_reference_needed_only_for_unwrappable_node_ports(
         self, valid_types: tuple[type, ...], needs_reference: bool
     ) -> None:
-        """A port needs an explicit reference iff none of its valid types can be
-        built from a bare primitive. The rule is an allow-list of wrappable node
-        types, not a block-list of one (``AbstractCode``), so a bare value to a
-        ``StructureData``/``RemoteData`` port gets the clean "expects a reference"
-        error rather than a confusing ``StructureData(value)`` failure.
+        """A port needs an explicit reference iff a node type is among its valid
+        types and none of them is wrappable. A wrappable type (``orm.Int``) wraps
+        a bare value; a non-wrappable node (``StructureData``/``Code``) gets the
+        clean "expects a reference" error; a port naming no node (a
+        ``metadata.options`` setting, ``metadata.computer``) is left to spec
+        validation.
         """
         assert _is_reference_type(valid_types) is needs_reference
+
+
+class TestPlainValuePorts:
+    """Ports whose ``valid_type`` names no node take the value as given.
+
+    Without this the whole ``metadata.options`` namespace, which the protocol
+    builder fills and which the execution agent is told to set for a real
+    cluster, is unsubmittable: every option is rejected as needing a node
+    reference.
+
+    ``core.arithmetic.add`` rather than ``MULTIPLY_ADD_EP`` throughout, because
+    only a CalcJob declares ``metadata.options`` at all: the ``multiply_add``
+    WorkChain's ``metadata`` namespace has no ``options`` in it.
+    """
+
+    @pytest.mark.parametrize(
+        "option, value",
+        [
+            pytest.param("max_wallclock_seconds", 3600, id="int"),
+            pytest.param("withmpi", True, id="bool"),
+            pytest.param("resources", {"num_machines": 1}, id="dict"),
+            pytest.param("additional_retrieve_list", ["aiida.out"], id="list"),
+            pytest.param("queue_name", "debug", id="str"),
+        ],
+    )
+    def test_option_keeps_its_python_type(self, option: str, value: object) -> None:
+        """The value comes back as itself, not wrapped in a node.
+
+        Asserting the exact type matters: ``orm.Int(3600) == 3600`` is true, so an
+        equality check alone would still pass if the option were silently wrapped
+        in a node, and the scheduler would only choke on it much later.
+        """
+        resolved = _resolve_inputs(
+            "core.arithmetic.add", {"metadata": {"options": {option: value}}}
+        )
+        resolved_option = resolved["metadata"]["options"][option]
+        assert resolved_option == value
+        assert type(resolved_option) is type(value)
 
 
 class TestNoStoreDuringResolution:
@@ -292,6 +340,37 @@ class TestSubmitWorkflow:
         _, node = run_get_node(process_class, **resolved)
         assert node.is_finished_ok
         assert node.outputs.sum.value == 13
+
+    def test_calcjob_resolution_runs_with_user_supplied_options(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """The companion case, and the point of resolving plain-value ports: the
+        same CalcJob runs with scheduler options the user set, and they reach the
+        node as the plain values they were given rather than the spec defaults.
+        Resolution and validation are covered above; this is the engine agreeing.
+        """
+        from aiida.engine import run_get_node
+
+        options = {
+            "resources": {"num_machines": 1, "num_mpiprocs_per_machine": 1},
+            "max_wallclock_seconds": 120,
+            "withmpi": False,
+        }
+        process_class, resolved = _prepare_submission(
+            "core.arithmetic.add",
+            {
+                "x": 5,
+                "y": 8,
+                "code": {"pk": arithmetic_add_code.pk},
+                "metadata": {"options": options},
+            },
+        )
+        _, node = run_get_node(process_class, **resolved)
+        assert node.is_finished_ok
+        assert node.outputs.sum.value == 13
+        assert node.get_option("max_wallclock_seconds") == 120
+        assert node.get_option("resources") == options["resources"]
+        assert node.get_option("withmpi") is False
 
     def test_validation_failure_writes_no_orphans(self) -> None:
         """Invalid inputs raise before any node is stored, so the wrapped

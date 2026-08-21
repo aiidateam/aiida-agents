@@ -54,8 +54,9 @@ _COMPATIBLE_NODES: dict[type, tuple[type, ...]] = {
 }
 
 # The node types a bare Python value can be wrapped into (the targets above). A
-# port accepting none of these (Code, StructureData, RemoteData, ...) cannot be
-# built from a plain value and needs an explicit reference (see _is_reference_type).
+# port whose valid_type names a node but none of these (Code, StructureData,
+# RemoteData, ...) cannot be built from a plain value and needs an explicit
+# reference (see _is_reference_type).
 _WRAPPABLE_TYPES: tuple[type, ...] = tuple(
     dict.fromkeys(node for nodes in _COMPATIBLE_NODES.values() for node in nodes)
 )
@@ -120,20 +121,48 @@ def _resolve_node_reference(ref: dict[str, Any], port_name: str) -> orm.Node:
     )
 
 
+def _node_types(expected_types: tuple[type, ...]) -> list[type]:
+    """The ``orm.Node`` subclasses among a port's valid types.
+
+    Non-empty means a node can go on this port, which is what makes a reference
+    dict meaningful there.
+    """
+    return [
+        t for t in expected_types if isinstance(t, type) and issubclass(t, orm.Node)
+    ]
+
+
 def _is_reference_type(expected_types: tuple[type, ...]) -> bool:
     """Return True if the port needs an explicit node reference (pk/uuid/label).
 
-    A port is wrappable from a bare value only if at least one of its valid types
-    is a primitive-backed node (``_WRAPPABLE_TYPES``); anything else (``Code``,
-    ``StructureData``, ``RemoteData``, ...) needs a reference. Inverting the rule
-    this way (allow-list of wrappable types, not a block-list of one) means a bare
-    value handed to, e.g., a ``StructureData`` port gets the clean "expects a
-    reference" error instead of a confusing ``StructureData(value)`` failure.
-    An unconstrained port (no concrete valid_type) is left to spec validation.
+    The rule is read entirely from the port's ``valid_type``, which comes in
+    three kinds:
+
+    * a wrappable primitive-backed node (``_WRAPPABLE_TYPES``: ``orm.Int``,
+      ``orm.Bool``, ...): a bare value is wrapped, so no reference is needed.
+    * another ``orm.Node`` subclass (``Code``, ``StructureData``, ``RemoteData``,
+      ...): a bare value cannot build it, so a reference *is* required.
+    * anything else: no node goes on this port, so a reference makes no sense
+      for it. The plain Python types (``int``/``bool``/``dict``/``str``/...) of
+      the ``metadata.options`` ports are the common case, and their values pass
+      straight through.
+
+    Only the middle case is a reference port. Everything else, an unconstrained
+    port included, is left to spec validation rather than handed the confusing
+    "expects a reference" error -- without this, the whole ``metadata.options``
+    namespace the protocol builder emits is unsubmittable, since each option
+    gets that error for a plain int.
+
+    The third kind is wider than "a plain Python value": ``metadata.computer``
+    (``valid_type`` ``orm.Computer``, an ``orm.Entity`` that is not a node)
+    lands there too. Spec validation's "expected Computer" names the type
+    actually wanted, where the reference error would point at ``pk``/``uuid``/
+    ``label`` forms that cannot load a Computer at all.
     """
-    return bool(expected_types) and not any(
-        isinstance(t, type) and issubclass(t, _WRAPPABLE_TYPES) for t in expected_types
-    )
+    node_types = _node_types(expected_types)
+    if not node_types:
+        return False
+    return not any(issubclass(t, _WRAPPABLE_TYPES) for t in node_types)
 
 
 def _resolve_port_value(name: str, value: Any, port: Any) -> Any:
@@ -218,9 +247,16 @@ def _resolve_inputs(entry_point: str, inputs: dict[str, Any]) -> dict[str, Any]:
         Passed through as-is.
 
     Reference-only ports (e.g. ``code``)
-        Ports whose ``valid_type`` is not a primitive-backed node (``Code``,
-        ``StructureData``, ``RemoteData``, ...) *require* an explicit reference
-        dict. Passing a bare primitive raises a clear ``SubmissionInputError``.
+        Ports whose ``valid_type`` names a node that is not primitive-backed
+        (``Code``, ``StructureData``, ``RemoteData``, ...) *require* an explicit
+        reference dict. Passing a bare primitive raises a clear
+        ``SubmissionInputError``.
+
+    Plain-value ports (e.g. ``metadata.options.max_wallclock_seconds``)
+        Ports whose ``valid_type`` names no node at all take a Python value
+        (``int``/``bool``/``dict``/``str``/...) and get it unchanged: no node is
+        built and no reference is asked for. This is the whole
+        ``metadata.options`` namespace.
 
     Recursively resolves ports across top-level inputs and nested namespaces.
 
@@ -390,19 +426,23 @@ def submit_workflow(entry_point: str, inputs: dict[str, Any]) -> SubmitResult:
     """Submit an AiiDA workflow or calculation.
 
     Resolves user-supplied values to AiiDA nodes automatically using the
-    process port spec. Three input conventions are supported:
+    process port spec. Four input conventions are supported:
 
     * **Bare primitive** — ``{"x": 2}`` always means the *value* 2 and wraps
       it in ``orm.Int(2)``. It is never treated as a node PK.
     * **Reference dict** — pass ``{"pk": N}``, ``{"uuid": "..."}``, or
       ``{"label": "bash@localhost"}`` to reuse an existing node.
     * **AiiDA node** — passed through unchanged.
+    * **Plain value on a non-node port** — a port whose ``valid_type`` is a
+      Python type rather than a node takes the value as-is, so scheduler
+      settings go in directly, e.g.
+      ``{"metadata": {"options": {"max_wallclock_seconds": 3600}}}``.
 
     Inputs are resolved and validated against the process spec before
     submission; nothing is written to the database unless they pass, and a
     compute CalcJob must include a ``code``. The caller (CLI) must obtain user
-    confirmation (HITL) before calling this tool. Only top-level inputs are
-    resolved (see ``_resolve_inputs``).
+    confirmation (HITL) before calling this tool. Nested namespaces are resolved
+    along with the top-level ports (see ``_resolve_inputs``).
 
     Submit-only: the process is handed to the daemon and this returns
     immediately with ``state`` the initial state. The profile must have a broker
