@@ -86,7 +86,7 @@ class StructureImportResult(TypedDict):
 
 
 class ProcessRecord(TypedDict):
-    """A row returned by ``list_processes``."""
+    """A row returned by ``list_recent_processes``."""
 
     pk: int
     uuid: str

@@ -12,7 +12,7 @@ casually as a read (HITL-gated, ADR-08).
 
 Public API
 ----------
-get_process_status, get_process_report, list_processes
+get_process_status, get_process_report, list_recent_processes
     Process inspection, shared by both agents (``tools/processes.py``): the
     Analysis agent reports on runs and explains failures, the Execution agent
     follows up on what it just submitted.
@@ -26,8 +26,8 @@ query_nodes, get_node_inputs, get_node_outputs, search_structures,
 diagnose_process_failure
     Analysis agent's read-only AiiDA query and diagnosis tools
     (``tools/analysis/``), safe to register on an agent or expose over MCP.
-list_workflows, describe_workflow, build_workflow_inputs,
-draft_workflow_inputs, list_codes, query_run_context
+list_process_entry_points, describe_process, build_process_inputs,
+draft_process_inputs, list_codes, query_run_context
     Execution agent's read-only tools (``tools/execution/``): entry-point and
     ``Process.spec()`` introspection, input pre-population from a protocol
     builder or (for a process without one) from the spec itself,
@@ -49,16 +49,16 @@ from aiida_agents.tools.processes import (
     get_process_report,
     get_retrieved_file,
     get_process_status,
-    list_processes,
+    list_recent_processes,
     list_retrieved_files,
 )
 from aiida_agents.tools.execution import (
     build_resubmission_spec,
-    build_workflow_inputs,
-    check_input_ranges,
-    describe_workflow,
-    draft_workflow_inputs,
-    list_workflows,
+    build_process_inputs,
+    check_cutoffs_against_pseudos,
+    describe_process,
+    draft_process_inputs,
+    list_process_entry_points,
     query_run_context,
     wait_for_process,
 )
@@ -67,11 +67,11 @@ from aiida_agents.tools.daemon import get_daemon_status
 
 __all__ = [
     "build_resubmission_spec",
-    "build_workflow_inputs",
-    "check_input_ranges",
-    "describe_workflow",
+    "build_process_inputs",
+    "check_cutoffs_against_pseudos",
+    "describe_process",
     "diagnose_process_failure",
-    "draft_workflow_inputs",
+    "draft_process_inputs",
     "get_daemon_status",
     "get_node_inputs",
     "get_node_outputs",
@@ -79,9 +79,9 @@ __all__ = [
     "get_retrieved_file",
     "get_process_status",
     "list_codes",
-    "list_processes",
+    "list_recent_processes",
     "list_retrieved_files",
-    "list_workflows",
+    "list_process_entry_points",
     "query_run_context",
     "query_nodes",
     "search_structures",

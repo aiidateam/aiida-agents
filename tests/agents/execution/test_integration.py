@@ -10,7 +10,10 @@ from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents.agents.execution import get_agent
 from aiida_agents.tools.run_context import query_run_context
-from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
+from aiida_agents.tools.execution.introspection import (
+    describe_process,
+    list_process_entry_points,
+)
 from aiida_agents.tools.execution.schemas import WorkflowSpec
 from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
 
@@ -32,14 +35,14 @@ class TestFullWorkflowIntegration:
         assert "success_rate" in context
 
         # Step 2: List workflows to discover available entry points
-        available = list_workflows(group="aiida.workflows")
+        available = list_process_entry_points(group="aiida.workflows")
         assert (
             "core.arithmetic.multiply_add"
             in available["entry_points"]["aiida.workflows"]
         )
 
         # Step 3: Describe specific workflow schema
-        schema = describe_workflow("core.arithmetic.multiply_add")
+        schema = describe_process("core.arithmetic.multiply_add")
         assert schema["entry_point"] == "core.arithmetic.multiply_add"
         assert "x" in schema["required_inputs"]
         assert "y" in schema["required_inputs"]
@@ -96,11 +99,11 @@ class TestFullWorkflowIntegration:
 
 EXPECTED_EXECUTION_TOOLS = {
     "query_run_context",
-    "list_workflows",
-    "describe_workflow",
-    "build_workflow_inputs",
-    "draft_workflow_inputs",
-    "check_input_ranges",
+    "list_process_entry_points",
+    "describe_process",
+    "build_process_inputs",
+    "draft_process_inputs",
+    "check_cutoffs_against_pseudos",
     "build_resubmission_spec",
     "execute_workflow_batch",
     "list_codes",

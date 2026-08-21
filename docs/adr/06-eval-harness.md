@@ -41,7 +41,7 @@ exercising real tool logic against real AiiDA fixture nodes without a live LLM:
   (`add_calc`, `multiply_add_workchain`, `silicon_structure`)
 
 **What the harness does not test**: tool selection quality (does the model
-pick `list_processes` for "show recent calcs"?) depends on the model and
+pick `list_recent_processes` for "show recent calcs"?) depends on the model and
 belongs in a separate, opt-in evaluation suite run against a real model.
 Mocking `agent.run` to assert on canned tool names is explicitly rejected
 (see Alternatives).

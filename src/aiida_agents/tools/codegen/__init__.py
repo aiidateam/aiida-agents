@@ -17,6 +17,6 @@ mistakes from a real traceback before the user is ever shown them.
 
 from __future__ import annotations
 
-from aiida_agents.tools.codegen.execution import run_aiida_code
+from aiida_agents.tools.codegen.execution import run_python_snippet
 
-__all__ = ["run_aiida_code"]
+__all__ = ["run_python_snippet"]

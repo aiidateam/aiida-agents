@@ -131,7 +131,7 @@ def build_resubmission_spec(
     Check the returned spec before submitting it. The inputs come from a real
     run, so they are self-consistent, but a change you asked for may want a
     companion change the original did not need: raising ``ecutwfc`` usually
-    means raising ``ecutrho`` with it, and ``check_input_ranges`` will say
+    means raising ``ecutrho`` with it, and ``check_cutoffs_against_pseudos`` will say
     whether the pair still matches the pseudopotentials.
 
     Args:

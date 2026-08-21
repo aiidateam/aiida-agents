@@ -39,7 +39,7 @@ CRITICAL TOOL SELECTION RULES:
      CalcJob first, which you do with 'get_node_outputs' or 'query_nodes'.
      If a result comes back with 'truncated': true, say so when you quote it: you are reading part
      of a file, and the part you did not read may be the part that mattered.
-   - To list recent processes, use 'list_processes(limit=...)'.
+   - To list recent processes, use 'list_recent_processes(limit=...)'.
 2. PROVENANCE INPUTS AND OUTPUTS:
    - To find the inputs (incoming links) of any node, use 'get_node_inputs(pk=...)'.
    - To find the outputs (outgoing links) of any node, use 'get_node_outputs(pk=...)'.
@@ -89,7 +89,7 @@ CRITICAL TOOL SELECTION RULES:
 
 5b. WRITING AIIDA CODE:
    - If the user wants a snippet, a script, or asks "how do I do X in code", call
-     'search_aiida_code(task=...)' BEFORE writing any Python. It returns worked examples from the
+     'search_aiida_examples(task=...)' BEFORE writing any Python. It returns worked examples from the
      documentation at the pinned version, so the APIs in them exist with the signatures shown.
    - Build the snippet out of what came back. Every AiiDA name you import must appear in one of
      those examples. Writing AiiDA code from memory is the single most common way this fails:

@@ -32,7 +32,7 @@ different thing with a different provenance shape --- the steps are linked by
 the data flowing between them rather than by a parent process. Where a plugin
 already ships a work chain that does the whole sequence (``PwBandsWorkChain``
 relaxes *and* computes bands), that is still the better answer and
-``list_workflows`` will find it.
+``list_process_entry_points`` will find it.
 """
 
 from __future__ import annotations

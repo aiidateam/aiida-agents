@@ -92,11 +92,11 @@ tests = [
   # So CI actually exercises import_structure's parse path rather than
   # skipping it; the tests skip cleanly when it is absent.
   "aiida-agents[structures]",
-  # check_input_ranges compares against a pseudopotential family's published
-  # cutoffs. The source needs nothing from aiida-pseudo -- it reads the family
-  # through AiiDA's group API -- but the tests build a real family to compare
-  # against, rather than mocking away the one part worth doubting. A test
-  # dependency only, so the package itself stays code-agnostic.
+  # check_cutoffs_against_pseudos compares against a pseudopotential family's
+  # published cutoffs. The source needs nothing from aiida-pseudo -- it reads
+  # the family through AiiDA's group API -- but the tests build a real family
+  # to compare against, rather than mocking away the one part worth doubting.
+  # A test dependency only, so the package itself stays code-agnostic.
   "aiida-pseudo~=1.8",
   # Scores the answer-quality eval tier (Dataset/Case/LLMJudge). An extra
   # rather than a dev-group entry because the `tests` extra is what CI's
@@ -138,10 +138,10 @@ qe = [
 
 # The same arrangement for VASP, and a group of its own so a QE-only setup does
 # not pay for it. Nothing in the tool layer is plugin-specific -- installing
-# aiida-vasp registers its entry points, and list_workflows/describe_workflow/
-# build_workflow_inputs read them like any other -- so what this group really
-# adds is the documentation corpus, without which an agent can discover a
-# VaspRelaxWorkChain's ports but not what any of them mean.
+# aiida-vasp registers its entry points, and list_process_entry_points /
+# describe_process / build_process_inputs read them like any other -- so what
+# this group really adds is the documentation corpus, without which an agent
+# can discover a VaspRelaxWorkChain's ports but not what any of them mean.
 #
 # No pseudopotential package here, deliberately: VASP's POTCARs are licensed
 # and cannot be distributed, so a working setup supplies them out of band.

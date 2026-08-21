@@ -79,7 +79,7 @@ def test_aiida_error_recovers_and_carries_guidance() -> None:
     assert calls["n"] == 2  # failed once, retried, then succeeded
     assert "loaded ok" in result.output
     # The guidance from describe_aiida_error is what the model saw on the retry.
-    assert "list_processes()" in captured["retry"]
+    assert "list_recent_processes()" in captured["retry"]
 
 
 @pytest.mark.parametrize(

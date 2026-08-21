@@ -208,7 +208,7 @@ class SandboxSettings(_Base):
     snippet_timeout: float = Field(default=30.0, ge=1.0, le=300.0)
     """Seconds one generated snippet may run before it is killed. A query over
     a large provenance graph is slow; an accidental ``while True`` is forever.
-    Bounds only ``run_aiida_code``: ``sandbox init`` copies the user's storage
+    Bounds only ``run_python_snippet``: ``sandbox init`` copies the user's storage
     and is deliberately allowed to take as long as that takes."""
 
 

@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import logging
+import typing as t
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from aiida_agents._settings import SandboxSettings, _format_validation_error
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_aiida_code"]
+__all__ = ["run_python_snippet"]
 
 _NOT_CONFIGURED = (
     "No sandbox profile is configured, so this code cannot be run. Tell the "
@@ -37,7 +38,18 @@ _MISCONFIGURED = (
 )
 
 
-def run_aiida_code(code: str) -> str:
+def run_python_snippet(
+    snippet: t.Annotated[
+        str,
+        Field(
+            description=(
+                "The Python to run. Imports are restricted to 'aiida' and a small "
+                "set of standard-library modules, and it must print() whatever it "
+                "should return."
+            )
+        ),
+    ],
+) -> str:
     """Run Python against a copy of the user's AiiDA data and return what it printed.
 
     Use this to **check the code you just wrote before showing it to the
@@ -64,7 +76,7 @@ def run_aiida_code(code: str) -> str:
     again. Show the user code that has run, not code you hope works.
 
     Args:
-        code: Python to run. Imports are restricted to ``aiida`` and a small
+        snippet: Python to run. Imports are restricted to ``aiida`` and a small
             set of standard-library modules.
 
     Returns:
@@ -116,7 +128,7 @@ def run_aiida_code(code: str) -> str:
         )
         return _NOT_SEPARATE
 
-    result = run_in_sandbox(code, profile=profile, timeout=settings.snippet_timeout)
+    result = run_in_sandbox(snippet, profile=profile, timeout=settings.snippet_timeout)
     logger.info(
         "sandbox run: ok=%s refused=%s timed_out=%s in %.1fs",
         result.ok,

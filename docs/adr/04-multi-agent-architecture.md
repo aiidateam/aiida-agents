@@ -62,16 +62,16 @@ The Analysis Agent exposes seven tools:
 > for the current per-agent layout (`tools/analysis/…`), and note that
 > `submit_workflow` has since moved off this agent entirely.
 
-| Tool                 | Source                | Type                            |
-| -------------------- | --------------------- | ------------------------------- |
-| `get_process_status` | `tools/processes.py`  | Read                            |
-| `list_processes`     | `tools/processes.py`  | Read                            |
-| `query_nodes`        | `tools/nodes.py`      | Read                            |
-| `get_node_inputs`    | `tools/nodes.py`      | Read                            |
-| `get_node_outputs`   | `tools/nodes.py`      | Read                            |
-| `search_structures`  | `tools/structures.py` | Read                            |
-| `search_aiida_docs`  | `rag/__init__.py`     | Read (RAG)                      |
-| `submit_workflow`    | `tools/submit.py`     | Write: `requires_approval=True` |
+| Tool                    | Source                | Type                            |
+| ----------------------- | --------------------- | ------------------------------- |
+| `get_process_status`    | `tools/processes.py`  | Read                            |
+| `list_recent_processes` | `tools/processes.py`  | Read                            |
+| `query_nodes`           | `tools/nodes.py`      | Read                            |
+| `get_node_inputs`       | `tools/nodes.py`      | Read                            |
+| `get_node_outputs`      | `tools/nodes.py`      | Read                            |
+| `search_structures`     | `tools/structures.py` | Read                            |
+| `search_aiida_docs`     | `rag/__init__.py`     | Read (RAG)                      |
+| `submit_workflow`       | `tools/submit.py`     | Write: `requires_approval=True` |
 
 A write tool is registered with Pydantic AI's native `requires_approval=True`,
 which pauses the agent run and returns a `DeferredToolRequests` object for the

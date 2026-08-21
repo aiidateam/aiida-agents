@@ -175,8 +175,8 @@ class TestSetupRequestsStillRouteToTheProgression:
     @pytest.mark.parametrize(
         "prompt,expected_tool",
         [
-            ("What workflows can I run?", "list_workflows"),
-            ("Set up a multiply_add calculation for me", "list_workflows"),
+            ("What workflows can I run?", "list_process_entry_points"),
+            ("Set up a multiply_add calculation for me", "list_process_entry_points"),
         ],
     )
     def test_setup_request_discovers_entry_points(

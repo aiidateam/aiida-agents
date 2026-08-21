@@ -1,4 +1,4 @@
-"""Tests for ``build_workflow_inputs``.
+"""Tests for ``build_process_inputs``.
 
 No installed process in this environment has a real ``get_builder_from_protocol``
 (it is an aiida-quantumespresso / ACWF convention, not aiida-core's), so these
@@ -20,8 +20,8 @@ from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
 from aiida.engine import run_get_node
 
 from aiida_agents.tools.execution.submit import _resolve_inputs
-from aiida_agents.tools.execution.introspection import describe_workflow
-from aiida_agents.tools.execution.protocol import build_workflow_inputs
+from aiida_agents.tools.execution.introspection import describe_process
+from aiida_agents.tools.execution.protocol import build_process_inputs
 
 ADD_EP = "core.arithmetic.add"
 
@@ -59,10 +59,10 @@ def with_fake_protocol(
     )
 
 
-class TestDescribeWorkflowProtocolParameters:
+class TestDescribeProcessProtocolParameters:
     def test_no_protocol_builder_reports_false_and_none(self) -> None:
         """A process without get_builder_from_protocol reports it plainly."""
-        desc = describe_workflow(ADD_EP)
+        desc = describe_process(ADD_EP)
         assert desc["has_protocol_builder"] is False
         assert desc["protocol_parameters"] is None
 
@@ -73,7 +73,7 @@ class TestDescribeWorkflowProtocolParameters:
         Signatures vary by workflow (not every one takes 'structure', some need a
         'codes' mapping instead of 'code'), so this must read the real signature.
         """
-        desc = describe_workflow(ADD_EP)
+        desc = describe_process(ADD_EP)
         assert desc["has_protocol_builder"] is True
         by_name = {p["name"]: p for p in desc["protocol_parameters"]}
         assert by_name["code"] == {"name": "code", "required": True, "default": None}
@@ -82,13 +82,13 @@ class TestDescribeWorkflowProtocolParameters:
         assert "cls" not in by_name  # the classmethod's own first argument
 
 
-class TestBuildWorkflowInputs:
+class TestBuildProcessInputs:
     @pytest.mark.usefixtures("with_fake_protocol")
     def test_builds_a_spec_from_the_protocol_builder(
         self, arithmetic_add_code: orm.InstalledCode
     ) -> None:
         """The populated builder serialises to a ready-to-use WorkflowSpec."""
-        spec = build_workflow_inputs(
+        spec = build_process_inputs(
             ADD_EP,
             protocol="fast",
             protocol_kwargs={"code": {"label": arithmetic_add_code.full_label}},
@@ -108,21 +108,21 @@ class TestBuildWorkflowInputs:
             {"pk": arithmetic_add_code.pk},
             {"uuid": arithmetic_add_code.uuid},
         ):
-            spec = build_workflow_inputs(ADD_EP, protocol_kwargs={"code": ref})
+            spec = build_process_inputs(ADD_EP, protocol_kwargs={"code": ref})
             assert spec["inputs"]["code"] == {"pk": arithmetic_add_code.pk}
 
     def test_no_protocol_builder_raises_a_clear_error(self) -> None:
         """A process without get_builder_from_protocol fails loudly, naming the
         fallback (build inputs directly) rather than a raw AttributeError."""
         with pytest.raises(ValueError, match="has no get_builder_from_protocol"):
-            build_workflow_inputs(ADD_EP)
+            build_process_inputs(ADD_EP)
 
     @pytest.mark.usefixtures("with_fake_protocol")
     def test_missing_required_kwarg_names_it(self) -> None:
         """Omitting a required protocol_kwarg (here: code) is a clear, actionable
         error, not a raw TypeError from the builder call."""
         with pytest.raises(ValueError, match=r"needs \['code'\]"):
-            build_workflow_inputs(ADD_EP)
+            build_process_inputs(ADD_EP)
 
     @pytest.mark.usefixtures("with_fake_protocol")
     def test_unknown_protocol_kwarg_is_rejected(
@@ -131,7 +131,7 @@ class TestBuildWorkflowInputs:
         """A protocol_kwarg the builder doesn't accept is caught before the call,
         naming the real parameters instead of a generic TypeError."""
         with pytest.raises(ValueError, match="has no parameter 'not_a_real_kwarg'"):
-            build_workflow_inputs(
+            build_process_inputs(
                 ADD_EP,
                 protocol_kwargs={
                     "code": {"label": arithmetic_add_code.full_label},
@@ -144,7 +144,7 @@ class TestBuildWorkflowInputs:
         """A bad node reference in protocol_kwargs fails with the same clarity as
         execute_workflow_spec's own reference resolution."""
         with pytest.raises(ValueError, match=r"No node found with pk=.*'code'"):
-            build_workflow_inputs(ADD_EP, protocol_kwargs={"code": {"pk": 10**9}})
+            build_process_inputs(ADD_EP, protocol_kwargs={"code": {"pk": 10**9}})
 
     def test_multi_code_style_nested_reference_resolves(
         self, monkeypatch: pytest.MonkeyPatch, arithmetic_add_code: orm.InstalledCode
@@ -170,7 +170,7 @@ class TestBuildWorkflowInputs:
             classmethod(fake_multi_code),
             raising=False,
         )
-        spec = build_workflow_inputs(
+        spec = build_process_inputs(
             ADD_EP,
             protocol_kwargs={
                 "codes": {"add": {"label": arithmetic_add_code.full_label}}
@@ -184,11 +184,11 @@ class TestBuildWorkflowInputs:
     ) -> None:
         """The returned spec is not just shaped right -- fed back through the
         existing resolution/submission pipeline, it actually runs and produces
-        the correct result. Pins the contract between build_workflow_inputs and
-        execute_workflow_spec/submit_workflow, not just build_workflow_inputs
+        the correct result. Pins the contract between build_process_inputs and
+        execute_workflow_spec/submit_workflow, not just build_process_inputs
         in isolation.
         """
-        spec = build_workflow_inputs(
+        spec = build_process_inputs(
             ADD_EP,
             protocol_kwargs={"code": {"label": arithmetic_add_code.full_label}},
         )
@@ -229,7 +229,7 @@ class TestOverridesReachTheBuilder:
         )
 
         overrides = {"base": {"pw": {"parameters": {"SYSTEM": {"ecutwfc": 60.0}}}}}
-        build_workflow_inputs(
+        build_process_inputs(
             ADD_EP,
             protocol_kwargs={
                 "code": {"label": arithmetic_add_code.full_label},
@@ -270,7 +270,7 @@ class TestOverridesReachTheBuilder:
             raising=False,
         )
 
-        build_workflow_inputs(
+        build_process_inputs(
             ADD_EP,
             protocol_kwargs={
                 "code": {"label": arithmetic_add_code.full_label},

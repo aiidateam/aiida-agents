@@ -158,7 +158,7 @@ teaches people to route around it, which costs more than the check earns.
 What was actually missing was never enforcement. It was the *fact* reaching the
 person approving, at the moment they approve. So:
 
-- `check_input_ranges` is a read tool the Execution agent can call before
+- `check_cutoffs_against_pseudos` is a read tool the Execution agent can call before
   proposing a submission, and the prompt tells it to whenever it has set a
   cutoff itself;
 - the same check runs unconditionally in `_print_previews`, so a finding

@@ -27,14 +27,14 @@ _WRITE_TOOLS = {
     "import_structure",
 }
 
-# Read-only, and still not exported. ``run_aiida_code`` executes arbitrary
+# Read-only, and still not exported. ``run_python_snippet`` executes arbitrary
 # Python; it is safe in the agents because it runs against a profile whose
 # database role cannot write, and that guarantee rests entirely on
 # ``AIIDA_AGENTS_SANDBOX_PROFILE`` naming a profile someone verified with
 # ``aiida-agents sandbox check``. An MCP client cannot verify that and we
 # cannot see whether it holds, so the honest export is none: a client that
 # wants to run code can run it itself, with its own consent.
-_UNEXPORTED_READ_TOOLS = {"run_aiida_code"}
+_UNEXPORTED_READ_TOOLS = {"run_python_snippet"}
 
 
 def _tool_functions() -> set[str]:

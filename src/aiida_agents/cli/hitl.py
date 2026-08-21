@@ -182,13 +182,15 @@ def _range_warnings(call: Any) -> list[str]:
     failure inside the check is swallowed --- an approval prompt that raises
     instead of asking is worse than one that shows nothing.
     """
-    from aiida_agents.tools.execution.ranges import check_input_ranges
+    from aiida_agents.tools.execution.ranges import check_cutoffs_against_pseudos
 
     entry_point, inputs = _submission_args(call)
     if not entry_point or not isinstance(inputs, dict):
         return []
     try:
-        findings = check_input_ranges({"workflow_type": entry_point, "inputs": inputs})
+        findings = check_cutoffs_against_pseudos(
+            {"workflow_type": entry_point, "inputs": inputs}
+        )
     except Exception:
         logger.debug("range check failed for %s", entry_point, exc_info=True)
         return []

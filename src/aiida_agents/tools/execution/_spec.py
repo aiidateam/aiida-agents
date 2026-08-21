@@ -1,8 +1,8 @@
 """Shared reading of a process spec, and the ``WorkflowSpec`` value convention.
 
 Two tools now build a :class:`~aiida_agents.tools.execution.schemas.WorkflowSpec`
---- ``build_workflow_inputs`` from a workflow's own protocol builder, and
-``draft_workflow_inputs`` from its ``Process.spec()`` --- and both have to speak
+--- ``build_process_inputs`` from a workflow's own protocol builder, and
+``draft_process_inputs`` from its ``Process.spec()`` --- and both have to speak
 the input convention ``execute_workflow_spec`` accepts: node-valued inputs as
 ``{"pk"|"uuid"|"label"}`` reference dicts, everything else as a bare value.
 

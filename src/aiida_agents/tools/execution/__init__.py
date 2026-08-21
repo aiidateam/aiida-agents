@@ -3,17 +3,17 @@ building, and workflow submission.
 
 Public API
 ----------
-list_workflows, describe_workflow
+list_process_entry_points, describe_process
     Read-only introspection of installed process plugins, read straight from
     AiiDA's entry-point registry and ``Process.spec()``.
-build_workflow_inputs
+build_process_inputs
     Pre-populate a workflow's inputs from its own protocol builder
     (``get_builder_from_protocol``), when it has one.
-draft_workflow_inputs
+draft_process_inputs
     Draft the same spec shape from a process's own input ports, for the
     processes that have no protocol builder --- most calculations, and any
     plugin that never adopted the convention.
-check_input_ranges
+check_cutoffs_against_pseudos
     Compare a spec's cutoffs against what its pseudopotential family was
     converged for, before it is submitted.
 query_run_context
@@ -34,10 +34,13 @@ it after building and validating a spec.
 from __future__ import annotations
 
 from aiida_agents.tools.run_context import query_run_context
-from aiida_agents.tools.execution.drafting import draft_workflow_inputs
-from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
-from aiida_agents.tools.execution.protocol import build_workflow_inputs
-from aiida_agents.tools.execution.ranges import check_input_ranges
+from aiida_agents.tools.execution.drafting import draft_process_inputs
+from aiida_agents.tools.execution.introspection import (
+    describe_process,
+    list_process_entry_points,
+)
+from aiida_agents.tools.execution.protocol import build_process_inputs
+from aiida_agents.tools.execution.ranges import check_cutoffs_against_pseudos
 from aiida_agents.tools.execution.resubmission import build_resubmission_spec
 from aiida_agents.tools.execution.schemas import (
     ValidationError,
@@ -52,12 +55,12 @@ __all__ = [
     "ValidationResult",
     "WorkflowSpec",
     "build_resubmission_spec",
-    "build_workflow_inputs",
-    "check_input_ranges",
-    "describe_workflow",
-    "draft_workflow_inputs",
+    "build_process_inputs",
+    "check_cutoffs_against_pseudos",
+    "describe_process",
+    "draft_process_inputs",
     "execute_workflow_spec",
-    "list_workflows",
+    "list_process_entry_points",
     "query_run_context",
     "wait_for_process",
 ]

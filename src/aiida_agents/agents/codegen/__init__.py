@@ -36,15 +36,15 @@ from pydantic_ai.toolsets import FunctionToolset
 from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
 from aiida_agents.agents._errors import RetryOnToolError
 from aiida_agents.agents._models import get_model
-from aiida_agents.rag import search_aiida_code, search_aiida_docs
-from aiida_agents.tools.codegen import run_aiida_code
+from aiida_agents.rag import search_aiida_examples, search_aiida_docs
+from aiida_agents.tools.codegen import run_python_snippet
 
-#: Everything this agent can do. ``search_aiida_code`` comes first because the
+#: Everything this agent can do. ``search_aiida_examples`` comes first because the
 #: prompt requires it before any Python is written: the failure this agent is
 #: most prone to is a confident call to a method that does not exist.
 _TOOLS: list[Any] = [
-    search_aiida_code,  # Worked examples to write from (read-only)
-    run_aiida_code,  # Run the snippet against a write-refusing profile (read-only)
+    search_aiida_examples,  # Worked examples to write from (read-only)
+    run_python_snippet,  # Run the snippet against a write-refusing profile (read-only)
     search_aiida_docs,  # What a concept means, when the examples are not enough (read-only)
 ]
 

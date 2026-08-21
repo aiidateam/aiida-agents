@@ -43,7 +43,7 @@ from aiida_agents.tools.execution.schemas import WorkflowSpec
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["RangeFinding", "check_input_ranges"]
+__all__ = ["RangeFinding", "check_cutoffs_against_pseudos"]
 
 # Quantum ESPRESSO's input is case-insensitive about card names and AiiDA
 # plugins have used both spellings; ``run_context`` accepts either for the same
@@ -219,7 +219,7 @@ def _recommended(
     return {"ecutwfc": float(wfc), "ecutrho": float(rho)}, str(unit)
 
 
-def check_input_ranges(
+def check_cutoffs_against_pseudos(
     spec: t.Annotated[
         WorkflowSpec,
         Field(

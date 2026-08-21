@@ -266,7 +266,7 @@ class TestCitedLinks:
         assert "Text A." in result
 
 
-class TestSearchAiidaCode:
+class TestSearchAiidaExamples:
     """Retrieval aimed at writing code rather than explaining a concept."""
 
     @staticmethod
@@ -275,57 +275,57 @@ class TestSearchAiidaCode:
 
     def test_only_excerpts_containing_python_come_back(self) -> None:
         """The corpus is mostly prose; a code request wants the worked example."""
-        from aiida_agents.rag import search_aiida_code
+        from aiida_agents.rag import search_aiida_examples
 
         fake = [
             self._hit("Some prose about querying, with no example.", "topics/a"),
             self._hit("Do this:\n```python\nqb = QueryBuilder()\n```", "howto/b"),
         ]
         with patch("aiida_agents.rag.query_docs", return_value=fake):
-            result = search_aiida_code("query for calculations")
+            result = search_aiida_examples("query for calculations")
 
         assert "qb = QueryBuilder()" in result
         assert "topics/a" not in result
 
     def test_it_casts_wider_than_the_prose_search(self) -> None:
         """Filtering to code-bearing hits only works with a pool to filter."""
-        from aiida_agents.rag import search_aiida_code
+        from aiida_agents.rag import search_aiida_examples
 
         with (
             patch("aiida_agents.rag.query_docs", return_value=[]) as mock_qd,
             patch("aiida_agents.rag.docs_index_available", return_value=True),
         ):
-            search_aiida_code("anything")
+            search_aiida_examples("anything")
 
         assert mock_qd.call_args.kwargs["limit"] > 3
 
     def test_no_code_found_forbids_answering_from_memory(self) -> None:
         """The whole failure mode is a plausible invented API."""
-        from aiida_agents.rag import search_aiida_code
+        from aiida_agents.rag import search_aiida_examples
 
         fake = [self._hit("Prose only, no example here at all.")]
         with (
             patch("aiida_agents.rag.query_docs", return_value=fake),
             patch("aiida_agents.rag.docs_index_available", return_value=True),
         ):
-            result = search_aiida_code("something obscure")
+            result = search_aiida_examples("something obscure")
 
         assert "do NOT write the code from memory" in result
 
     def test_an_unbuilt_index_says_so_rather_than_reporting_no_examples(self) -> None:
-        from aiida_agents.rag import search_aiida_code
+        from aiida_agents.rag import search_aiida_examples
 
         with (
             patch("aiida_agents.rag.query_docs", return_value=[]),
             patch("aiida_agents.rag.docs_index_available", return_value=False),
         ):
-            result = search_aiida_code("query")
+            result = search_aiida_examples("query")
 
         assert "has not been built" in result
 
     def test_the_page_link_travels_with_the_snippet(self) -> None:
         """So a user can read the example in its original context."""
-        from aiida_agents.rag import search_aiida_code
+        from aiida_agents.rag import search_aiida_examples
 
         fake = [
             {
@@ -336,6 +336,6 @@ class TestSearchAiidaCode:
             }
         ]
         with patch("aiida_agents.rag.query_docs", return_value=fake):
-            result = search_aiida_code("query")
+            result = search_aiida_examples("query")
 
         assert "https://example.invalid/howto/query.html#s" in result

@@ -15,10 +15,13 @@ from aiida_agents.agents._models import get_model
 
 from aiida_agents.tools.run_context import query_run_context
 from aiida_agents.tools.execution.codes import list_codes
-from aiida_agents.tools.execution.introspection import describe_workflow, list_workflows
-from aiida_agents.tools.execution.drafting import draft_workflow_inputs
-from aiida_agents.tools.execution.protocol import build_workflow_inputs
-from aiida_agents.tools.execution.ranges import check_input_ranges
+from aiida_agents.tools.execution.introspection import (
+    describe_process,
+    list_process_entry_points,
+)
+from aiida_agents.tools.execution.drafting import draft_process_inputs
+from aiida_agents.tools.execution.protocol import build_process_inputs
+from aiida_agents.tools.execution.ranges import check_cutoffs_against_pseudos
 from aiida_agents.tools.execution.resubmission import (
     build_resubmission_spec,
     execute_workflow_batch,
@@ -33,11 +36,11 @@ from aiida_agents.rag import search_aiida_docs
 # Read-only tools: wrapped by RetryOnToolError so tool failures become ModelRetry
 _READ_TOOLS: list[Any] = [
     query_run_context,  # Query the AiiDA database for context (read-only)
-    list_workflows,  # Discover registered workflow and calculation entry points (read-only)
-    describe_workflow,  # Inspect process schema, ports, defaults, and exit codes (read-only)
-    build_workflow_inputs,  # Pre-populate inputs from a protocol builder (read-only)
-    draft_workflow_inputs,  # Draft inputs from the process spec, when it has no protocol builder (read-only)
-    check_input_ranges,  # Compare a spec's cutoffs against its pseudopotentials (read-only)
+    list_process_entry_points,  # Discover registered workflow and calculation entry points (read-only)
+    describe_process,  # Inspect process schema, ports, defaults, and exit codes (read-only)
+    build_process_inputs,  # Pre-populate inputs from a protocol builder (read-only)
+    draft_process_inputs,  # Draft inputs from the process spec, when it has no protocol builder (read-only)
+    check_cutoffs_against_pseudos,  # Compare a spec's cutoffs against its pseudopotentials (read-only)
     build_resubmission_spec,  # Rebuild a past run's inputs so it can be re-run (read-only)
     list_codes,  # Discover the configured codes to submit against (read-only)
     get_process_status,  # Follow up on what was just submitted (read-only)
@@ -61,10 +64,10 @@ def get_agent(
 
     The Execution Agent:
     1. Queries the AiiDA database for context on past runs (query_run_context)
-    2. Discovers installed workflow and calculation entry points (list_workflows)
-    3. Introspects process schemas, required/optional ports, and exit codes (describe_workflow)
-    4. Pre-populates inputs from a protocol builder when one exists (build_workflow_inputs),
-       and drafts them from the process spec itself when one does not (draft_workflow_inputs)
+    2. Discovers installed workflow and calculation entry points (list_process_entry_points)
+    3. Introspects process schemas, required/optional ports, and exit codes (describe_process)
+    4. Pre-populates inputs from a protocol builder when one exists (build_process_inputs),
+       and drafts them from the process spec itself when one does not (draft_process_inputs)
     5. Discovers the configured codes a calculation can run on (list_codes)
     6. Submits workflow specs (execute_workflow_spec, requires HITL approval)
     7. Follows up on what it submitted (get_process_status)
@@ -72,12 +75,12 @@ def get_agent(
     Step 4's two tools are a pair, not alternatives to weigh: a protocol builder
     carries physics defaults tuned on real runs and is always preferred, but only
     a minority of processes ship one. For the rest --- most calculations, and any
-    plugin that never adopted the convention --- ``draft_workflow_inputs`` reads
+    plugin that never adopted the convention --- ``draft_process_inputs`` reads
     the same ``Process.spec()`` that validates the submission, so the agent never
     has to reconstruct a port tree from prose.
 
     It can also read the AiiDA (and any installed plugin's) documentation
-    via search_aiida_docs. describe_workflow gives a workflow's input
+    via search_aiida_docs. describe_process gives a workflow's input
     *schema*; the docs are what explain what those inputs mean, which is
     exactly what configuring a real simulation needs.
 

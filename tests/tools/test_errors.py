@@ -16,20 +16,20 @@ from aiida_agents.tools._errors import describe_aiida_error
     [
         pytest.param(
             NotExistent("no node 42"),
-            ["no node 42", "list_processes()", "query_nodes()"],
+            ["no node 42", "list_recent_processes()", "query_nodes()"],
             [],
             id="not-found-points-at-listing-tools",
         ),
         pytest.param(
             MultipleObjectsError("ambiguous uuid 'ab'"),
             ["ambiguous uuid 'ab'", "full uuid"],
-            ["list_processes()"],
+            ["list_recent_processes()"],
             id="ambiguous-asks-for-full-identifier-not-listing",
         ),
         pytest.param(
             AiidaException("some other failure"),
             ["some other failure"],
-            ["list_processes()", "full uuid"],
+            ["list_recent_processes()", "full uuid"],
             id="other-reported-as-is-without-a-misfit-hint",
         ),
     ],

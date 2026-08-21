@@ -13,7 +13,7 @@ import typing as t
 
 import pytest
 
-EXPECTED_TOOLS = {"search_aiida_code", "run_aiida_code", "search_aiida_docs"}
+EXPECTED_TOOLS = {"search_aiida_examples", "run_python_snippet", "search_aiida_docs"}
 
 
 @pytest.fixture
@@ -113,7 +113,7 @@ class TestExecutionToolSafety:
             lambda *a, **k: ran.append("ran"),
         )
 
-        result = execution.run_aiida_code("print(1)")
+        result = execution.run_python_snippet("print(1)")
 
         assert ran == []
         assert "sandbox init" in result
@@ -128,7 +128,7 @@ class TestExecutionToolSafety:
             lambda profile: False,
         )
 
-        assert "do NOT claim to have run it" in execution.run_aiida_code("print(1)")
+        assert "do NOT claim to have run it" in execution.run_python_snippet("print(1)")
 
     def test_it_refuses_a_profile_that_is_not_separate(
         self, monkeypatch: pytest.MonkeyPatch
@@ -159,7 +159,7 @@ class TestExecutionToolSafety:
             lambda *a, **k: ran.append("ran"),
         )
 
-        result = execution.run_aiida_code("print(1)")
+        result = execution.run_python_snippet("print(1)")
 
         assert ran == []
         assert "shares storage" in result
@@ -186,7 +186,7 @@ class TestExecutionToolSafety:
             lambda *a, **k: ran.append("ran"),
         )
 
-        assert "not run" in execution.run_aiida_code("print(1)")
+        assert "not run" in execution.run_python_snippet("print(1)")
         assert ran == []
 
     def test_it_runs_against_the_configured_profile(
@@ -220,7 +220,7 @@ class TestExecutionToolSafety:
 
         monkeypatch.setattr("aiida_agents.sandbox.run_in_sandbox", _fake_run)
 
-        assert execution.run_aiida_code("print(42)") == "42"
+        assert execution.run_python_snippet("print(42)") == "42"
         assert seen["profile"] == "my-readonly"
 
     def test_invalid_settings_refuse_rather_than_raise(
@@ -237,7 +237,7 @@ class TestExecutionToolSafety:
 
         monkeypatch.setenv("AIIDA_AGENTS_SNIPPET_TIMEOUT", "10000")
 
-        result = execution.run_aiida_code("print(42)")
+        result = execution.run_python_snippet("print(42)")
 
         assert "snippet_timeout" in result
         assert "less than or equal to 300" in result

@@ -3,8 +3,8 @@ aiida-vasp would eventually declare itself.
 
 Sibling of ``dev/qe_rag_stub``, and the same bargain: aiida-vasp's *workflows*
 need nothing from us --- installing the package registers its entry points, and
-``list_workflows`` / ``describe_workflow`` / ``build_workflow_inputs`` read them
-generically --- but its *documentation* is what tells an agent what an
+``list_process_entry_points`` / ``describe_process`` / ``build_process_inputs``
+read them generically --- but its *documentation* is what tells an agent what an
 ``INCAR`` tag means or which protocol a ``VaspRelaxWorkChain`` expects, and
 nothing indexes that unless someone declares the corpus.
 

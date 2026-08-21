@@ -36,7 +36,7 @@ __all__ = [
     "index_docs",
     "index_plugin_corpora",
     "query_docs",
-    "search_aiida_code",
+    "search_aiida_examples",
     "search_aiida_docs",
 ]
 
@@ -166,7 +166,7 @@ def _has_python(text: str) -> bool:
     return any(fence in text for fence in _PYTHON_FENCES)
 
 
-def search_aiida_code(task: str) -> str:
+def search_aiida_examples(task: str) -> str:
     """Find real AiiDA code examples for a task, to write code from.
 
     Use this **before writing any Python that uses AiiDA**, and prefer it over

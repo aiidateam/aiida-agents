@@ -33,13 +33,13 @@ from aiida_agents.tools import (
     get_process_report,
     get_process_status,
     get_retrieved_file,
-    list_processes,
+    list_recent_processes,
     list_retrieved_files,
     query_nodes,
     query_run_context,
     search_structures,
 )
-from aiida_agents.rag import search_aiida_code, search_aiida_docs
+from aiida_agents.rag import search_aiida_examples, search_aiida_docs
 
 # Every read tool is exposed through RetryOnToolError (see get_agent), so a
 # tool that raises -- e.g. on a hallucinated or wrong-type identifier -- comes
@@ -54,14 +54,14 @@ _READ_TOOLS: list[Any] = [
     get_daemon_status,
     list_retrieved_files,
     get_retrieved_file,
-    list_processes,
+    list_recent_processes,
     query_nodes,
     get_node_inputs,
     get_node_outputs,
     search_structures,
     query_run_context,
     search_aiida_docs,
-    search_aiida_code,
+    search_aiida_examples,
 ]
 
 _SYSTEM_PROMPT = (

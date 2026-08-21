@@ -6,7 +6,7 @@ plugins following the AiiDA Common Workflows convention) expose a
 code), it returns a ``ProcessBuilder`` already filled in with physically
 sensible defaults for a named protocol ("fast", "moderate", "precise"), tuned
 by people who have run the underlying simulations at scale. Building a
-workchain's inputs from scratch -- which is all ``describe_workflow`` and
+workchain's inputs from scratch -- which is all ``describe_process`` and
 ``execute_workflow_spec`` support -- throws that away and asks the model to
 invent every physics parameter itself, for workchains whose input schema can
 run into dozens of ports.
@@ -19,9 +19,9 @@ vary by workflow) and serialises the result back into the same
 tweaking a handful of fields on the returned spec, not building it from zero.
 
 Not every workflow has a protocol builder (most calculations and many older
-workchains do not); ``describe_workflow``'s ``has_protocol_builder`` says so
+workchains do not); ``describe_process``'s ``has_protocol_builder`` says so
 up front, and this tool raises a clear, actionable error if called on one that
-doesn't, pointing at ``draft_workflow_inputs`` --- which drafts the same spec
+doesn't, pointing at ``draft_process_inputs`` --- which drafts the same spec
 shape from the process's own ``Process.spec()`` instead.
 """
 
@@ -43,7 +43,7 @@ from aiida_agents.tools.execution.schemas import WorkflowSpec
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["build_workflow_inputs"]
+__all__ = ["build_process_inputs"]
 
 # Parameters every protocol builder implementation takes, so passing them
 # through needs no per-workflow introspection.
@@ -68,7 +68,7 @@ def _resolve_protocol_kwargs(kwargs: dict[str, t.Any]) -> dict[str, t.Any]:
     return resolved
 
 
-def build_workflow_inputs(
+def build_process_inputs(
     entry_point: t.Annotated[
         str,
         Field(
@@ -87,7 +87,7 @@ def build_workflow_inputs(
             description=(
                 "Keyword arguments for get_builder_from_protocol, beyond 'protocol' "
                 "itself -- typically 'structure' and 'code' (or 'codes' for a "
-                "multi-code workflow), whichever describe_workflow's "
+                "multi-code workflow), whichever describe_process's "
                 "'protocol_parameters' names as required. Node-valued arguments "
                 "(structure, code, ...) are given as reference dicts: "
                 '{"pk": N}, {"uuid": "..."}, or {"label": "name@computer"}. '
@@ -105,7 +105,7 @@ def build_workflow_inputs(
     and serialises the result -- already populated with physically sensible
     defaults for the named protocol -- into the same spec shape
     ``execute_workflow_spec`` accepts. Use this instead of constructing
-    ``inputs`` by hand whenever ``describe_workflow`` reports
+    ``inputs`` by hand whenever ``describe_process`` reports
     ``has_protocol_builder: true``: start from the returned spec and adjust
     only the handful of parameters that genuinely need it (per
     ``query_run_context``'s historical context, say), rather than
@@ -116,7 +116,7 @@ def build_workflow_inputs(
         protocol: Named protocol, e.g. "fast", "moderate", "precise". Passed
             through only if the builder actually accepts it (nearly all do).
         protocol_kwargs: The builder's other keyword arguments -- see
-            ``describe_workflow``'s ``protocol_parameters`` for exactly which
+            ``describe_process``'s ``protocol_parameters`` for exactly which
             ones this workflow needs and which are optional.
 
     Returns:
@@ -129,7 +129,7 @@ def build_workflow_inputs(
             fails (a bad reference, an invalid protocol name, ...).
     """
     logger.debug(
-        "build_workflow_inputs(entry_point=%r, protocol=%r, protocol_kwargs=%r)",
+        "build_process_inputs(entry_point=%r, protocol=%r, protocol_kwargs=%r)",
         entry_point,
         protocol,
         protocol_kwargs,
@@ -139,7 +139,7 @@ def build_workflow_inputs(
     if builder_from_protocol is None:
         msg = (
             f"{entry_point!r} has no get_builder_from_protocol -- call "
-            f"draft_workflow_inputs({entry_point!r}) instead. It drafts the same "
+            f"draft_process_inputs({entry_point!r}) instead. It drafts the same "
             "spec shape from the process's own input ports, filling every default "
             "the spec declares and naming the required ports you still have to "
             "supply. Do not assemble the inputs by hand."

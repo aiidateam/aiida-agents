@@ -18,7 +18,7 @@ We retain that read vs. write split to gate agent permissions: read-only tools r
 
 ### Refinement (2026-05-30)
 
-"Wrap `aiida-restapi`" applies where it earns its place: the collection/query surface, where the service layer centralises filtering, projection, and pagination (e.g. `list_processes`, `query_nodes`). For simple single-node operations addressed by a known identifier (load one node, then read its attributes or traverse its links), use `aiida-core`'s ORM directly (`orm.load_node`, `node.base.links`). That is the canonical AiiDA access path, not a re-implementation, and it avoids the round-trips the service layer incurs for a single node: resolving the identifier to a uuid, then an N+1 follow-up query per linked node. Rule of thumb: `NodeService` for queries over many nodes; plain ORM where you already hold, or load, a single node.
+"Wrap `aiida-restapi`" applies where it earns its place: the collection/query surface, where the service layer centralises filtering, projection, and pagination (e.g. `list_recent_processes`, `query_nodes`). For simple single-node operations addressed by a known identifier (load one node, then read its attributes or traverse its links), use `aiida-core`'s ORM directly (`orm.load_node`, `node.base.links`). That is the canonical AiiDA access path, not a re-implementation, and it avoids the round-trips the service layer incurs for a single node: resolving the identifier to a uuid, then an N+1 follow-up query per linked node. Rule of thumb: `NodeService` for queries over many nodes; plain ORM where you already hold, or load, a single node.
 
 ### Status of the dependency (2026-08-19)
 

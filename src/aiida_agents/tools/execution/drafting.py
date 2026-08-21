@@ -1,10 +1,10 @@
-"""Draft a workflow's inputs from its own ``Process.spec()``.
+"""Draft a process's inputs from its own ``Process.spec()``.
 
-``build_workflow_inputs`` covers the workflows that ship a
+``build_process_inputs`` covers the workflows that ship a
 ``get_builder_from_protocol``, which is an aiida-quantumespresso / AiiDA Common
 Workflows convention rather than an aiida-core one. Everything else --- most
 calculations, many older workchains, and whole plugin packages that never
-adopted protocols --- had no tool at all. ``build_workflow_inputs`` raised and
+adopted protocols --- had no tool at all. ``build_process_inputs`` raised and
 told the agent to build the inputs "by hand", which in practice means a model
 reconstructing a port tree from prose and getting the names, the nesting, or
 which ports are required wrong; the failure only surfaces at submission, if it
@@ -67,7 +67,7 @@ from aiida_agents.tools.execution.schemas import WorkflowSpec
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["draft_workflow_inputs"]
+__all__ = ["draft_process_inputs"]
 
 # A namespace by this name holds scheduler/bookkeeping options rather than
 # physics, at whatever depth it appears (a workchain exposes one per sub-process
@@ -150,7 +150,7 @@ def _draft_namespace(
         msg = (
             f"Unknown input port(s) {sorted(unknown)}{where}: this process does "
             f"not declare them. Ports declared here: {sorted(declared)}. Check "
-            f"describe_workflow's inputs_schema for the exact nesting."
+            f"describe_process's inputs_schema for the exact nesting."
         )
         raise ValueError(msg)
 
@@ -218,7 +218,7 @@ def _draft_namespace(
     return drafted
 
 
-def draft_workflow_inputs(
+def draft_process_inputs(
     entry_point: t.Annotated[
         str,
         Field(
@@ -242,7 +242,7 @@ def draft_workflow_inputs(
 ) -> WorkflowSpec:
     """Draft a WorkflowSpec from a process's own input ports, for any process.
 
-    Use this whenever ``describe_workflow`` reports ``has_protocol_builder:
+    Use this whenever ``describe_process`` reports ``has_protocol_builder:
     false``. It reads the same ``Process.spec()`` that validates the eventual
     submission, so the port names and nesting in the returned draft are correct
     by construction --- which is exactly what assembling the inputs from the
@@ -259,7 +259,7 @@ def draft_workflow_inputs(
     What this tool does *not* do is choose physics for you. It fills in only the
     defaults the process itself declares; a required cutoff with no default
     comes back in ``missing_required``, not filled with a plausible number.
-    Where a protocol builder exists, ``build_workflow_inputs`` is still the
+    Where a protocol builder exists, ``build_process_inputs`` is still the
     better starting point, because its defaults were tuned by people who ran the
     underlying simulations.
 
@@ -278,9 +278,7 @@ def draft_workflow_inputs(
             declared by the process, a namespace was given a non-mapping, or a
             supplied node reference does not resolve.
     """
-    logger.debug(
-        "draft_workflow_inputs(entry_point=%r, inputs=%r)", entry_point, inputs
-    )
+    logger.debug("draft_process_inputs(entry_point=%r, inputs=%r)", entry_point, inputs)
     if not entry_point or not isinstance(entry_point, str):
         msg = "entry_point must be a non-empty string."
         raise ValueError(msg)

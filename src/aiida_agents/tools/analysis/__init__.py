@@ -1,6 +1,6 @@
 """Read-only tools owned by the Analysis agent.
 
-Process inspection (``get_process_status``, ``list_processes``) deliberately
+Process inspection (``get_process_status``, ``list_recent_processes``) deliberately
 does *not* live here: the Execution agent needs it too, to follow up on what it
 submitted, so it sits at the shared ``tools`` top level (see that package's
 docstring for the rule).

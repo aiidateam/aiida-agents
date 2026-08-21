@@ -1,4 +1,4 @@
-"""Tests for ``check_input_ranges``.
+"""Tests for ``check_cutoffs_against_pseudos``.
 
 Built on a real ``SsspFamily`` rather than a stub, because the whole claim of
 this check is that the number it compares against comes from an authority
@@ -23,7 +23,7 @@ import pytest
 from aiida import orm
 from aiida_pseudo.groups.family.sssp import SsspFamily
 
-from aiida_agents.tools.execution.ranges import check_input_ranges
+from aiida_agents.tools.execution.ranges import check_cutoffs_against_pseudos
 from aiida_agents.tools.execution.schemas import WorkflowSpec
 
 FAMILY_LABEL = "SSSP/1.3/PBE/efficiency"
@@ -83,7 +83,7 @@ class TestFindingsAgainstTheFamily:
     def test_a_cutoff_below_the_recommendation_is_reported(
         self, pseudo_family: SsspFamily, silicon_structure: orm.StructureData
     ) -> None:
-        findings = check_input_ranges(_spec(silicon_structure, ecutwfc=12.0))
+        findings = check_cutoffs_against_pseudos(_spec(silicon_structure, ecutwfc=12.0))
 
         wfc = next(f for f in findings if f["parameter"].endswith("ecutwfc"))
         assert wfc["severity"] == "below_recommended"
@@ -95,7 +95,7 @@ class TestFindingsAgainstTheFamily:
         self, pseudo_family: SsspFamily, silicon_structure: orm.StructureData
     ) -> None:
         """Without the source it is an opinion, not a check."""
-        findings = check_input_ranges(_spec(silicon_structure, ecutwfc=12.0))
+        findings = check_cutoffs_against_pseudos(_spec(silicon_structure, ecutwfc=12.0))
 
         wfc = next(f for f in findings if f["parameter"].endswith("ecutwfc"))
         assert FAMILY_LABEL in wfc["source"]
@@ -105,13 +105,13 @@ class TestFindingsAgainstTheFamily:
     def test_a_cutoff_at_the_recommendation_is_not_reported(
         self, pseudo_family: SsspFamily, silicon_structure: orm.StructureData
     ) -> None:
-        assert check_input_ranges(_spec(silicon_structure)) == []
+        assert check_cutoffs_against_pseudos(_spec(silicon_structure)) == []
 
     def test_a_cutoff_slightly_under_is_not_worth_interrupting_for(
         self, pseudo_family: SsspFamily, silicon_structure: orm.StructureData
     ) -> None:
         """29 Ry against a 30 Ry recommendation is noise, not a finding."""
-        findings = check_input_ranges(_spec(silicon_structure, ecutwfc=29.0))
+        findings = check_cutoffs_against_pseudos(_spec(silicon_structure, ecutwfc=29.0))
 
         assert [f for f in findings if f["parameter"].endswith("ecutwfc")] == []
 
@@ -119,7 +119,9 @@ class TestFindingsAgainstTheFamily:
         self, pseudo_family: SsspFamily, silicon_structure: orm.StructureData
     ) -> None:
         """The other direction costs core-hours rather than correctness."""
-        findings = check_input_ranges(_spec(silicon_structure, ecutwfc=200.0))
+        findings = check_cutoffs_against_pseudos(
+            _spec(silicon_structure, ecutwfc=200.0)
+        )
 
         wfc = next(f for f in findings if f["parameter"].endswith("ecutwfc"))
         assert wfc["severity"] == "far_above_recommended"
@@ -132,7 +134,7 @@ class TestWhereItLooks:
         self, pseudo_family: SsspFamily, silicon_structure: orm.StructureData
     ) -> None:
         """PwRelaxWorkChain puts them at base.pw.parameters, not the top level."""
-        findings = check_input_ranges(
+        findings = check_cutoffs_against_pseudos(
             _spec(silicon_structure, ecutwfc=12.0, nested=True)
         )
 
@@ -143,7 +145,7 @@ class TestWhereItLooks:
         self, pseudo_family: SsspFamily, silicon_structure: orm.StructureData
     ) -> None:
         """Plugins have written both; run_context accepts either, so must this."""
-        findings = check_input_ranges(
+        findings = check_cutoffs_against_pseudos(
             _spec(silicon_structure, ecutwfc=12.0, card="system")
         )
 
@@ -157,7 +159,7 @@ class TestWhereItLooks:
         spec = _spec(silicon_structure, ecutwfc=12.0, family_label=None)
         spec["inputs"]["pseudos"] = {"Si": {"pk": pseudo.pk}}
 
-        findings = check_input_ranges(spec)
+        findings = check_cutoffs_against_pseudos(spec)
 
         assert any(f["parameter"].endswith("ecutwfc") for f in findings)
 
@@ -168,7 +170,7 @@ class TestWhenItCannotCompare:
     def test_a_spec_with_no_family_yields_nothing(
         self, pseudo_family: SsspFamily, silicon_structure: orm.StructureData
     ) -> None:
-        findings = check_input_ranges(
+        findings = check_cutoffs_against_pseudos(
             _spec(silicon_structure, ecutwfc=12.0, family_label=None)
         )
 
@@ -185,7 +187,7 @@ class TestWhenItCannotCompare:
             },
         }
 
-        assert check_input_ranges(spec) == []
+        assert check_cutoffs_against_pseudos(spec) == []
 
     def test_an_unresolvable_structure_reference_yields_nothing(
         self, pseudo_family: SsspFamily
@@ -200,12 +202,12 @@ class TestWhenItCannotCompare:
             },
         }
 
-        assert check_input_ranges(spec) == []
+        assert check_cutoffs_against_pseudos(spec) == []
 
     def test_a_family_label_naming_no_group_yields_nothing(
         self, silicon_structure: orm.StructureData
     ) -> None:
-        findings = check_input_ranges(
+        findings = check_cutoffs_against_pseudos(
             _spec(silicon_structure, ecutwfc=12.0, family_label="no/such/family")
         )
 
@@ -218,7 +220,9 @@ class TestMalformedInput:
     def test_a_non_numeric_cutoff_is_skipped(
         self, pseudo_family: SsspFamily, silicon_structure: orm.StructureData
     ) -> None:
-        findings = check_input_ranges(_spec(silicon_structure, ecutwfc="not a number"))
+        findings = check_cutoffs_against_pseudos(
+            _spec(silicon_structure, ecutwfc="not a number")
+        )
 
         assert [f for f in findings if f["parameter"].endswith("ecutwfc")] == []
 
@@ -232,4 +236,4 @@ class TestMalformedInput:
         ],
     )
     def test_a_spec_with_no_usable_inputs_yields_nothing(self, spec: t.Any) -> None:
-        assert check_input_ranges(spec) == []
+        assert check_cutoffs_against_pseudos(spec) == []

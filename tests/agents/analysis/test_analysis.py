@@ -34,13 +34,13 @@ EXPECTED_TOOLS = {
     "query_run_context",
     "list_retrieved_files",
     "get_retrieved_file",
-    "list_processes",
+    "list_recent_processes",
     "query_nodes",
     "get_node_inputs",
     "get_node_outputs",
     "search_structures",
     "search_aiida_docs",
-    "search_aiida_code",
+    "search_aiida_examples",
 }
 
 

@@ -8,7 +8,9 @@ from __future__ import annotations
 
 from aiida.common.exceptions import AiidaException, MultipleObjectsError, NotExistent
 
-_FIND_IDENTIFIERS = "Use list_processes() or query_nodes() to find valid identifiers."
+_FIND_IDENTIFIERS = (
+    "Use list_recent_processes() or query_nodes() to find valid identifiers."
+)
 
 
 def describe_aiida_error(exc: AiidaException) -> str:

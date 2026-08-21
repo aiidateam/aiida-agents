@@ -105,7 +105,7 @@ def _resolve_process_label(workflow_type: str) -> tuple[str, bool]:
 
     Nodes store ``process_label`` as the class name (``MultiplyAddWorkChain``),
     but the agent has three plausible things to hand and no reason to prefer
-    one: the entry point ``list_workflows`` gave it
+    one: the entry point ``list_process_entry_points`` gave it
     (``core.arithmetic.multiply_add``), the ``group:entry_point`` form that
     ``process_type`` uses, or the class name itself.
 
@@ -270,7 +270,7 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
     if not workflow_type:
         msg = (
             "past_successful_workflows needs filters={'workflow_type': ...} -- the "
-            "entry point of the workflow to summarise, as list_workflows() reports "
+            "entry point of the workflow to summarise, as list_process_entry_points() reports "
             "it. Statistics across every workflow type in the profile would not "
             "mean anything."
         )
@@ -313,7 +313,7 @@ def _query_past_workflows(filters: dict[str, t.Any]) -> dict[str, t.Any]:
                     f"{workflow_type!r} is not a registered entry point, so it was "
                     f"searched for as the process label {process_label!r}, and no "
                     "runs matched. If this workflow is installed, pass the entry "
-                    "point that list_workflows() reported; if it is not, say so "
+                    "point that list_process_entry_points() reported; if it is not, say so "
                     "rather than treating this as an absence of history."
                 )
             ),

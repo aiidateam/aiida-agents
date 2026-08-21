@@ -19,7 +19,7 @@ from aiida.common import timezone
 from aiida_agents.tools.processes import (
     get_process_report,
     get_process_status,
-    list_processes,
+    list_recent_processes,
 )
 
 
@@ -71,9 +71,9 @@ def test_get_process_status_rejects_non_process_node() -> None:
         get_process_status(str(data.pk))
 
 
-def test_list_processes(add_calc: orm.CalcJobNode) -> None:
+def test_list_recent_processes(add_calc: orm.CalcJobNode) -> None:
     """The process filter selects process nodes and pulls state from attributes."""
-    records = list_processes(limit=50)
+    records = list_recent_processes(limit=50)
 
     # The ``%process%`` node-type filter excludes plain data nodes.
     assert all("process" in record["node_type"] for record in records)

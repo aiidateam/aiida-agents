@@ -17,17 +17,17 @@ Where a scenario below is wrong or missing, the conclusion it feeds may change.
 
 ## The tools each agent holds
 
-| Analysis (read-only) | Execution                      |
-| -------------------- | ------------------------------ |
-| `get_process_status` | `list_workflows`               |
-| `get_process_report` | `describe_workflow`            |
-| `list_processes`     | `build_workflow_inputs`        |
-| `query_nodes`        | `list_codes`                   |
-| `get_node_inputs`    | `query_run_context`            |
-| `get_node_outputs`   | `get_process_status`           |
-| `search_structures`  | `search_aiida_docs`            |
-| `search_aiida_docs`  | `execute_workflow_spec` (HITL) |
-|                      | `import_structure` (HITL)      |
+| Analysis (read-only)    | Execution                     |
+| ----------------------- | ----------------------------- |
+| `get_process_status`    | `list_process_entry_points`   |
+| `get_process_report`    | `describe_process`            |
+| `list_recent_processes` | `build_process_inputs`        |
+| `query_nodes`           | `list_codes`                  |
+| `get_node_inputs`       | `query_run_context`           |
+| `get_node_outputs`      | `get_process_status`          |
+| `search_structures`     | `search_aiida_docs`           |
+| `search_aiida_docs`     | `execute_workflow_spec` (HITL) |
+|                         | `import_structure` (HITL)     |
 
 Note the overlap: both agents hold `search_aiida_docs` and `get_process_status`.
 
@@ -42,8 +42,8 @@ Verdict key: **A**: Analysis alone. **E**: Execution alone. **A→E**: needs bot
 | 3   | "Is pk 1234 still running?"                                                       | A or E        | Both hold `get_process_status`; routing is unambiguous in effect because either answer is correct.                                                                               |
 | 4   | "What is a `CalcJobNode`?" / "How do I write a WorkChain?"                        | A or E        | Both hold `search_aiida_docs`. Same observation as #3.                                                                                                                           |
 | 5   | "Why did pk 1234 fail?"                                                           | A (partial)   | `get_process_status` then `get_process_report` gives AiiDA's log. When the real cause is in the code's own stdout inside the `retrieved` folder, nothing can reach it: see Gaps. |
-| 6   | "What workflows can I run, and what inputs does `PwRelaxWorkChain` need?"         | E             | `list_workflows` then `describe_workflow`.                                                                                                                                       |
-| 7   | "Relax the silicon structure at pk 512."                                          | E             | Full discover → describe → `list_codes` → `build_workflow_inputs` → `execute_workflow_spec` chain.                                                                               |
+| 6   | "What workflows can I run, and what inputs does `PwRelaxWorkChain` need?"         | E             | `list_process_entry_points` then `describe_process`.                                                                                                                             |
+| 7   | "Relax the silicon structure at pk 512."                                          | E             | Full discover → describe → `list_codes` → `build_process_inputs` → `execute_workflow_spec` chain.                                                                                 |
 | 8   | "Relax the structure in `~/si.cif`."                                              | E             | Adds `import_structure` at the front. Both writes are HITL-gated.                                                                                                                |
 | 9   | "What `ecutwfc` did my successful Si relaxations use? Use that for this new one." | **E**         | **Already served inside Execution**: `query_run_context` returns `median_ecutwfc`, `median_kpoints_distance`, `common_parameters` and success rate. No Analysis call needed.     |
 | 10  | "Why did pk 1234 fail, and resubmit it with a longer wallclock."                  | **A→E**       | Diagnosis (`get_process_report`) must inform the resubmission. Not servable today by either agent alone.                                                                         |

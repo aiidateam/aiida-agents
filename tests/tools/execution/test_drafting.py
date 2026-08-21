@@ -1,4 +1,4 @@
-"""Tests for ``draft_workflow_inputs``.
+"""Tests for ``draft_process_inputs``.
 
 Two kinds of test here, deliberately.
 
@@ -27,7 +27,7 @@ from aiida.calculations.arithmetic.add import ArithmeticAddCalculation
 from aiida.engine import WorkChain, run_get_node
 
 from aiida_agents.tools.execution import drafting
-from aiida_agents.tools.execution.drafting import draft_workflow_inputs
+from aiida_agents.tools.execution.drafting import draft_process_inputs
 from aiida_agents.tools.execution.schemas import WorkflowSpec
 from aiida_agents.tools.execution.submit import _resolve_inputs
 
@@ -81,7 +81,7 @@ class TestDefaults:
     """What the drafter fills in on the caller's behalf."""
 
     def test_declared_defaults_are_filled_in(self, synthetic: None) -> None:
-        spec = draft_workflow_inputs(SYNTHETIC_EP)
+        spec = draft_process_inputs(SYNTHETIC_EP)
 
         # Serialised to bare values, not left as the Float/Str nodes the
         # defaults construct -- that is the WorkflowSpec convention.
@@ -89,12 +89,12 @@ class TestDefaults:
         assert spec["inputs"]["scheme"] == "bfgs"
 
     def test_a_supplied_value_wins_over_the_default(self, synthetic: None) -> None:
-        spec = draft_workflow_inputs(SYNTHETIC_EP, {"cutoff": 80.0})
+        spec = draft_process_inputs(SYNTHETIC_EP, {"cutoff": 80.0})
 
         assert spec["inputs"]["cutoff"] == 80.0
 
     def test_optional_ports_without_defaults_stay_absent(self, synthetic: None) -> None:
-        spec = draft_workflow_inputs(SYNTHETIC_EP)
+        spec = draft_process_inputs(SYNTHETIC_EP)
 
         assert "optional_port" not in spec["inputs"]
         assert "structure" not in spec["inputs"]
@@ -110,7 +110,7 @@ class TestDefaults:
         port = SyntheticWorkChain.spec().inputs["cutoff"]
         monkeypatch.setattr(port, "_default", _explode)
 
-        spec = draft_workflow_inputs(SYNTHETIC_EP)
+        spec = draft_process_inputs(SYNTHETIC_EP)
 
         assert "cutoff" not in spec["inputs"]
 
@@ -121,7 +121,7 @@ class TestMissingRequired:
     def test_required_ports_are_reported_with_types_and_help(
         self, synthetic: None
     ) -> None:
-        spec = draft_workflow_inputs(SYNTHETIC_EP)
+        spec = draft_process_inputs(SYNTHETIC_EP)
 
         entry = next(
             e
@@ -135,7 +135,7 @@ class TestMissingRequired:
     def test_a_port_inside_a_required_namespace_is_reported_by_full_path(
         self, synthetic: None
     ) -> None:
-        spec = draft_workflow_inputs(SYNTHETIC_EP)
+        spec = draft_process_inputs(SYNTHETIC_EP)
 
         assert "required_ns.inner" in _missing_ports(spec)
 
@@ -143,7 +143,7 @@ class TestMissingRequired:
         self, synthetic: None
     ) -> None:
         """Its inner port is required *of the namespace*, not of the process."""
-        spec = draft_workflow_inputs(SYNTHETIC_EP)
+        spec = draft_process_inputs(SYNTHETIC_EP)
 
         assert "optional_ns.inner" not in _missing_ports(spec)
         assert "optional_ns" not in spec["inputs"]
@@ -157,7 +157,7 @@ class TestMissingRequired:
         visible: the required sibling now has to be reported, where a moment
         ago it did not.
         """
-        spec = draft_workflow_inputs(SYNTHETIC_EP, {"optional_ns": {"other": 1}})
+        spec = draft_process_inputs(SYNTHETIC_EP, {"optional_ns": {"other": 1}})
 
         assert "optional_ns.inner" in _missing_ports(spec)
         assert spec["inputs"]["optional_ns"]["other"] == 1
@@ -165,7 +165,7 @@ class TestMissingRequired:
     def test_filling_every_requirement_marks_the_draft_ready(
         self, synthetic: None
     ) -> None:
-        spec = draft_workflow_inputs(
+        spec = draft_process_inputs(
             SYNTHETIC_EP,
             {"required_port": 1, "required_ns": {"inner": 2}},
         )
@@ -177,7 +177,7 @@ class TestMissingRequired:
         self, aiida_profile: t.Any
     ) -> None:
         """No synthetic class involved: the four inputs MultiplyAdd declares."""
-        spec = draft_workflow_inputs(MULTIPLY_ADD_EP)
+        spec = draft_process_inputs(MULTIPLY_ADD_EP)
 
         assert set(_missing_ports(spec)) == {"x", "y", "z", "code"}
 
@@ -189,7 +189,7 @@ class TestRejectedInput:
         self, synthetic: None
     ) -> None:
         with pytest.raises(ValueError, match="Unknown input port") as excinfo:
-            draft_workflow_inputs(SYNTHETIC_EP, {"ecutwfc": 60.0})
+            draft_process_inputs(SYNTHETIC_EP, {"ecutwfc": 60.0})
 
         message = str(excinfo.value)
         assert "'ecutwfc'" in message
@@ -199,41 +199,41 @@ class TestRejectedInput:
         self, synthetic: None
     ) -> None:
         with pytest.raises(ValueError, match="required_ns") as excinfo:
-            draft_workflow_inputs(SYNTHETIC_EP, {"required_ns": {"nope": 1}})
+            draft_process_inputs(SYNTHETIC_EP, {"required_ns": {"nope": 1}})
 
         assert "'nope'" in str(excinfo.value)
 
     def test_a_dynamic_namespace_accepts_undeclared_keys(self, synthetic: None) -> None:
         """Its keys are open by declaration, so the spec is not the authority."""
-        spec = draft_workflow_inputs(SYNTHETIC_EP, {"pseudos": {"Si": "SSSP/Si"}})
+        spec = draft_process_inputs(SYNTHETIC_EP, {"pseudos": {"Si": "SSSP/Si"}})
 
         assert spec["inputs"]["pseudos"] == {"Si": "SSSP/Si"}
 
     def test_a_namespace_given_a_scalar_is_rejected(self, synthetic: None) -> None:
         with pytest.raises(ValueError, match="is a namespace"):
-            draft_workflow_inputs(SYNTHETIC_EP, {"required_ns": 5})
+            draft_process_inputs(SYNTHETIC_EP, {"required_ns": 5})
 
     def test_an_unresolvable_reference_is_rejected(
         self, synthetic: None, aiida_profile: t.Any
     ) -> None:
         """Caught while the agent can still fix it, not at submission."""
         with pytest.raises(ValueError, match="No node found with pk=999999"):
-            draft_workflow_inputs(SYNTHETIC_EP, {"structure": {"pk": 999999}})
+            draft_process_inputs(SYNTHETIC_EP, {"structure": {"pk": 999999}})
 
     def test_unknown_entry_point_is_rejected(self, aiida_profile: t.Any) -> None:
         with pytest.raises(ValueError, match="Entry point not found"):
-            draft_workflow_inputs("not.a.real.process")
+            draft_process_inputs("not.a.real.process")
 
     @pytest.mark.parametrize("bad", ["", None, 42])
     def test_entry_point_must_be_a_non_empty_string(
         self, bad: t.Any, aiida_profile: t.Any
     ) -> None:
         with pytest.raises(ValueError, match="entry_point must be"):
-            draft_workflow_inputs(bad)
+            draft_process_inputs(bad)
 
     def test_inputs_must_be_a_mapping(self, aiida_profile: t.Any) -> None:
         with pytest.raises(ValueError, match="inputs must be a mapping"):
-            draft_workflow_inputs(ADD_EP, [("x", 2)])  # type: ignore[arg-type]
+            draft_process_inputs(ADD_EP, [("x", 2)])  # type: ignore[arg-type]
 
 
 class TestReferences:
@@ -249,7 +249,7 @@ class TestReferences:
         """
         ref = {"pk": silicon_structure.pk}
 
-        spec = draft_workflow_inputs(SYNTHETIC_EP, {"structure": ref})
+        spec = draft_process_inputs(SYNTHETIC_EP, {"structure": ref})
 
         assert spec["inputs"]["structure"] == ref
 
@@ -261,7 +261,7 @@ class TestReferences:
         """
         environment = {"label": "run-42", "OMP_NUM_THREADS": "4"}
 
-        spec = draft_workflow_inputs(
+        spec = draft_process_inputs(
             ADD_EP, {"metadata": {"options": {"environment_variables": environment}}}
         )
 
@@ -275,7 +275,7 @@ class TestReferences:
         fail during drafting, while the agent can act on it.
         """
         with pytest.raises(ValueError, match=r"No node found with pk=.*'code'"):
-            draft_workflow_inputs(ADD_EP, {"code": {"pk": 10**9}})
+            draft_process_inputs(ADD_EP, {"code": {"pk": 10**9}})
 
 
 class TestRoundTrip:
@@ -284,7 +284,7 @@ class TestRoundTrip:
     def test_a_completed_draft_runs_through_the_engine(
         self, arithmetic_add_code: orm.InstalledCode
     ) -> None:
-        spec = draft_workflow_inputs(
+        spec = draft_process_inputs(
             ADD_EP,
             {"x": 2, "y": 3, "code": {"pk": arithmetic_add_code.pk}},
         )
@@ -299,7 +299,7 @@ class TestRoundTrip:
     def test_the_draft_is_addressed_to_the_process_it_was_asked_about(
         self, aiida_profile: t.Any
     ) -> None:
-        spec = draft_workflow_inputs(ADD_EP)
+        spec = draft_process_inputs(ADD_EP)
 
         assert spec["workflow_type"] == ADD_EP
         assert spec["metadata"]["source"] == "process_spec"

@@ -107,7 +107,7 @@ class TestEntryPointSpellingsAllFindTheSameRuns:
     against real nodes. Nodes store ``process_label`` as the class name, but the
     lookup derived it with ``workflow_type.split(":")[-1]``, which only works
     for the legacy ``aiida.workflows:PwRelaxWorkChain`` spelling used in the
-    prompt's examples. ``list_workflows()`` hands the agent modern entry points
+    prompt's examples. ``list_process_entry_points()`` hands the agent modern entry points
     (``core.arithmetic.multiply_add``), which have no colon, were passed through
     whole, and matched nothing.
 
@@ -119,7 +119,7 @@ class TestEntryPointSpellingsAllFindTheSameRuns:
     @pytest.mark.parametrize(
         "workflow_type",
         [
-            "core.arithmetic.multiply_add",  # what list_workflows() reports
+            "core.arithmetic.multiply_add",  # what list_process_entry_points() reports
             "aiida.workflows:core.arithmetic.multiply_add",  # what process_type stores
             "MultiplyAddWorkChain",  # the class name itself
         ],

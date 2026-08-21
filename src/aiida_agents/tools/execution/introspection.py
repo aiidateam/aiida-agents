@@ -20,10 +20,10 @@ from aiida_agents.tools.execution._spec import valid_type_names
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["list_workflows", "describe_workflow"]
+__all__ = ["list_process_entry_points", "describe_process"]
 
 
-def list_workflows(
+def list_process_entry_points(
     group: t.Annotated[
         str | None,
         Field(
@@ -45,7 +45,7 @@ def list_workflows(
         Dictionary mapping entry-point groups to dictionaries of entry point name
         -> module path/class name.
     """
-    logger.debug("list_workflows(group=%r)", group)
+    logger.debug("list_process_entry_points(group=%r)", group)
     groups_to_check = (group,) if group else ("aiida.workflows", "aiida.calculations")
     results: dict[str, dict[str, str]] = {}
     total_count = 0
@@ -62,7 +62,7 @@ def list_workflows(
         total_count += len(group_entries)
 
     return {
-        "query_type": "list_workflows",
+        "query_type": "list_process_entry_points",
         "group": group,
         "total_entry_points": total_count,
         "entry_points": results,
@@ -124,7 +124,7 @@ def _collect_flat_ports(
     return required, optional
 
 
-def describe_workflow(
+def describe_process(
     entry_point: t.Annotated[
         str,
         Field(
@@ -144,7 +144,7 @@ def describe_workflow(
     Returns:
         Dictionary detailing the process class schema and parameters.
     """
-    logger.debug("describe_workflow(entry_point=%r)", entry_point)
+    logger.debug("describe_process(entry_point=%r)", entry_point)
     if not entry_point or not isinstance(entry_point, str):
         msg = "entry_point must be a non-empty string."
         raise ValueError(msg)
@@ -183,7 +183,7 @@ def describe_workflow(
     builder_from_protocol = getattr(process_class, "get_builder_from_protocol", None)
 
     return {
-        "query_type": "describe_workflow",
+        "query_type": "describe_process",
         "entry_point": entry_point,
         "group": resolved_group,
         "process_class": f"{process_class.__module__}:{process_class.__name__}",
@@ -205,7 +205,7 @@ def _describe_protocol_parameters(
     Signatures vary by workflow -- some need only ``structure``, others also
     ``code`` or a ``codes`` mapping for a multi-code workflow -- so this is read
     from the callable itself rather than assumed, telling
-    ``build_workflow_inputs``'s caller exactly what to put in its
+    ``build_process_inputs``'s caller exactly what to put in its
     ``protocol_kwargs``.
     """
     if builder_from_protocol is None:

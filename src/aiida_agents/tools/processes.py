@@ -54,9 +54,9 @@ def get_process_status(identifier: Identifier) -> ProcessStatus:
     }
 
 
-def list_processes(limit: int = 10) -> list[ProcessRecord]:
+def list_recent_processes(limit: int = 10) -> list[ProcessRecord]:
     """List recent AiiDA processes, newest first."""
-    logger.debug("list_processes(limit=%d)", limit)
+    logger.debug("list_recent_processes(limit=%d)", limit)
 
     # One query projecting the state/exit_status attributes, rather than a
     # follow-up attribute lookup per process.
@@ -87,7 +87,7 @@ def list_processes(limit: int = 10) -> list[ProcessRecord]:
         }
         for pk, uuid, node_type, process_type, state, exit_status in qb.iterall()
     ]
-    logger.debug("list_processes: returned %d records", len(records))
+    logger.debug("list_recent_processes: returned %d records", len(records))
     return records
 
 

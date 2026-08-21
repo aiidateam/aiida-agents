@@ -132,7 +132,7 @@ class RunTrace:
 
         This is the corpus a claim in the answer has to be traceable to. It
         deliberately includes *all* tools, not just the documentation search:
-        a k-point spacing taken from ``build_workflow_inputs`` is grounded
+        a k-point spacing taken from ``build_process_inputs`` is grounded
         just as legitimately as one quoted from the docs.
         """
         return "\n".join(c.output for c in self.calls)
