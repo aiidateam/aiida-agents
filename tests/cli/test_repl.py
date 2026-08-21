@@ -1,4 +1,5 @@
-"""Tests for cli/repl.py: history windowing and the prompt session."""
+"""Tests for cli/repl.py: history windowing, the planner transcript, and the
+prompt session."""
 
 from __future__ import annotations
 
@@ -16,12 +17,15 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
+from aiida_agents._settings import ReplSettings
 from aiida_agents.cli.repl import (
+    _PLANNER_HISTORY_MAX_TURNS,
     _cap_history,
     _history_file,
     _key_bindings,
     _parse_agent_switch,
     _prompt_continuation,
+    _record_planner_turn,
 )
 
 
@@ -82,6 +86,95 @@ def test_cap_history_returns_input_when_within_budget() -> None:
     """Under the turn budget, the history is returned untouched."""
     messages = [m for i in range(2) for m in _turn(i)]
     assert _cap_history(messages, max_turns=5) is messages
+
+
+class TestThePlannerTranscript:
+    """What the REPL hands the planner so a follow-up can refer back a turn.
+
+    Deliberately not the specialists' histories: those carry tool calls the
+    tool-less planner cannot read. This is a plain alternating user/assistant
+    transcript, and these pin the three things the routing depends on -- the
+    user's own words, the order, and the bound.
+    """
+
+    @staticmethod
+    def _texts(history: list[ModelMessage]) -> list[str]:
+        """The transcript as plain strings, in the order the planner reads it."""
+        return [
+            part.content
+            for message in history
+            for part in message.parts
+            if isinstance(part, UserPromptPart | TextPart)
+            and isinstance(part.content, str)
+        ]
+
+    def test_a_turn_is_recorded_as_the_question_then_the_answer(self) -> None:
+        """Order is the whole point: "the former" resolves against the turn before."""
+        history: list[ModelMessage] = []
+
+        _record_planner_turn(history, "search for silicon structures", "PK 105, PK 150")
+        _record_planner_turn(history, "relax the former", "submitted PK 161")
+
+        assert self._texts(history) == [
+            "search for silicon structures",
+            "PK 105, PK 150",
+            "relax the former",
+            "submitted PK 161",
+        ]
+        assert [isinstance(message, ModelRequest) for message in history] == [
+            True,
+            False,
+            True,
+            False,
+        ], "the planner reads a user turn and an assistant turn, alternating"
+
+    def test_the_user_words_are_recorded_not_a_rendered_step_prompt(self) -> None:
+        """A multi-step turn runs a handoff prompt; the planner must see the request.
+
+        Routing the *next* turn works off what the user actually asked, so
+        recording the generated step prompt instead would have the planner
+        resolving references against words the user never wrote.
+        """
+        history: list[ModelMessage] = []
+
+        _record_planner_turn(history, "why did pk 1234 fail", "the wallclock ran out")
+
+        assert self._texts(history)[0] == "why did pk 1234 fail"
+
+    def test_the_transcript_is_bounded_as_it_is_written(self) -> None:
+        """Trimmed on write, so a long session cannot grow it without bound.
+
+        The oldest turns go first: a demonstrative refers back a turn or two,
+        and keeping every answer ever produced would put a session's worth of
+        prose in front of a routing call whose entire output is one line.
+        """
+        history: list[ModelMessage] = []
+        total = _PLANNER_HISTORY_MAX_TURNS + 3
+
+        for i in range(total):
+            _record_planner_turn(history, f"q{i}", f"a{i}")
+
+        assert len(history) == 2 * _PLANNER_HISTORY_MAX_TURNS
+        assert self._texts(history)[0] == f"q{total - _PLANNER_HISTORY_MAX_TURNS}"
+        assert self._texts(history)[-1] == f"a{total - 1}"
+
+    def test_a_short_session_keeps_every_turn(self) -> None:
+        history: list[ModelMessage] = []
+
+        for i in range(_PLANNER_HISTORY_MAX_TURNS):
+            _record_planner_turn(history, f"q{i}", f"a{i}")
+
+        assert len(history) == 2 * _PLANNER_HISTORY_MAX_TURNS
+        assert self._texts(history)[0] == "q0"
+
+    def test_the_planner_window_is_tighter_than_a_specialist_conversation(self) -> None:
+        """The two caps size different needs and must not silently converge.
+
+        ``history_max_turns`` sizes what a specialist needs to keep working;
+        the planner only has to resolve a reference back a turn or two, and its
+        docstrings sell it as one cheap round-trip.
+        """
+        assert _PLANNER_HISTORY_MAX_TURNS < ReplSettings().history_max_turns
 
 
 @pytest.mark.parametrize(

@@ -270,7 +270,10 @@ def _probe_failure_hint(settings: ModelSettings, exc: Exception) -> str | None:
 
 
 def _resolve_plan(
-    agent_type: str, question: str, settings: ModelSettings
+    agent_type: str,
+    question: str,
+    settings: ModelSettings,
+    message_history: list[ModelMessage] | None = None,
 ) -> list[Step]:  # pragma: no cover
     """Turn the ``--agent`` value and the request into the steps to run.
 
@@ -278,6 +281,10 @@ def _resolve_plan(
     honoured as a single step, so ``-a execution`` remains a way to bypass
     planning entirely -- for debugging, and for a user who already knows what
     they want.
+
+    ``message_history`` is the conversation the planner routes against, so a
+    follow-up can refer back to an earlier turn. A one-shot caller has no
+    conversation and passes nothing.
 
     The plan is printed rather than executed silently. Which specialist
     answered changes what the answer can be, and a planner that has quietly
@@ -292,7 +299,7 @@ def _resolve_plan(
     if agent_type != "auto":
         return [Step(_as_specialist(agent_type), "")]
 
-    steps = plan(question, settings)
+    steps = plan(question, settings, message_history=message_history)
     if len(steps) == 1:
         console.print(f"[dim]→ {steps[0].specialist} agent[/dim]")
     else:

@@ -13,12 +13,20 @@ import logging
 
 import pytest
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage, ModelResponse, TextPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    SystemPromptPart,
+    TextPart,
+    UserPromptPart,
+)
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
 from aiida_agents.agents.planner import (
     MAX_STEPS,
     _SPECIALISTS,
+    _SYSTEM_PROMPT,
     Specialist,
     Step,
     _as_specialist,
@@ -28,11 +36,110 @@ from aiida_agents.agents.planner import (
 )
 
 
+def _conversation() -> list[ModelMessage]:
+    """One prior turn, as the REPL records it: the user's words, then the answer.
+
+    A function rather than a module constant, so no two cases share a list.
+    """
+    return [
+        ModelRequest(parts=[UserPromptPart(content="search for silicon structures")]),
+        ModelResponse(parts=[TextPart("I found PK 105 and PK 150.")]),
+    ]
+
+
 def _replying(text: str) -> FunctionModel:
     def model_fn(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
         return ModelResponse(parts=[TextPart(text)])
 
     return FunctionModel(model_fn)
+
+
+class TestRoutingAFollowUp:
+    """What reaches the model when a follow-up is routed."""
+
+    def test_the_conversation_reaches_the_model_in_order(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """ "the former" is only routable alongside what it refers back to.
+
+        Asserted as the whole transcript rather than as membership: a history
+        replayed reversed, or twice, resolves the reference to the wrong turn
+        and would satisfy an ``in`` check either way.
+        """
+        seen: dict[str, list[ModelMessage]] = {}
+
+        def capture(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            seen["messages"] = messages
+            return ModelResponse(parts=[TextPart("analysis")])
+
+        monkeypatch.setattr(
+            "aiida_agents.agents.planner.get_planner",
+            lambda model_settings=None, ollama_settings=None: Agent(
+                FunctionModel(capture), instructions=_SYSTEM_PROMPT, output_type=str
+            ),
+        )
+
+        steps = plan("relax the former", message_history=_conversation())
+
+        assert [
+            part.content
+            for message in seen["messages"]
+            for part in message.parts
+            if isinstance(part, UserPromptPart | TextPart)
+            and isinstance(part.content, str)
+        ] == [
+            "search for silicon structures",
+            "I found PK 105 and PK 150.",
+            "relax the former",
+        ]
+        assert [step.specialist for step in steps] == ["analysis"]
+
+    @pytest.mark.parametrize(
+        "history",
+        [
+            pytest.param(None, id="first-turn"),
+            pytest.param(_conversation(), id="follow-up"),
+        ],
+    )
+    def test_the_planner_keeps_its_routing_prompt(
+        self, history: list[ModelMessage] | None
+    ) -> None:
+        """The prompt is what makes a reply parseable; without it a turn routes blind.
+
+        pydantic-ai emits a ``system_prompt`` only on a run that starts from an
+        empty history, so a planner built with one loses it the moment a
+        follow-up arrives. Both turns are checked, so neither can regress alone.
+
+        Driven through the real :func:`get_planner` with only its model swapped:
+        how that function attaches the prompt is the thing under test, and a
+        stand-in agent built here would pin this test's own wiring. Asserted on
+        the prompt arriving rather than on which field carries it.
+        """
+        seen: list[list[ModelMessage]] = []
+
+        def capture(messages: list[ModelMessage], info: AgentInfo) -> ModelResponse:
+            seen.append(messages)
+            return ModelResponse(parts=[TextPart("analysis")])
+
+        agent = get_planner()
+        with agent.override(model=FunctionModel(capture)):
+            agent.run_sync("relax the former", message_history=history)
+
+        (messages,) = seen
+        delivered = [
+            message.instructions
+            for message in messages
+            if isinstance(message, ModelRequest)
+        ] + [
+            part.content
+            for message in messages
+            for part in message.parts
+            if isinstance(part, SystemPromptPart)
+        ]
+        assert _SYSTEM_PROMPT in delivered, (
+            "the routing prompt never reached the model; it has to choose a "
+            "specialist without knowing what the specialists are"
+        )
 
 
 class TestParsingASingleStep:

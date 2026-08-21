@@ -33,6 +33,7 @@ from importlib.resources import files
 from typing import Literal
 
 from pydantic_ai import Agent
+from pydantic_ai.messages import ModelMessage
 
 from aiida_agents._settings import ModelSettings, OllamaSettings
 from aiida_agents.agents._models import get_model
@@ -85,6 +86,15 @@ def get_planner(
     tool-call JSON. A plan is the last thing that should fail to parse, so it
     is asked for as lines and parsed strictly (:func:`_parse_plan`).
 
+    The prompt is passed as ``instructions``, which pydantic-ai re-attaches to
+    every request. A ``system_prompt`` is emitted only when a run starts from
+    an empty history, on the assumption that a non-empty one already carries
+    it. That assumption does not hold here: the transcript :func:`plan` is
+    given is synthesised from plain user/assistant turns and has no system
+    prompt in it, so the routing prompt would silently vanish from the second
+    turn onward and every follow-up would be routed by a model that has never
+    been told what the specialists are.
+
     Args:
         model_settings: Model/provider config. Read from env/.env if not given.
         ollama_settings: Ollama endpoint config. Read from env/.env if not given.
@@ -94,7 +104,7 @@ def get_planner(
     """
     return Agent(
         get_model(model_settings=model_settings, ollama_settings=ollama_settings),
-        system_prompt=_SYSTEM_PROMPT,
+        instructions=_SYSTEM_PROMPT,
         output_type=str,
     )
 
@@ -186,6 +196,7 @@ def plan(
     question: str,
     model_settings: ModelSettings | None = None,
     ollama_settings: OllamaSettings | None = None,
+    message_history: list[ModelMessage] | None = None,
 ) -> list[Step]:
     """Plan how to serve one request.
 
@@ -200,12 +211,20 @@ def plan(
         question: The user's request.
         model_settings: Model/provider config. Read from env/.env if not given.
         ollama_settings: Ollama endpoint config. Read from env/.env if not given.
+        message_history: Prior conversation, so a follow-up like "the former"
+            can be routed. The planner is tool-less, so this is a plain
+            user/assistant transcript, never a specialist's tool-carrying
+            history.
 
     Returns:
         One to :data:`MAX_STEPS` steps.
     """
     try:
-        reply = get_planner(model_settings, ollama_settings).run_sync(question).output
+        reply = (
+            get_planner(model_settings, ollama_settings)
+            .run_sync(question, message_history=message_history)
+            .output
+        )
     except Exception as exc:  # noqa: BLE001 - planning must never be fatal
         logger.warning(
             "planning failed (%s); falling back to the read-only analysis agent", exc

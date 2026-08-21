@@ -259,6 +259,50 @@ class TestPlanningPicksTheRightSpecialist:
         logger.info("routed %r -> %s (expected %s)", question, chosen, expected)
         assert chosen == expected
 
+    def test_a_follow_up_routes_against_the_earlier_turn(self) -> None:
+        """ "relax the former" is only routable next to what "the former" refers to.
+
+        The one case in the suite that runs the planner with a history
+        attached, which is what makes it worth a real-model call: passing a
+        history changes how pydantic-ai assembles the request, and a planner
+        that lost its prompt on that path would still look fine to every
+        history-free case here. A planner in that state answers the question in
+        prose, the strict parser rejects the reply, and what comes back is the
+        bare ``analysis`` fallback -- which is what both assertions look for.
+        """
+        from pydantic_ai.messages import (
+            ModelMessage,
+            ModelRequest,
+            ModelResponse,
+            TextPart,
+            UserPromptPart,
+        )
+
+        from aiida_agents.agents.planner import plan
+
+        conversation: list[ModelMessage] = [
+            ModelRequest(
+                parts=[UserPromptPart(content="search for silicon structures")]
+            ),
+            ModelResponse(
+                parts=[TextPart("I found two silicon structures: PK 105 and PK 150.")]
+            ),
+        ]
+
+        steps = plan("relax the former", message_history=conversation)
+        logger.info(
+            "planned the follow-up -> %s", [(s.specialist, s.task) for s in steps]
+        )
+
+        assert steps[0].specialist == "execution", (
+            "a relaxation is execution's; falling back to analysis means the "
+            "follow-up was not routed at all"
+        )
+        assert steps[0].task, (
+            "an empty task is the fallback's shape: the planner replied with "
+            "something unparseable rather than a plan"
+        )
+
     def test_a_mixed_request_routes_to_the_read_only_specialist(self) -> None:
         """ "Diagnose then resubmit" must not jump straight to submitting.
 

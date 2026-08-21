@@ -14,7 +14,13 @@ from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.key_binding.key_processor import KeyPressEvent
 import rich_click as click
 from pydantic_ai import Agent
-from pydantic_ai.messages import ModelMessage, ModelRequest, UserPromptPart
+from pydantic_ai.messages import (
+    ModelMessage,
+    ModelRequest,
+    ModelResponse,
+    TextPart,
+    UserPromptPart,
+)
 from pydantic_ai.tools import DeferredToolRequests
 
 from aiida_agents._settings import ModelSettings, ReplSettings
@@ -52,6 +58,32 @@ def _cap_history(messages: list[ModelMessage], max_turns: int) -> list[ModelMess
         and any(isinstance(p, UserPromptPart) for p in m.parts)
     ]
     return messages[starts[-max_turns] :] if len(starts) > max_turns else messages
+
+
+#: User turns the planner's transcript keeps.
+#:
+#: Deliberately smaller than ``ReplSettings.history_max_turns``, which sizes
+#: what a *specialist* needs to keep working. The planner only has to resolve a
+#: reference back to a recent turn ("the former", "that one"), and its own
+#: docstrings sell it as one cheap round-trip -- putting a session's worth of
+#: specialist prose in front of a call whose entire output is one line would
+#: stop that being true.
+_PLANNER_HISTORY_MAX_TURNS = 3
+
+
+def _record_planner_turn(
+    history: list[ModelMessage], question: str, answer: str
+) -> None:
+    """Append one user/assistant pair, dropping the oldest turn past the cap.
+
+    Trimmed on write rather than on send, so the list itself stays bounded over
+    a long session. A plain slice suffices: this transcript strictly alternates
+    and holds no tools, whereas :func:`_cap_history` has to search for turn
+    boundaries to avoid splitting a specialist's tool-call/return pair.
+    """
+    history.append(ModelRequest(parts=[UserPromptPart(content=question)]))
+    history.append(ModelResponse(parts=[TextPart(content=answer)]))
+    del history[: -2 * _PLANNER_HISTORY_MAX_TURNS]
 
 
 def _history_file() -> Path:
@@ -234,6 +266,13 @@ def _run_repl(
     # starts that specialist where it last left off, not mid-thread on another.
     agents: dict[str, Agent] = {} if agent is None else {agent_type: agent}
     histories: dict[str, list[ModelMessage]] = {}
+    # The planner is tool-less and called fresh each turn, so a follow-up ("the
+    # former") cannot be routed without the prior turns. This clean transcript is
+    # replayed to it, kept separate from the specialists' tool-carrying
+    # histories, which the planner cannot read. Only turns that ended in an
+    # answer are recorded: one that errored, was interrupted, or ended in an
+    # approval flow leaves no text, and is dropped along with its question.
+    planner_history: list[ModelMessage] = []
     while True:
         # Ctrl-C aborts the current line (like a shell); Ctrl-D at an empty
         # prompt exits. prompt_toolkit raises KeyboardInterrupt / EOFError.
@@ -254,6 +293,7 @@ def _run_repl(
             break
         if question.lower() == "/clear":
             histories.clear()
+            planner_history.clear()
             click.echo("Conversation cleared.\n")
             continue
         if question.lower().startswith("/agent"):
@@ -262,6 +302,7 @@ def _run_repl(
                 agent_type = requested
                 agents.clear()
                 histories.clear()
+                planner_history.clear()
                 if agent_type != "auto":
                     agents[agent_type] = _build_agent(settings, profile, agent_type)
                 label = (
@@ -273,7 +314,12 @@ def _run_repl(
             continue
 
         previous: _StepResult | None = None
-        steps = _resolve_plan(agent_type, question, settings)
+        steps = _resolve_plan(
+            agent_type,
+            question,
+            settings,
+            message_history=planner_history or None,
+        )
         for index, step in enumerate(steps, start=1):
             active = step.specialist
             if active not in agents:
@@ -298,3 +344,10 @@ def _run_repl(
                     )
                 break
             previous = _StepResult(active, answer, references)
+
+        # Record this turn for the planner's next routing decision, so a
+        # reference like "the former" resolves against what was actually said.
+        # A multi-step plan records its last step's answer: that is the answer
+        # the request ended on, and the earlier steps were its working.
+        if previous is not None:
+            _record_planner_turn(planner_history, question, previous.answer)
