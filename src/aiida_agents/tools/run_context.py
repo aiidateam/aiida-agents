@@ -470,7 +470,13 @@ def _query_failed_attempts(filters: dict[str, t.Any]) -> dict[str, t.Any]:
         qb = orm.QueryBuilder()
         filters_dict: dict[str, t.Any] = {
             "attributes.process_state": "finished",
-            "attributes.exit_status": {"!=": 0},
+            # ``{"!=": 0}`` reads better and does not run: the sqlite backends
+            # implement only a subset of the JSON operators and raise
+            # ``ValueError: SQLite does not support JSON query`` for this one,
+            # so every call failed on a ``core.sqlite_dos`` profile. ``ExitCode``
+            # documents ``status`` as a positive integer, which makes ``> 0`` the
+            # same set of runs and portable across both storage backends.
+            "attributes.exit_status": {">": 0},
         }
         if workflow_type:
             filters_dict["attributes.process_label"] = _resolve_process_label(

@@ -319,6 +319,41 @@ class TestStatisticsCarryTheirUnits:
         assert res["units"]["ecutwfc"] == "Ry"
 
 
+class TestFailedAttemptsAreActuallyFound:
+    """A failed run in the profile must come back from ``failed_attempts``.
+
+    The query filtered ``exit_status`` with ``{"!=": 0}``, which the sqlite
+    storage backends do not implement for a JSON attribute: they raise
+    ``ValueError: SQLite does not support JSON query``. Every call therefore
+    failed on a ``core.sqlite_dos`` profile and reported ``attempts: []``
+    alongside the note "Real introspection of failed WorkChainNode records."
+
+    Placed above the classes that take ``aiida_profile_clean``: that fixture
+    closes the storage the session-scoped node fixtures are bound to, so
+    anything requesting one after it errors out with ``ClosedStorage``.
+    """
+
+    def test_a_failed_run_is_reported(
+        self, failed_multiply_add: Any, arithmetic_add_code: Any
+    ) -> None:
+        res = query_run_context(query_type="failed_attempts", filters={})
+
+        pks = [attempt["pk"] for attempt in res["attempts"]]
+        assert failed_multiply_add.pk in pks, (
+            f"the failed run was not reported; suggestion was: {res['suggestion']!r}"
+        )
+
+    def test_a_successful_run_is_not_reported(
+        self, multiply_add_workchain: Any, failed_multiply_add: Any
+    ) -> None:
+        """Nothing that finished with exit status 0 is a failed attempt."""
+        res = query_run_context(query_type="failed_attempts", filters={})
+
+        pks = [attempt["pk"] for attempt in res["attempts"]]
+        assert multiply_add_workchain.pk not in pks
+        assert all(attempt["exit_code"] != 0 for attempt in res["attempts"])
+
+
 class TestTheToolStatesNothingItCannotSupport:
     """No invented subject, no invented qualifier, no unfounded endorsement.
 
