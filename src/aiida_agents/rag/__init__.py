@@ -36,8 +36,8 @@ __all__ = [
     "index_docs",
     "index_plugin_corpora",
     "query_docs",
-    "search_aiida_examples",
     "search_aiida_docs",
+    "search_aiida_examples",
 ]
 
 

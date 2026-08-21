@@ -1,4 +1,4 @@
-"""Run generated Python against the read-only sandbox profile."""
+"""Run generated Python against the sandbox copy of the user's profile."""
 
 from __future__ import annotations
 

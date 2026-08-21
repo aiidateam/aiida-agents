@@ -20,7 +20,7 @@ from aiida_agents.tools.execution._spec import valid_type_names
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["list_process_entry_points", "describe_process"]
+__all__ = ["describe_process", "list_process_entry_points"]
 
 
 def list_process_entry_points(

@@ -5,10 +5,11 @@ of the tool is that it reads what a run *actually* used rather than what
 someone remembers it using --- a fixture of inputs would test the merge logic
 while removing the part worth doubting.
 
-Submission itself is not re-tested here: ``submit_process_batch`` delegates
-to ``submit_process_spec``, which has its own coverage. What is tested is the
-batch's own contract --- the cap, the rejection of an empty list, and that the
-count it reports matches what it was given.
+Submission itself is not re-tested here: ``submit_process_batch`` drives the
+same ``_prepare_submission`` / ``_run_submission`` seams as the single-spec
+path, which has its own coverage. What is tested is the batch's own contract
+--- the cap, the rejection of an empty list, and that the count it reports
+matches what it was given.
 """
 
 from __future__ import annotations

@@ -28,8 +28,8 @@ _WRITE_TOOLS = {
 }
 
 # Read-only, and still not exported. ``run_python_snippet`` executes arbitrary
-# Python; it is safe in the agents because it runs against a profile whose
-# database role cannot write, and that guarantee rests entirely on
+# Python; it is safe in the agents because it runs against a disposable copy
+# of the user's storage, and that guarantee rests entirely on
 # ``AIIDA_AGENTS_SANDBOX_PROFILE`` naming a profile someone verified with
 # ``aiida-agents sandbox check``. An MCP client cannot verify that and we
 # cannot see whether it holds, so the honest export is none: a client that

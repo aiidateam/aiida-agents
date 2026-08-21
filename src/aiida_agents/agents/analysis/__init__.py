@@ -39,7 +39,7 @@ from aiida_agents.tools import (
     query_run_context,
     search_structures,
 )
-from aiida_agents.rag import search_aiida_examples, search_aiida_docs
+from aiida_agents.rag import search_aiida_docs, search_aiida_examples
 
 # Every read tool is exposed through RetryOnToolError (see get_agent), so a
 # tool that raises -- e.g. on a hallucinated or wrong-type identifier -- comes
