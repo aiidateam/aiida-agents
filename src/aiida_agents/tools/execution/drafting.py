@@ -30,7 +30,7 @@ authority on what the keys may be.
 *A supplied node reference is resolved, then handed back as a reference.*
 Resolving proves the node exists while the agent can still do something about
 it; keeping the reference form means the drafted spec stays a plain, printable
-document that ``execute_workflow_spec`` accepts unchanged.
+document that ``submit_process_spec`` accepts unchanged.
 
 *An optional namespace nobody has touched is left out.* AiiDA validates such a
 namespace only once something in it is supplied, so its inner required ports are
@@ -63,7 +63,7 @@ from aiida_agents.tools.execution._spec import (
     to_spec_value,
     valid_type_names,
 )
-from aiida_agents.tools.execution.schemas import WorkflowSpec
+from aiida_agents.tools.execution.schemas import SubmissionSpec
 
 logger = logging.getLogger(__name__)
 
@@ -239,8 +239,8 @@ def draft_process_inputs(
             )
         ),
     ] = None,
-) -> WorkflowSpec:
-    """Draft a WorkflowSpec from a process's own input ports, for any process.
+) -> SubmissionSpec:
+    """Draft a SubmissionSpec from a process's own input ports, for any process.
 
     Use this whenever ``describe_process`` reports ``has_protocol_builder:
     false``. It reads the same ``Process.spec()`` that validates the eventual
@@ -254,7 +254,7 @@ def draft_process_inputs(
     ``query_run_context`` for a pseudopotential family or a proven parameter,
     ``search_aiida_docs`` for what a port means), and call again with them
     added. When ``metadata['ready_to_submit']`` is true, the spec has every
-    required input and can go to ``execute_workflow_spec``.
+    required input and can go to ``submit_process_spec``.
 
     What this tool does *not* do is choose physics for you. It fills in only the
     defaults the process itself declares; a required cutoff with no default
@@ -269,7 +269,7 @@ def draft_process_inputs(
         inputs: Values you already have, nested as the process declares them.
 
     Returns:
-        A ``WorkflowSpec`` whose ``metadata`` carries ``missing_required`` (the
+        A ``SubmissionSpec`` whose ``metadata`` carries ``missing_required`` (the
         required ports still unfilled, each with its accepted types and help
         text) and ``ready_to_submit``.
 
@@ -297,7 +297,7 @@ def draft_process_inputs(
     )
 
     return {
-        "workflow_type": entry_point,
+        "entry_point": entry_point,
         "inputs": drafted,
         "metadata": {
             "source": "process_spec",

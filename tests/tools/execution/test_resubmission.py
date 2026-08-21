@@ -1,12 +1,12 @@
-"""Tests for ``build_resubmission_spec`` and ``execute_workflow_batch``.
+"""Tests for ``build_resubmission_spec`` and ``submit_process_batch``.
 
 Rebuilding is tested against real finished processes, because the whole point
 of the tool is that it reads what a run *actually* used rather than what
 someone remembers it using --- a fixture of inputs would test the merge logic
 while removing the part worth doubting.
 
-Submission itself is not re-tested here: ``execute_workflow_batch`` delegates
-to ``execute_workflow_spec``, which has its own coverage. What is tested is the
+Submission itself is not re-tested here: ``submit_process_batch`` delegates
+to ``submit_process_spec``, which has its own coverage. What is tested is the
 batch's own contract --- the cap, the rejection of an empty list, and that the
 count it reports matches what it was given.
 """
@@ -23,7 +23,7 @@ from aiida_agents.tools.execution import resubmission
 from aiida_agents.tools.execution.resubmission import (
     MAX_BATCH,
     build_resubmission_spec,
-    execute_workflow_batch,
+    submit_process_batch,
 )
 
 
@@ -35,7 +35,7 @@ class TestRebuildingFromTheNode:
     ) -> None:
         spec = build_resubmission_spec(str(multiply_add_workchain.pk))
 
-        assert spec["workflow_type"] == "core.arithmetic.multiply_add"
+        assert spec["entry_point"] == "core.arithmetic.multiply_add"
 
     def test_every_original_input_is_carried_over(
         self, multiply_add_workchain: orm.WorkChainNode
@@ -80,7 +80,7 @@ class TestRebuildingFromTheNode:
 
         spec = build_resubmission_spec(str(multiply_add_workchain.pk))
 
-        resolved = _resolve_inputs(spec["workflow_type"], spec["inputs"])
+        resolved = _resolve_inputs(spec["entry_point"], spec["inputs"])
         assert set(resolved) >= {"x", "y", "z", "code"}
 
 
@@ -140,27 +140,25 @@ class TestBatchContract:
 
     def test_an_empty_batch_is_rejected(self) -> None:
         with pytest.raises(ValueError, match="non-empty list"):
-            execute_workflow_batch([])
+            submit_process_batch([])
 
     @pytest.mark.parametrize("bad", [None, "not a list", {}])
     def test_a_non_list_is_rejected(self, bad: t.Any) -> None:
         with pytest.raises(ValueError, match="non-empty list"):
-            execute_workflow_batch(bad)
+            submit_process_batch(bad)
 
     def test_a_batch_over_the_cap_is_refused_with_the_reason(self) -> None:
         """An approval prompt nobody reads is not an approval."""
-        specs = [{"workflow_type": "core.arithmetic.add", "inputs": {}}] * (
-            MAX_BATCH + 1
-        )
+        specs = [{"entry_point": "core.arithmetic.add", "inputs": {}}] * (MAX_BATCH + 1)
 
         with pytest.raises(ValueError, match=f"capped at {MAX_BATCH}"):
-            execute_workflow_batch(specs)  # type: ignore[arg-type]
+            submit_process_batch(specs)  # type: ignore[arg-type]
 
     def test_the_cap_itself_is_accepted(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """Off-by-one in the other direction: exactly MAX_BATCH is fine."""
         _stub_submission(monkeypatch, pk=1)
 
-        result = execute_workflow_batch([{"workflow_type": "x"}] * MAX_BATCH)
+        result = submit_process_batch([{"entry_point": "x"}] * MAX_BATCH)
 
         assert result["requested"] == MAX_BATCH
         assert result["submitted"] == MAX_BATCH
@@ -171,7 +169,7 @@ class TestBatchContract:
         """So a trimmed batch cannot read as one that ran whole."""
         _stub_submission(monkeypatch, pk=7)
 
-        result = execute_workflow_batch([{"workflow_type": "x"}] * 3)
+        result = submit_process_batch([{"entry_point": "x"}] * 3)
 
         assert result["requested"] == 3
         assert [r["pk"] for r in result["results"]] == [7, 7, 7]
@@ -187,7 +185,7 @@ def _stub_submission(
     """Stub the three seams a batch passes through, optionally failing at one.
 
     Deliberately stubs `_validate_spec`/`_prepare_submission`/`_run_submission`
-    rather than `execute_workflow_spec`. The old tests stubbed the latter,
+    rather than `submit_process_spec`. The old tests stubbed the latter,
     which is exactly why the partial-submit bug survived them: with validation
     and submission behind one stub, no test could tell whether the batch
     validated everything before submitting anything.
@@ -234,7 +232,7 @@ class TestTheBatchIsAllOrNothing:
     """The guarantee the docstring makes, which the code did not keep.
 
     Issue #76. The implementation was
-    `[execute_workflow_spec(spec) for spec in specs]`, and that call validates
+    `[submit_process_spec(spec) for spec in specs]`, and that call validates
     *and submits* each spec in turn. A bad spec at position N therefore left
     1..N-1 already on the daemon and then raised, returning no BatchResult at
     all -- so the user who approved twenty got fourteen running and a traceback
@@ -248,7 +246,7 @@ class TestTheBatchIsAllOrNothing:
         trace: list[str] = []
         _stub_submission(monkeypatch, trace=trace)
 
-        execute_workflow_batch([{"workflow_type": "x"}] * 3)
+        submit_process_batch([{"entry_point": "x"}] * 3)
 
         assert trace == [
             "prepare 1",
@@ -267,7 +265,7 @@ class TestTheBatchIsAllOrNothing:
         _stub_submission(monkeypatch, fail_prepare_at=3, trace=trace)
 
         with pytest.raises(ValueError):
-            execute_workflow_batch([{"workflow_type": "x"}] * 5)
+            submit_process_batch([{"entry_point": "x"}] * 5)
 
         assert not [step for step in trace if step.startswith("run")]
 
@@ -278,7 +276,7 @@ class TestTheBatchIsAllOrNothing:
         _stub_submission(monkeypatch, fail_prepare_at=3)
 
         with pytest.raises(ValueError, match="Spec 3 of 5") as exc_info:
-            execute_workflow_batch([{"workflow_type": "x"}] * 5)
+            submit_process_batch([{"entry_point": "x"}] * 5)
 
         assert "none of the batch was submitted" in str(exc_info.value)
 
@@ -295,7 +293,7 @@ class TestTheBatchIsAllOrNothing:
         _stub_submission(monkeypatch, pk=42, fail_run_at=3)
 
         with pytest.raises(RuntimeError, match="Submitted 2 of 4") as exc_info:
-            execute_workflow_batch([{"workflow_type": "x"}] * 4)
+            submit_process_batch([{"entry_point": "x"}] * 4)
 
         message = str(exc_info.value)
         assert "42, 42" in message, "the pks already running must be recoverable"

@@ -24,7 +24,7 @@ from aiida import orm
 from aiida_pseudo.groups.family.sssp import SsspFamily
 
 from aiida_agents.tools.execution.ranges import check_cutoffs_against_pseudos
-from aiida_agents.tools.execution.schemas import WorkflowSpec
+from aiida_agents.tools.execution.schemas import SubmissionSpec
 
 FAMILY_LABEL = "SSSP/1.3/PBE/efficiency"
 RECOMMENDED_WFC = 30.0
@@ -59,8 +59,8 @@ def _spec(
     nested: bool = False,
     family_label: str | None = FAMILY_LABEL,
     card: str = "SYSTEM",
-) -> WorkflowSpec:
-    """A spec in the shape ``execute_workflow_spec`` accepts."""
+) -> SubmissionSpec:
+    """A spec in the shape ``submit_process_spec`` accepts."""
     parameters = {card: {"ecutwfc": ecutwfc, "ecutrho": RECOMMENDED_RHO}}
     inner: dict[str, t.Any] = {"parameters": parameters}
     inputs: dict[str, t.Any] = {"structure": {"pk": structure.pk}}
@@ -70,8 +70,8 @@ def _spec(
         inputs["base"] = {"pw": inner}
     else:
         inputs.update(inner)
-    spec: WorkflowSpec = {
-        "workflow_type": "quantumespresso.pw.relax",
+    spec: SubmissionSpec = {
+        "entry_point": "quantumespresso.pw.relax",
         "inputs": inputs,
     }
     return spec
@@ -179,8 +179,8 @@ class TestWhenItCannotCompare:
     def test_a_spec_with_no_structure_yields_nothing(
         self, pseudo_family: SsspFamily
     ) -> None:
-        spec: WorkflowSpec = {
-            "workflow_type": "quantumespresso.pw.relax",
+        spec: SubmissionSpec = {
+            "entry_point": "quantumespresso.pw.relax",
             "inputs": {
                 "pseudo_family": FAMILY_LABEL,
                 "parameters": {"SYSTEM": {"ecutwfc": 12.0}},
@@ -193,8 +193,8 @@ class TestWhenItCannotCompare:
         self, pseudo_family: SsspFamily
     ) -> None:
         """A bad pk is submit_workflow's error to raise, not this one's."""
-        spec: WorkflowSpec = {
-            "workflow_type": "quantumespresso.pw.relax",
+        spec: SubmissionSpec = {
+            "entry_point": "quantumespresso.pw.relax",
             "inputs": {
                 "structure": {"pk": 999999},
                 "pseudo_family": FAMILY_LABEL,
@@ -230,9 +230,9 @@ class TestMalformedInput:
         "spec",
         [
             {},
-            {"workflow_type": "x"},
-            {"workflow_type": "x", "inputs": None},
-            {"workflow_type": "x", "inputs": []},
+            {"entry_point": "x"},
+            {"entry_point": "x", "inputs": None},
+            {"entry_point": "x", "inputs": []},
         ],
     )
     def test_a_spec_with_no_usable_inputs_yields_nothing(self, spec: t.Any) -> None:

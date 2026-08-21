@@ -132,7 +132,7 @@ def wait_for_process(
 
     Args:
         identifier: The process's pk or uuid, as returned by
-            ``execute_workflow_spec``.
+            ``submit_process_spec``.
         timeout_seconds: How long to wait before reporting it unfinished.
 
     Returns:

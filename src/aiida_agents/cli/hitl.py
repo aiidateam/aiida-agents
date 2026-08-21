@@ -9,7 +9,7 @@ Approved calls run *here* rather than by handing them back to pydantic-ai, which
 would execute them on a worker thread: AiiDA's storage is thread-bound, so a
 write from the worker thread raises a cross-thread error. Every approval-gated
 tool therefore needs a main-thread executor, not just the submissions
-(``submit_workflow`` / ``execute_workflow_spec``): ``_run_approvals`` calls the
+(``submit_workflow`` / ``submit_process_spec``): ``_run_approvals`` calls the
 tool's own registered function, and submissions get an extra resolve-and-preview
 pass on top (see ``_triage_submissions``). Without that, a non-submission write
 tool -- ``import_structure``, or any write tool a plugin contributes -- is
@@ -40,27 +40,27 @@ _MAX_APPROVAL_ROUNDS = 10
 # The approval-gated write tools that resolve to an AiiDA submission. Both funnel
 # through the same resolve/validate/submit path; they differ only in where the
 # entry point and inputs sit in the tool-call args (see ``_submission_args``).
-_SUBMIT_TOOLS = ("submit_workflow", "execute_workflow_spec")
+_SUBMIT_TOOLS = ("submit_workflow", "submit_process_spec")
 
 # The batch write tool. One tool call carries many submissions, so it is one
 # approval covering the whole set -- which only means anything if the prompt
 # enumerates what is in it and every spec has been validated first.
-_BATCH_TOOL = "execute_workflow_batch"
+_BATCH_TOOL = "submit_process_batch"
 
 
 def _submission_args(call: Any) -> tuple[str, dict[str, Any]]:
     """Extract ``(entry_point, inputs)`` from a submit tool call.
 
-    ``submit_workflow`` carries them at the top level; ``execute_workflow_spec``
-    nests them under ``validated_spec`` as ``workflow_type`` / ``inputs``. A
-    malformed ``execute_workflow_spec`` payload yields empty values, which
-    ``_prepare_submission`` then rejects with an actionable message.
+    ``submit_workflow`` carries them at the top level; ``submit_process_spec``
+    nests them under ``spec``. A malformed ``submit_process_spec`` payload
+    yields empty values, which ``_prepare_submission`` then rejects with an
+    actionable message.
     """
     args = call.args_as_dict()
-    if call.tool_name == "execute_workflow_spec":
-        spec = args.get("validated_spec", {})
+    if call.tool_name == "submit_process_spec":
+        spec = args.get("spec", {})
         if isinstance(spec, dict):
-            return spec.get("workflow_type", ""), spec.get("inputs", {})
+            return spec.get("entry_point", ""), spec.get("inputs", {})
         return "", {}
     return args.get("entry_point", ""), args.get("inputs", {})
 
@@ -104,7 +104,7 @@ def _triage_submissions(
     Returns ``(auto_denials, previews)``:
 
     * ``auto_denials`` maps a tool-call id to a ``ToolDenied`` for any submit
-      tool call (``submit_workflow`` / ``execute_workflow_spec``) whose inputs
+      tool call (``submit_workflow`` / ``submit_process_spec``) whose inputs
       fail resolution or validation. These go straight back to the model so it
       can correct its own mistakes without bothering the user.
     * ``previews`` lists ``(call, process_class, resolved)`` for the calls the
@@ -128,14 +128,14 @@ def _triage_submissions(
             if not isinstance(specs, list) or not specs:
                 auto[call.tool_call_id] = ToolDenied(
                     "Batch rejected before reaching the user: 'specs' must be a "
-                    "non-empty list of WorkflowSpec dictionaries."
+                    "non-empty list of SubmissionSpec dictionaries."
                 )
                 continue
             resolved_batch: list[tuple[str, dict[str, Any]]] = []
             failure: str | None = None
             for index, spec in enumerate(specs, start=1):
                 entry_point = (
-                    spec.get("workflow_type") if isinstance(spec, dict) else None
+                    spec.get("entry_point") if isinstance(spec, dict) else None
                 )
                 inputs = spec.get("inputs") if isinstance(spec, dict) else None
                 try:
@@ -189,7 +189,7 @@ def _range_warnings(call: Any) -> list[str]:
         return []
     try:
         findings = check_cutoffs_against_pseudos(
-            {"workflow_type": entry_point, "inputs": inputs}
+            {"entry_point": entry_point, "inputs": inputs}
         )
     except Exception:
         logger.debug("range check failed for %s", entry_point, exc_info=True)
@@ -252,8 +252,8 @@ def _run_approvals(
     }
     for call, process_class, resolved, _batch in previews:
         if process_class is not None and resolved is not None:
-            # Not args_as_dict()["entry_point"]: execute_workflow_spec nests it
-            # under validated_spec, so only _submission_args reads both shapes.
+            # Not args_as_dict()["entry_point"]: submit_process_spec nests it
+            # under spec, so only _submission_args reads both shapes.
             entry_point, _ = _submission_args(call)
             try:
                 res = _run_submission(entry_point, process_class, resolved)
@@ -262,7 +262,7 @@ def _run_approvals(
                 outcomes[call.tool_call_id] = {"error": str(exc)}
                 continue
             click.echo(
-                f"\n✅ Submitted {res['workflow']}: pk={res['pk']}, state={res['state']}"
+                f"\n✅ Submitted {res['entry_point']}: pk={res['pk']}, state={res['state']}"
             )
             outcomes[call.tool_call_id] = res
             continue

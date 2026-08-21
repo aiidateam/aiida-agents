@@ -56,13 +56,13 @@ class TestSubmitWorkflowRequiresApproval:
         # Both tools that touch the database: the submission itself, and the
         # structure import that writes a StructureData from a file on disk.
         assert set(function_toolset.tools) == {
-            "execute_workflow_spec",
-            "execute_workflow_batch",
+            "submit_process_spec",
+            "submit_process_batch",
             "import_structure",
         }
         for name in (
-            "execute_workflow_spec",
-            "execute_workflow_batch",
+            "submit_process_spec",
+            "submit_process_batch",
             "import_structure",
         ):
             assert function_toolset.tools[name].requires_approval is True
@@ -85,7 +85,7 @@ class TestSubmitWorkflowRequiresApproval:
         assert isinstance(read_toolset, FunctionToolset)
         assert set(read_toolset.tools) == READ_TOOL_NAMES
         assert "submit_workflow" not in read_toolset.tools
-        assert "execute_workflow_spec" not in read_toolset.tools
+        assert "submit_process_spec" not in read_toolset.tools
 
 
 MULTIPLY_ADD = "core.arithmetic.multiply_add"
@@ -111,7 +111,7 @@ Si2 0.5 0.5 0.5
 
 class TestSubmissionArgs:
     """Both write tools reduce to the same ``(entry_point, inputs)`` pair, but
-    ``execute_workflow_spec`` nests them under ``validated_spec`` while
+    ``submit_process_spec`` nests them under ``spec`` while
     ``submit_workflow`` carries them at the top level.
     """
 
@@ -125,14 +125,14 @@ class TestSubmissionArgs:
         )
         assert _submission_args(call) == (MULTIPLY_ADD, {"x": 1})
 
-    def test_execute_workflow_spec_reads_nested_spec(self) -> None:
+    def test_submit_process_spec_reads_nested_spec(self) -> None:
         from aiida_agents.cli.hitl import _submission_args
 
         call = ToolCallPart(
-            tool_name="execute_workflow_spec",
+            tool_name="submit_process_spec",
             args={
-                "validated_spec": {
-                    "workflow_type": "aiida.workflows:PwRelaxWorkChain",
+                "spec": {
+                    "entry_point": "aiida.workflows:PwRelaxWorkChain",
                     "inputs": {"structure": 1},
                 }
             },
@@ -143,15 +143,13 @@ class TestSubmissionArgs:
             {"structure": 1},
         )
 
-    def test_execute_workflow_spec_missing_spec_yields_empty(self) -> None:
+    def test_submit_process_spec_missing_spec_yields_empty(self) -> None:
         """A malformed payload yields empty values, which _prepare_submission
         then rejects with an actionable message (rather than raising here).
         """
         from aiida_agents.cli.hitl import _submission_args
 
-        call = ToolCallPart(
-            tool_name="execute_workflow_spec", args={}, tool_call_id="c1"
-        )
+        call = ToolCallPart(tool_name="submit_process_spec", args={}, tool_call_id="c1")
         assert _submission_args(call) == ("", {})
 
 
@@ -216,16 +214,16 @@ class TestTriageSubmissions:
 
         assert previews == [_Preview(call, None, None)]
 
-    def test_invalid_execute_workflow_spec_is_denied_naming_its_tool(self) -> None:
+    def test_invalid_submit_process_spec_is_denied_naming_its_tool(self) -> None:
         """The execution agent's write tool goes through the same triage: an
         invalid one is denied without prompting, and the denial names the tool
-        the model must retry (execute_workflow_spec, not submit_workflow).
+        the model must retry (submit_process_spec, not submit_workflow).
         """
         call = ToolCallPart(
-            tool_name="execute_workflow_spec",
+            tool_name="submit_process_spec",
             args={
-                "validated_spec": {
-                    "workflow_type": MULTIPLY_ADD,
+                "spec": {
+                    "entry_point": MULTIPLY_ADD,
                     "inputs": {"x": 1, "y": 2},  # missing z / code
                 }
             },
@@ -235,19 +233,19 @@ class TestTriageSubmissions:
 
         assert previews == []
         assert isinstance(auto["c1"], ToolDenied)
-        assert "execute_workflow_spec again" in auto["c1"].message
+        assert "submit_process_spec again" in auto["c1"].message
 
-    def test_valid_execute_workflow_spec_is_queued_for_the_user(
+    def test_valid_submit_process_spec_is_queued_for_the_user(
         self, arithmetic_add_code: orm.InstalledCode
     ) -> None:
-        """A valid execute_workflow_spec resolves through its nested spec and
+        """A valid submit_process_spec resolves through its nested spec and
         reaches the confirmation prompt, exactly like submit_workflow.
         """
         call = ToolCallPart(
-            tool_name="execute_workflow_spec",
+            tool_name="submit_process_spec",
             args={
-                "validated_spec": {
-                    "workflow_type": MULTIPLY_ADD,
+                "spec": {
+                    "entry_point": MULTIPLY_ADD,
                     "inputs": {
                         "x": 2,
                         "y": 3,
@@ -293,7 +291,7 @@ def test_run_approvals_records_one_outcome_per_call(
     ) -> dict[str, object]:
         if entry_point == "boom":
             raise RuntimeError("submit exploded")
-        return {"workflow": entry_point, "pk": 7, "state": "created"}
+        return {"entry_point": entry_point, "pk": 7, "state": "created"}
 
     monkeypatch.setattr(
         "aiida_agents.tools.execution.submit._run_submission", _fake_run_submission
@@ -320,7 +318,7 @@ def test_run_approvals_records_one_outcome_per_call(
 
     assert outcomes == {
         "denied": {"rejected": "bad inputs"},
-        "ok": {"workflow": "core.arithmetic.add", "pk": 7, "state": "created"},
+        "ok": {"entry_point": "core.arithmetic.add", "pk": 7, "state": "created"},
         "err": {"error": "submit exploded"},
         "skip": {"skipped": "other"},
     }

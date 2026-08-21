@@ -39,7 +39,7 @@ from pydantic import Field
 from typing_extensions import TypedDict
 
 from aiida_agents.tools.execution._spec import is_reference, resolve_reference
-from aiida_agents.tools.execution.schemas import WorkflowSpec
+from aiida_agents.tools.execution.schemas import SubmissionSpec
 
 logger = logging.getLogger(__name__)
 
@@ -221,11 +221,11 @@ def _recommended(
 
 def check_cutoffs_against_pseudos(
     spec: t.Annotated[
-        WorkflowSpec,
+        SubmissionSpec,
         Field(
             description=(
-                "The WorkflowSpec to check, exactly as it would go to "
-                "execute_workflow_spec. It must name a structure and a "
+                "The SubmissionSpec to check, exactly as it would go to "
+                "submit_process_spec. It must name a structure and a "
                 "pseudopotential family (or carry resolved pseudos), since the "
                 "recommendation is per element."
             )
@@ -234,7 +234,7 @@ def check_cutoffs_against_pseudos(
 ) -> list[RangeFinding]:
     """Check a spec's cutoffs against what its pseudopotentials were converged for.
 
-    Call this before ``execute_workflow_spec`` whenever you have set or changed
+    Call this before ``submit_process_spec`` whenever you have set or changed
     a cutoff --- particularly one you took from historical runs, which may have
     used a different pseudopotential family than this spec does.
 
@@ -255,7 +255,7 @@ def check_cutoffs_against_pseudos(
     inventing a bound for it.
 
     Args:
-        spec: The workflow spec about to be submitted.
+        spec: The process spec about to be submitted.
 
     Returns:
         One finding per cutoff that differs materially from the recommendation,

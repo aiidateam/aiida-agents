@@ -41,7 +41,7 @@ from typing_extensions import TypedDict
 from aiida_agents.tools._orm import WrongNodeType, load_node
 from aiida_agents.tools._types import Identifier, SubmitResult
 from aiida_agents.tools.execution._spec import to_spec_value
-from aiida_agents.tools.execution.schemas import WorkflowSpec
+from aiida_agents.tools.execution.schemas import SubmissionSpec
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ __all__ = [
     "MAX_BATCH",
     "BatchResult",
     "build_resubmission_spec",
-    "execute_workflow_batch",
+    "submit_process_batch",
 ]
 
 #: Most submissions one batch may carry. Set by what a person will actually
@@ -58,12 +58,12 @@ MAX_BATCH = 20
 
 # AiiDA stores a nested input port as a flat link label joined by this
 # separator, and rebuilding the nesting from it is what turns a node's links
-# back into something ``execute_workflow_spec`` accepts.
+# back into something ``submit_process_spec`` accepts.
 _NAMESPACE_SEPARATOR = "__"
 
 
 class BatchResult(TypedDict):
-    """Return shape of ``execute_workflow_batch``.
+    """Return shape of ``submit_process_batch``.
 
     ``submitted`` is reported alongside the count the caller asked for, so a
     batch that was trimmed or partially rejected cannot be read as a batch that
@@ -120,7 +120,7 @@ def build_resubmission_spec(
             )
         ),
     ] = None,
-) -> WorkflowSpec:
+) -> SubmissionSpec:
     """Rebuild the spec that would re-run a past process, with changes applied.
 
     Use this for anything of the form "run that again, but ...". It reads the
@@ -141,8 +141,8 @@ def build_resubmission_spec(
         overrides: Nested changes to merge into the original inputs.
 
     Returns:
-        A ``WorkflowSpec`` for the same process type, ready for
-        ``execute_workflow_spec`` or ``execute_workflow_batch``.
+        A ``SubmissionSpec`` for the same process type, ready for
+        ``submit_process_spec`` or ``submit_process_batch``.
 
     Raises:
         WrongNodeType: If the identifier names a data node rather than a process.
@@ -181,19 +181,19 @@ def build_resubmission_spec(
         inputs = _deep_merge(inputs, overrides)
 
     return {
-        "workflow_type": entry_point,
+        "entry_point": entry_point,
         "inputs": inputs,
         "metadata": {"source": "resubmission", "resubmitted_from": node.pk},
     }
 
 
-def execute_workflow_batch(
+def submit_process_batch(
     specs: t.Annotated[
-        list[WorkflowSpec],
+        list[SubmissionSpec],
         Field(
             description=(
                 "The submissions to run, each in the same shape "
-                "execute_workflow_spec accepts. All are approved together, or "
+                "submit_process_spec accepts. All are approved together, or "
                 f"none are. At most {MAX_BATCH}."
             )
         ),
@@ -203,7 +203,7 @@ def execute_workflow_batch(
 
     Use this for a request about a *set* --- "resubmit the ones that failed",
     "run all of these with a higher cutoff" --- rather than calling
-    ``execute_workflow_spec`` in a loop, which would ask the user to approve
+    ``submit_process_spec`` in a loop, which would ask the user to approve
     each one separately and turn review into a formality.
 
     Build each spec with ``build_resubmission_spec`` when re-running something,
@@ -216,7 +216,7 @@ def execute_workflow_batch(
     again rather than dropping it silently.
 
     Args:
-        specs: One ``WorkflowSpec`` per submission.
+        specs: One ``SubmissionSpec`` per submission.
 
     Returns:
         How many were requested, how many were submitted, and each result's pk.
@@ -225,9 +225,9 @@ def execute_workflow_batch(
         ValueError: If the list is empty, over ``MAX_BATCH``, or not a list of
             specs.
     """
-    logger.debug("execute_workflow_batch(%d specs)", len(specs) if specs else 0)
+    logger.debug("submit_process_batch(%d specs)", len(specs) if specs else 0)
     if not isinstance(specs, list) or not specs:
-        msg = "specs must be a non-empty list of WorkflowSpec dictionaries."
+        msg = "specs must be a non-empty list of SubmissionSpec dictionaries."
         raise ValueError(msg)
     if len(specs) > MAX_BATCH:
         msg = (
@@ -242,32 +242,32 @@ def execute_workflow_batch(
     from aiida_agents.tools.execution.submit import _prepare_submission, _run_submission
 
     # Every spec is resolved and validated before any of them is submitted.
-    # The obvious loop --- `[execute_workflow_spec(spec) for spec in specs]` ---
+    # The obvious loop --- `[submit_process_spec(spec) for spec in specs]` ---
     # validated and submitted each in turn, so a bad spec at position N left
     # 1..N-1 already on the daemon and then raised, returning no BatchResult at
     # all. The user was told "all are approved together, or none are", approved
     # twenty, and got fourteen plus a traceback naming none of them.
     prepared = []
     for position, spec in enumerate(specs, start=1):
-        workflow_type, inputs = _validate_spec(spec)
+        entry_point, inputs = _validate_spec(spec)
         try:
-            process_class, resolved = _prepare_submission(workflow_type, inputs)
+            process_class, resolved = _prepare_submission(entry_point, inputs)
         except Exception as exc:
             # Name the position as well as the reason: the specs were built
             # from a query, so "the ninth one" is how the user finds it.
             msg = (
-                f"Spec {position} of {len(specs)} ({workflow_type}) is not "
+                f"Spec {position} of {len(specs)} ({entry_point}) is not "
                 f"submittable, so none of the batch was submitted: {exc}"
             )
             raise ValueError(msg) from exc
-        prepared.append((workflow_type, process_class, resolved))
+        prepared.append((entry_point, process_class, resolved))
 
     results = []
-    for position, (workflow_type, process_class, resolved) in enumerate(
+    for position, (entry_point, process_class, resolved) in enumerate(
         prepared, start=1
     ):
         try:
-            results.append(_run_submission(workflow_type, process_class, resolved))
+            results.append(_run_submission(entry_point, process_class, resolved))
         except Exception as exc:
             # Validation is all-or-nothing; submission cannot be. There is no
             # transaction across the daemon, so if the engine fails partway the
@@ -278,7 +278,7 @@ def execute_workflow_batch(
             submitted = ", ".join(str(result.get("pk")) for result in results)
             msg = (
                 f"Submitted {len(results)} of {len(specs)} before spec "
-                f"{position} ({workflow_type}) failed: {exc}. "
+                f"{position} ({entry_point}) failed: {exc}. "
                 f"Already running: {submitted or 'none'}. "
                 "Do not resubmit those; check them with get_process_status."
             )

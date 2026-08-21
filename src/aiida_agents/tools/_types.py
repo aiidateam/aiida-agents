@@ -196,7 +196,7 @@ class SubmitResult(TypedDict):
 
     pk: int
     uuid: str
-    workflow: str
+    entry_point: str
     state: str
 
 

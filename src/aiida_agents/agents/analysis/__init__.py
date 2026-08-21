@@ -6,7 +6,7 @@ querying processes, nodes, and crystal structures, plus documentation search.
 
 It holds no write tool: submitting is the Execution agent's responsibility
 (``agents.execution``), which reaches the database through its own HITL-gated
-``execute_workflow_spec`` after discovering and validating a spec. An installed
+``submit_process_spec`` after discovering and validating a spec. An installed
 plugin may still contribute a write tool, which is registered here behind the
 same approval gate (ADR-08).
 """

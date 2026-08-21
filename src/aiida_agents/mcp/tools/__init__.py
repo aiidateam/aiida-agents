@@ -36,7 +36,7 @@ from aiida_agents.tools import (
 
 # The write tools are intentionally NOT registered: they reach the database, so
 # they go only through the HITL-gated agents (ADR-08). ``submit_workflow`` lives
-# in ``aiida_agents.tools.execution.submit`` and ``execute_workflow_spec`` (which
+# in ``aiida_agents.tools.execution.submit`` and ``submit_process_spec`` (which
 # delegates to it) in ``...execution.spec_execution``; the Execution agent
 # imports the latter directly.
 

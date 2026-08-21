@@ -87,13 +87,13 @@ class TestBuildProcessInputs:
     def test_builds_a_spec_from_the_protocol_builder(
         self, arithmetic_add_code: orm.InstalledCode
     ) -> None:
-        """The populated builder serialises to a ready-to-use WorkflowSpec."""
+        """The populated builder serialises to a ready-to-use SubmissionSpec."""
         spec = build_process_inputs(
             ADD_EP,
             protocol="fast",
             protocol_kwargs={"code": {"label": arithmetic_add_code.full_label}},
         )
-        assert spec["workflow_type"] == ADD_EP
+        assert spec["entry_point"] == ADD_EP
         assert spec["inputs"]["x"] == 2
         assert spec["inputs"]["y"] == 3
         assert spec["inputs"]["code"] == {"pk": arithmetic_add_code.pk}
@@ -103,7 +103,7 @@ class TestBuildProcessInputs:
     def test_reference_by_pk_and_uuid_also_resolve(
         self, arithmetic_add_code: orm.InstalledCode
     ) -> None:
-        """The same {"pk"|"uuid"|"label"} convention as execute_workflow_spec."""
+        """The same {"pk"|"uuid"|"label"} convention as submit_process_spec."""
         for ref in (
             {"pk": arithmetic_add_code.pk},
             {"uuid": arithmetic_add_code.uuid},
@@ -142,7 +142,7 @@ class TestBuildProcessInputs:
     @pytest.mark.usefixtures("with_fake_protocol")
     def test_unresolvable_reference_names_the_kwarg(self) -> None:
         """A bad node reference in protocol_kwargs fails with the same clarity as
-        execute_workflow_spec's own reference resolution."""
+        submit_process_spec's own reference resolution."""
         with pytest.raises(ValueError, match=r"No node found with pk=.*'code'"):
             build_process_inputs(ADD_EP, protocol_kwargs={"code": {"pk": 10**9}})
 
@@ -185,14 +185,14 @@ class TestBuildProcessInputs:
         """The returned spec is not just shaped right -- fed back through the
         existing resolution/submission pipeline, it actually runs and produces
         the correct result. Pins the contract between build_process_inputs and
-        execute_workflow_spec/submit_workflow, not just build_process_inputs
+        submit_process_spec/submit_workflow, not just build_process_inputs
         in isolation.
         """
         spec = build_process_inputs(
             ADD_EP,
             protocol_kwargs={"code": {"label": arithmetic_add_code.full_label}},
         )
-        resolved = _resolve_inputs(spec["workflow_type"], spec["inputs"])
+        resolved = _resolve_inputs(spec["entry_point"], spec["inputs"])
         _, node = run_get_node(ArithmeticAddCalculation, **resolved)
         assert node.outputs.sum.value == 5
 

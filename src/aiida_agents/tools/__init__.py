@@ -32,8 +32,9 @@ draft_process_inputs, list_codes, query_run_context
     ``Process.spec()`` introspection, input pre-population from a protocol
     builder or (for a process without one) from the spec itself,
     installed-code discovery, and historical context from the Analysis agent.
-    The write path (``execute_workflow_spec``/``submit_workflow``) is
-    intentionally not re-exported here.
+    The write path (``submit_process_spec``, ``submit_process_batch``,
+    ``submit_workflow`` and ``import_structure``) is intentionally not
+    re-exported here.
 """
 
 from __future__ import annotations

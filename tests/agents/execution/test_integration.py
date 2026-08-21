@@ -14,8 +14,8 @@ from aiida_agents.tools.execution.introspection import (
     describe_process,
     list_process_entry_points,
 )
-from aiida_agents.tools.execution.schemas import WorkflowSpec
-from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
+from aiida_agents.tools.execution.schemas import SubmissionSpec
+from aiida_agents.tools.execution.spec_execution import submit_process_spec
 
 
 class TestFullWorkflowIntegration:
@@ -48,14 +48,14 @@ class TestFullWorkflowIntegration:
         assert "y" in schema["required_inputs"]
         assert "code" in schema["required_inputs"]
 
-    def test_execute_workflow_spec_unknown_workflow(self) -> None:
-        """Execute tool should raise ValueError when workflow_type is not registered."""
-        spec: WorkflowSpec = {
-            "workflow_type": "nonexistent.fake.workflow",
+    def test_submit_process_spec_unknown_entry_point(self) -> None:
+        """Submitting a spec whose entry_point is not registered raises ValueError."""
+        spec: SubmissionSpec = {
+            "entry_point": "nonexistent.fake.workflow",
             "inputs": {"x": 1},
         }
         with pytest.raises(ValueError, match="is not a known AiiDA entry point"):
-            execute_workflow_spec(spec)
+            submit_process_spec(spec)
 
     def test_verify_submit_workflow_invoked(self) -> None:
         """Verify that calling submit_workflow actually invokes the submission tool/function."""
@@ -73,7 +73,7 @@ class TestFullWorkflowIntegration:
                 mock_run.return_value = {
                     "pk": 999,
                     "uuid": "1234-5678-90ab",
-                    "workflow": "core.arithmetic.add",
+                    "entry_point": "core.arithmetic.add",
                     "state": "created",
                 }
 
@@ -88,13 +88,13 @@ class TestFullWorkflowIntegration:
                 assert res["state"] == "created"
 
     def test_full_execution_preview_requires_approval(self) -> None:
-        """Test execution gating: agent invokes execute_workflow_spec which requires HITL approval."""
+        """Test execution gating: agent invokes submit_process_spec which requires HITL approval."""
         agent = get_agent()
-        with agent.override(model=TestModel(call_tools=["execute_workflow_spec"])):
+        with agent.override(model=TestModel(call_tools=["submit_process_spec"])):
             res = agent.run_sync("Please submit the calculation.")
             assert isinstance(res.output, DeferredToolRequests)
             assert len(res.output.approvals) == 1
-            assert res.output.approvals[0].tool_name == "execute_workflow_spec"
+            assert res.output.approvals[0].tool_name == "submit_process_spec"
 
 
 EXPECTED_EXECUTION_TOOLS = {
@@ -105,13 +105,13 @@ EXPECTED_EXECUTION_TOOLS = {
     "draft_process_inputs",
     "check_cutoffs_against_pseudos",
     "build_resubmission_spec",
-    "execute_workflow_batch",
+    "submit_process_batch",
     "list_codes",
     "get_process_status",
     "wait_for_process",
     "get_daemon_status",
     "search_aiida_docs",
-    "execute_workflow_spec",
+    "submit_process_spec",
     "import_structure",
 }
 

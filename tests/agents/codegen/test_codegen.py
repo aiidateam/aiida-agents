@@ -40,9 +40,9 @@ class TestToolSurface:
         from aiida_agents.agents.codegen import _TOOLS
 
         forbidden = {
-            "execute_workflow_spec",
+            "submit_process_spec",
             "import_structure",
-            "execute_workflow_batch",
+            "submit_process_batch",
         }
         assert {tool.__name__ for tool in _TOOLS} & forbidden == set()
 

@@ -1,7 +1,7 @@
-"""Data structures and metadata for workflow specification and execution.
+"""Data structures and metadata for process specification and submission.
 
 Defines:
-- WorkflowSpec: The structured JSON spec that the model generates and passes to execution.
+- SubmissionSpec: The structured JSON spec that the model generates and submits.
 - ValidationResult / ValidationError: Standard error structures.
 """
 
@@ -12,20 +12,20 @@ import typing as t
 from typing_extensions import TypedDict
 
 __all__ = [
-    "WorkflowSpec",
+    "SubmissionSpec",
     "ValidationResult",
     "ValidationError",
 ]
 
 
-class WorkflowSpec(TypedDict, total=False):
-    """A structured workflow specification that the model generates and executes."""
+class SubmissionSpec(TypedDict, total=False):
+    """A structured process specification that the model generates and submits."""
 
-    workflow_type: str
-    """Full or short workflow identifier, e.g. 'core.arithmetic.multiply_add'"""
+    entry_point: str
+    """Entry point of the process to run, e.g. 'core.arithmetic.multiply_add'"""
 
     inputs: dict[str, t.Any]
-    """Workflow inputs dictionary mapping port names to values or reference dicts."""
+    """Process inputs dictionary mapping port names to values or reference dicts."""
 
     metadata: dict[str, t.Any]
     """Optional metadata: description, estimated walltime, etc."""

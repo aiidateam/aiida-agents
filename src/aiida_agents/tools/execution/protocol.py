@@ -7,7 +7,7 @@ code), it returns a ``ProcessBuilder`` already filled in with physically
 sensible defaults for a named protocol ("fast", "moderate", "precise"), tuned
 by people who have run the underlying simulations at scale. Building a
 workchain's inputs from scratch -- which is all ``describe_process`` and
-``execute_workflow_spec`` support -- throws that away and asks the model to
+``submit_process_spec`` support -- throws that away and asks the model to
 invent every physics parameter itself, for workchains whose input schema can
 run into dozens of ports.
 
@@ -15,7 +15,7 @@ This tool calls the process's own protocol builder (introspecting its exact
 keyword arguments rather than assuming ``structure=``/``code=``, since they
 vary by workflow) and serialises the result back into the same
 ``{"pk"|"uuid"|"label"}``-reference / bare-value convention
-``execute_workflow_spec`` already accepts -- so the agent's next step is
+``submit_process_spec`` already accepts -- so the agent's next step is
 tweaking a handful of fields on the returned spec, not building it from zero.
 
 Not every workflow has a protocol builder (most calculations and many older
@@ -39,7 +39,7 @@ from aiida_agents.tools.execution._spec import (
     resolve_reference,
     to_spec_value,
 )
-from aiida_agents.tools.execution.schemas import WorkflowSpec
+from aiida_agents.tools.execution.schemas import SubmissionSpec
 
 logger = logging.getLogger(__name__)
 
@@ -98,13 +98,13 @@ def build_process_inputs(
             )
         ),
     ] = None,
-) -> WorkflowSpec:
-    """Build a WorkflowSpec from a process's own protocol builder, if it has one.
+) -> SubmissionSpec:
+    """Build a SubmissionSpec from a process's own protocol builder, if it has one.
 
     Calls ``entry_point``'s ``get_builder_from_protocol(protocol=..., **protocol_kwargs)``
     and serialises the result -- already populated with physically sensible
     defaults for the named protocol -- into the same spec shape
-    ``execute_workflow_spec`` accepts. Use this instead of constructing
+    ``submit_process_spec`` accepts. Use this instead of constructing
     ``inputs`` by hand whenever ``describe_process`` reports
     ``has_protocol_builder: true``: start from the returned spec and adjust
     only the handful of parameters that genuinely need it (per
@@ -120,7 +120,7 @@ def build_process_inputs(
             ones this workflow needs and which are optional.
 
     Returns:
-        A ``WorkflowSpec`` ready for ``execute_workflow_spec`` (or further
+        A ``SubmissionSpec`` ready for ``submit_process_spec`` (or further
         adjustment first).
 
     Raises:
@@ -187,7 +187,7 @@ def build_process_inputs(
 
     populated = to_spec_value(builder._inputs(prune=True))  # noqa: SLF001 - AiiDA's own public-in-practice accessor
     return {
-        "workflow_type": entry_point,
+        "entry_point": entry_point,
         "inputs": populated,
         "metadata": {"protocol": protocol, "source": "get_builder_from_protocol"},
     }

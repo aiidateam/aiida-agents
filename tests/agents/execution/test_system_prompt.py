@@ -13,7 +13,7 @@ from aiida_agents.agents.execution import _SYSTEM_PROMPT as SYSTEM_PROMPT
 
 #: HITL-gated writes, registered via ``agent.tool_plain`` rather than in
 #: ``_READ_TOOLS``, so they are not discoverable from that list.
-_WRITE_TOOL_NAMES = ("execute_workflow_spec", "import_structure")
+_WRITE_TOOL_NAMES = ("submit_process_spec", "import_structure")
 
 
 class TestSystemPrompt:

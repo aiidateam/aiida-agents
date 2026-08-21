@@ -1,9 +1,9 @@
-"""Shared reading of a process spec, and the ``WorkflowSpec`` value convention.
+"""Shared reading of a process spec, and the ``SubmissionSpec`` value convention.
 
-Two tools now build a :class:`~aiida_agents.tools.execution.schemas.WorkflowSpec`
+Two tools now build a :class:`~aiida_agents.tools.execution.schemas.SubmissionSpec`
 --- ``build_process_inputs`` from a workflow's own protocol builder, and
 ``draft_process_inputs`` from its ``Process.spec()`` --- and both have to speak
-the input convention ``execute_workflow_spec`` accepts: node-valued inputs as
+the input convention ``submit_process_spec`` accepts: node-valued inputs as
 ``{"pk"|"uuid"|"label"}`` reference dicts, everything else as a bare value.
 
 Keeping the conversions here means the two builders cannot drift apart on what a
@@ -85,7 +85,7 @@ def port_accepts_node(port: t.Any) -> bool:
 def resolve_reference(ref: dict[str, t.Any], context: str) -> orm.Node:
     """Resolve a ``{"pk"|"uuid"|"label"}`` reference to an existing node.
 
-    Same reference convention as ``execute_workflow_spec``'s inputs, so a
+    Same reference convention as ``submit_process_spec``'s inputs, so a
     structure or code the model already has a handle on plugs in unchanged.
     """
     if "pk" in ref:
@@ -114,9 +114,9 @@ def resolve_reference(ref: dict[str, t.Any], context: str) -> orm.Node:
 
 
 def to_spec_value(value: t.Any) -> t.Any:
-    """Serialise one AiiDA-side value back to the ``WorkflowSpec`` convention.
+    """Serialise one AiiDA-side value back to the ``SubmissionSpec`` convention.
 
-    Mirrors ``execute_workflow_spec``'s input convention exactly, so a
+    Mirrors ``submit_process_spec``'s input convention exactly, so a
     serialised value plugs straight back in: ``Dict``/``List`` unwrap to their
     plain contents, primitive-backed nodes (``BaseType``: Int/Float/Str/Bool)
     to their bare ``.value``, and any other *stored* node (Code, StructureData,

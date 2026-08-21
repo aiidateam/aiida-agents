@@ -155,11 +155,12 @@ Two consequences worth stating:
 
 - **One write path.** `submit_workflow` was registered on the Analysis Agent
   back when it was the only agent. It is not any more: Execution reaches the
-  database through its own HITL-gated `execute_workflow_spec` (which delegates
+  database through its own HITL-gated `submit_process_spec` (which delegates
   to `submit_workflow` after building and validating a spec), and Analysis is
   read-only. A plugin-contributed write tool is still gated the same way on
   whichever agent registers it (ADR-08).
-- **The MCP server's read-only guarantee is unchanged**, but now excludes two
-  names rather than one (`submit_workflow` and `execute_workflow_spec`); the
-  server's discovery test walks the subpackages recursively, so a new tool in a
-  new agent package is still caught automatically.
+- **The MCP server's read-only guarantee is unchanged**, but now excludes four
+  names rather than one (`submit_workflow`, `submit_process_spec`,
+  `submit_process_batch` and `import_structure`); the server's discovery test
+  walks the subpackages recursively, so a new tool in a new agent package is
+  still caught automatically.

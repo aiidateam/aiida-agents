@@ -250,7 +250,7 @@ aiida-agents mcp
 Point any MCP client at it (the Inspector is easiest).
 
 - **Good:** the read tools are listed and **no write tool appears**: no
-  `execute_workflow_spec`, no `import_structure`, no `execute_workflow_batch`.
+  `submit_process_spec`, no `import_structure`, no `submit_process_batch`.
 - **Flag it if:** any write tool is exposed. Writes must go only through the
   approval-gated agents.
 

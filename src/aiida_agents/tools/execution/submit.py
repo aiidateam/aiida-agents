@@ -447,7 +447,7 @@ def _run_submission(
     return {
         "pk": cast(int, node.pk),
         "uuid": node.uuid,
-        "workflow": entry_point,
+        "entry_point": entry_point,
         "state": node.process_state.value if node.process_state else "created",
     }
 

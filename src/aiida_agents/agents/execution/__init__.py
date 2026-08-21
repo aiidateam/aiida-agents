@@ -24,9 +24,9 @@ from aiida_agents.tools.execution.protocol import build_process_inputs
 from aiida_agents.tools.execution.ranges import check_cutoffs_against_pseudos
 from aiida_agents.tools.execution.resubmission import (
     build_resubmission_spec,
-    execute_workflow_batch,
+    submit_process_batch,
 )
-from aiida_agents.tools.execution.spec_execution import execute_workflow_spec
+from aiida_agents.tools.execution.spec_execution import submit_process_spec
 from aiida_agents.tools.execution.structures import import_structure
 from aiida_agents.tools.execution.waiting import wait_for_process
 from aiida_agents.tools.processes import get_process_status
@@ -69,7 +69,7 @@ def get_agent(
     4. Pre-populates inputs from a protocol builder when one exists (build_process_inputs),
        and drafts them from the process spec itself when one does not (draft_process_inputs)
     5. Discovers the configured codes a calculation can run on (list_codes)
-    6. Submits workflow specs (execute_workflow_spec, requires HITL approval)
+    6. Submits workflow specs (submit_process_spec, requires HITL approval)
     7. Follows up on what it submitted (get_process_status)
 
     Step 4's two tools are a pair, not alternatives to weigh: a protocol builder
@@ -86,7 +86,7 @@ def get_agent(
 
     It also imports a structure file into the profile (import_structure), for
     the common case where the structure to run on is a CIF/POSCAR on disk
-    rather than a node that already exists. Like execute_workflow_spec, it is
+    rather than a node that already exists. Like submit_process_spec, it is
     HITL-gated.
 
     Step 7 is why ``get_process_status`` is shared rather than Analysis-owned:
@@ -97,7 +97,7 @@ def get_agent(
     All read tools are wrapped by RetryOnToolError so tool failures
     (e.g., hallucinated parameters) become recoverable retries instead of crashes.
 
-    ``execute_workflow_spec`` is registered with ``requires_approval=True`` so the
+    ``submit_process_spec`` is registered with ``requires_approval=True`` so the
     agent pauses for human confirmation before anything is written to the database.
 
     Args:
@@ -121,14 +121,14 @@ def get_agent(
         output_type=(str, DeferredToolRequests),
     )
 
-    # Both write tools are HITL-gated (ADR-08). execute_workflow_spec delegates
-    # to submit_workflow internally, so submit_workflow is NOT registered
-    # separately — doing so would expose it twice and confuse the model.
-    # import_structure writes a single StructureData; it is gated too, so a file
-    # read off the user's disk still needs their explicit approval.
-    agent.tool_plain(requires_approval=True)(execute_workflow_spec)
+    # All three write tools are HITL-gated (ADR-08). submit_process_spec
+    # delegates to submit_workflow internally, so submit_workflow is NOT
+    # registered separately — doing so would expose it twice and confuse the
+    # model. import_structure writes a single StructureData; it is gated too,
+    # so a file read off the user's disk still needs their explicit approval.
+    agent.tool_plain(requires_approval=True)(submit_process_spec)
     agent.tool_plain(requires_approval=True)(import_structure)
     # A batch is one call and therefore one approval, covering the whole set.
-    agent.tool_plain(requires_approval=True)(execute_workflow_batch)
+    agent.tool_plain(requires_approval=True)(submit_process_batch)
 
     return agent

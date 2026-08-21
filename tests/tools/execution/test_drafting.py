@@ -28,7 +28,7 @@ from aiida.engine import WorkChain, run_get_node
 
 from aiida_agents.tools.execution import drafting
 from aiida_agents.tools.execution.drafting import draft_process_inputs
-from aiida_agents.tools.execution.schemas import WorkflowSpec
+from aiida_agents.tools.execution.schemas import SubmissionSpec
 from aiida_agents.tools.execution.submit import _resolve_inputs
 
 ADD_EP = "core.arithmetic.add"
@@ -73,7 +73,7 @@ def synthetic(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _missing_ports(spec: WorkflowSpec) -> list[str]:
+def _missing_ports(spec: SubmissionSpec) -> list[str]:
     return [entry["port"] for entry in spec["metadata"]["missing_required"]]
 
 
@@ -84,7 +84,7 @@ class TestDefaults:
         spec = draft_process_inputs(SYNTHETIC_EP)
 
         # Serialised to bare values, not left as the Float/Str nodes the
-        # defaults construct -- that is the WorkflowSpec convention.
+        # defaults construct -- that is the SubmissionSpec convention.
         assert spec["inputs"]["cutoff"] == 30.0
         assert spec["inputs"]["scheme"] == "bfgs"
 
@@ -290,7 +290,7 @@ class TestRoundTrip:
         )
         assert spec["metadata"]["ready_to_submit"] is True
 
-        resolved = _resolve_inputs(spec["workflow_type"], spec["inputs"])
+        resolved = _resolve_inputs(spec["entry_point"], spec["inputs"])
         _, node = run_get_node(ArithmeticAddCalculation, **resolved)
 
         assert node.is_finished_ok
@@ -301,5 +301,5 @@ class TestRoundTrip:
     ) -> None:
         spec = draft_process_inputs(ADD_EP)
 
-        assert spec["workflow_type"] == ADD_EP
+        assert spec["entry_point"] == ADD_EP
         assert spec["metadata"]["source"] == "process_spec"
