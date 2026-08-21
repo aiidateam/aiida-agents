@@ -268,6 +268,85 @@ class TestTriageSubmissions:
         assert isinstance(resolved["x"], orm.Int) and resolved["x"].value == 2
 
 
+class TestBatchTriage:
+    """A batch is triaged as a set, on its own branch of ``_triage_submissions``.
+
+    That branch reads each spec's entry point by key rather than through
+    ``_submission_args``, so nothing else in this file exercises it: a spec key
+    that stops matching resolves to ``""``, every ``_prepare_submission`` then
+    fails, and the whole batch is auto-denied with a message naming a spec the
+    model wrote correctly.
+    """
+
+    @staticmethod
+    def _pending(*calls: ToolCallPart) -> DeferredToolRequests:
+        return DeferredToolRequests(approvals=list(calls))
+
+    @staticmethod
+    def _spec(code: orm.InstalledCode, x: int) -> dict[str, Any]:
+        return {
+            "entry_point": MULTIPLY_ADD,
+            "inputs": {"x": x, "y": 3, "z": 4, "code": {"pk": code.pk}},
+        }
+
+    def test_a_valid_batch_is_resolved_and_queued_as_one_preview(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """One approval covers the set, and it carries every spec resolved."""
+        call = ToolCallPart(
+            tool_name="submit_process_batch",
+            args={
+                "specs": [
+                    self._spec(arithmetic_add_code, 2),
+                    self._spec(arithmetic_add_code, 5),
+                ]
+            },
+            tool_call_id="c1",
+        )
+        auto, previews = _triage_submissions(self._pending(call))
+
+        assert auto == {}
+        assert len(previews) == 1
+        _, process_class, resolved, batch = previews[0]
+        # The batch enrichment lives in ``batch``, not in the single-spec fields.
+        assert process_class is None and resolved is None
+        assert batch is not None
+        assert [entry_point for entry_point, _ in batch] == [MULTIPLY_ADD] * 2
+        assert [inputs["x"].value for _, inputs in batch] == [2, 5]
+
+    def test_one_bad_spec_refuses_the_whole_batch_naming_its_position(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """All are approved together or none are, so a bad spec at position N
+        stops the batch before the user sees it, and the denial says which.
+        """
+        bad = {"entry_point": MULTIPLY_ADD, "inputs": {"x": 1, "y": 2}}  # no z/code
+        call = ToolCallPart(
+            tool_name="submit_process_batch",
+            args={"specs": [self._spec(arithmetic_add_code, 2), bad]},
+            tool_call_id="c1",
+        )
+        auto, previews = _triage_submissions(self._pending(call))
+
+        assert previews == []
+        assert isinstance(auto["c1"], ToolDenied)
+        assert "spec 2 of 2" in auto["c1"].message
+        assert "submit_process_batch again" in auto["c1"].message
+
+    @pytest.mark.parametrize("specs", [[], "not a list", None])
+    def test_a_batch_that_is_not_a_non_empty_list_is_refused(self, specs: Any) -> None:
+        call = ToolCallPart(
+            tool_name="submit_process_batch",
+            args={"specs": specs},
+            tool_call_id="c1",
+        )
+        auto, previews = _triage_submissions(self._pending(call))
+
+        assert previews == []
+        assert isinstance(auto["c1"], ToolDenied)
+        assert "non-empty list" in auto["c1"].message
+
+
 def _approval_agent(*fns: Callable[..., Any]) -> Agent:
     """A real agent with ``fns`` registered as approval-gated write tools."""
     agent: Agent = Agent(TestModel(), output_type=(str, DeferredToolRequests))
