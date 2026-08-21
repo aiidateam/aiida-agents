@@ -298,6 +298,31 @@ class TestPrepareSubmission:
         assert process_class is CalculationFactory("core.arithmetic.add")
         assert "metadata" not in resolved
 
+    def test_supplied_namespace_is_not_filled_with_engine_defaults(
+        self, arithmetic_add_code: orm.InstalledCode
+    ) -> None:
+        """Same guarantee as above once the user *does* supply a namespace: the
+        preview they approve shows the two options they set, with the scheduler
+        boilerplate the engine fills in behind them left out. ``pre_process``
+        writes its defaults into nested namespaces too, so copying only the top
+        level of ``resolved`` still lets them leak in.
+        """
+        options = {
+            "resources": {"num_machines": 1, "num_mpiprocs_per_machine": 1},
+            "max_wallclock_seconds": 3600,
+        }
+        _, resolved = _prepare_submission(
+            "core.arithmetic.add",
+            {
+                "x": 2,
+                "y": 3,
+                "code": {"pk": arithmetic_add_code.pk},
+                "metadata": {"options": dict(options)},
+            },
+        )
+        assert set(resolved["metadata"]) == {"options"}
+        assert resolved["metadata"]["options"] == options
+
     def test_calcjob_requires_a_code(self) -> None:
         """Agent-scope policy: a compute CalcJob must be given a code. AiiDA makes
         ``code`` optional on the base CalcJob on purpose (import/parse jobs ingest

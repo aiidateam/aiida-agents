@@ -327,6 +327,22 @@ def _format_resolved_inputs(resolved: dict[str, Any], prefix: str = "") -> str:
     return "\n".join([line for line in lines if line])
 
 
+def _copy_namespaces(inputs: dict[str, Any]) -> dict[str, Any]:
+    """Copy a resolved input tree's namespace dicts, sharing the leaf values.
+
+    ``pre_process`` fills port defaults into the mapping it is handed, nested
+    namespaces included, so a shallow ``dict(...)`` leaves every namespace the
+    same object in both trees and lets it write engine defaults into the inputs
+    the HITL preview presents as the user's own. Copying the dict spine and
+    sharing the leaves keeps the resolved nodes identical (a deep copy would
+    clone the unstored ones).
+    """
+    return {
+        name: _copy_namespaces(value) if isinstance(value, dict) else value
+        for name, value in inputs.items()
+    }
+
+
 def _prepare_submission(
     entry_point: str, inputs: dict[str, Any]
 ) -> tuple[type[Process], dict[str, Any]]:
@@ -367,10 +383,11 @@ def _prepare_submission(
     # parser, ...) exactly as the engine does at submit time. Skipping it would
     # reject submissions the engine accepts and force the user to hand-specify
     # boilerplate options such as ``metadata.options.resources``. pre_process
-    # mutates its argument, so pass a copy and keep ``resolved`` (what the HITL
-    # preview shows) limited to what the user actually supplied.
+    # mutates its argument, nested namespaces included, so pass a copy and keep
+    # ``resolved`` (what the HITL preview shows) limited to what the user
+    # actually supplied.
     try:
-        processed = spec_inputs.pre_process(dict(resolved))
+        processed = spec_inputs.pre_process(_copy_namespaces(resolved))
     except Exception as exc:
         raise SubmissionInputError(f"Could not build inputs: {exc}") from exc
     error = spec_inputs.validate(processed)
