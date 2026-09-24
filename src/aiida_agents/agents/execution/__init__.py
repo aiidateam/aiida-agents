@@ -7,11 +7,9 @@ from typing import Any
 
 from pydantic_ai import Agent
 from pydantic_ai.tools import DeferredToolRequests
-from pydantic_ai.toolsets import FunctionToolset
 
 from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
-from aiida_agents.agents._errors import RetryOnToolError
-from aiida_agents.agents._models import get_model
+from aiida_agents.agents._builder import build_agent
 
 from aiida_agents.tools.run_context import query_run_context
 from aiida_agents.tools.execution.codes import list_codes
@@ -94,9 +92,6 @@ def get_agent(
     routing a single pk lookup through ``query_run_context`` would spend a
     whole extra agent run on it.
 
-    All read tools are wrapped by RetryOnToolError so tool failures
-    (e.g., hallucinated parameters) become recoverable retries instead of crashes.
-
     ``submit_process_spec`` is registered with ``requires_approval=True`` so the
     agent pauses for human confirmation before anything is written to the database.
 
@@ -108,27 +103,12 @@ def get_agent(
     Returns:
         Agent: Ready-to-use Execution Agent instance.
     """
-    cfg = agent_settings if agent_settings is not None else AgentSettings()
-
-    # Wrap read tools with RetryOnToolError for automatic retry on failures
-    toolset = RetryOnToolError(FunctionToolset(_READ_TOOLS))
-
-    agent: Agent = Agent(
-        get_model(model_settings=model_settings, ollama_settings=ollama_settings),
-        toolsets=[toolset],
-        retries=cfg.tool_retries,
+    return build_agent(
         system_prompt=_SYSTEM_PROMPT,
+        read_tools=_READ_TOOLS,
+        write_tools=[submit_process_spec, import_structure, submit_process_batch],
         output_type=(str, DeferredToolRequests),
+        model_settings=model_settings,
+        ollama_settings=ollama_settings,
+        agent_settings=agent_settings,
     )
-
-    # All three write tools are HITL-gated (ADR-08). submit_process_spec
-    # delegates to submit_workflow internally, so submit_workflow is NOT
-    # registered separately — doing so would expose it twice and confuse the
-    # model. import_structure writes a single StructureData; it is gated too,
-    # so a file read off the user's disk still needs their explicit approval.
-    agent.tool_plain(requires_approval=True)(submit_process_spec)
-    agent.tool_plain(requires_approval=True)(import_structure)
-    # A batch is one call and therefore one approval, covering the whole set.
-    agent.tool_plain(requires_approval=True)(submit_process_batch)
-
-    return agent

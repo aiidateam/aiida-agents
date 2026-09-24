@@ -19,11 +19,9 @@ from typing import Any
 
 from pydantic_ai import Agent
 from pydantic_ai.tools import DeferredToolRequests
-from pydantic_ai.toolsets import FunctionToolset
 
 from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
-from aiida_agents.agents._errors import RetryOnToolError
-from aiida_agents.agents._models import get_model
+from aiida_agents.agents._builder import build_agent
 from aiida_agents.plugins import LoadedPlugin, discover_plugins
 from aiida_agents.tools import (
     diagnose_process_failure,
@@ -107,11 +105,6 @@ def get_agent(
     CLI must obtain user confirmation before re-running with
     ``DeferredToolResults``.
 
-    The read tools are wrapped once, at the toolset boundary, by
-    ``RetryOnToolError``: a tool failure becomes a ``ModelRetry`` the model
-    can recover from rather than a fatal error that aborts the run, bounded
-    by ``tool_retries``.
-
     Called from the CLI after environment variables are loaded, so model
     construction always sees a fully populated environment.
 
@@ -122,33 +115,19 @@ def get_agent(
     :param agent_settings: Agent behaviour configuration (the per-tool retry
         budget). Read from env / ``.env`` if not given.
     """
-    cfg = agent_settings if agent_settings is not None else AgentSettings()
-
     # Installed plugins may contribute tools and domain guidance (see
     # aiida_agents.plugins). Read tools join the retry-wrapped toolset like the
     # built-ins; write tools are registered behind the approval gate below.
     plugins = discover_plugins()
     plugin_reads = [tool.fn for p in plugins for tool in p.tools if not tool.writes]
     plugin_writes = [tool.fn for p in plugins for tool in p.tools if tool.writes]
-    toolset = RetryOnToolError(FunctionToolset(_READ_TOOLS + plugin_reads))
 
-    # ``output_type=(str, DeferredToolRequests)`` makes the real type
-    # ``Agent[None, str | DeferredToolRequests]``, but agents are annotated as the
-    # bare ``Agent`` throughout (mypy takes that as-is; basedpyright resolves bare
-    # ``Agent`` to its PEP 696 default ``Agent[None, str]`` and flags the mismatch).
-    # Keep it bare until the multi-agent architecture (Orchestrator/Workflow)
-    # settles how agent types are shared; this ignore is basedpyright-only.
-    agent: Agent = Agent(  # pyright: ignore[reportAssignmentType]
-        get_model(model_settings=model_settings, ollama_settings=ollama_settings),
-        toolsets=[toolset],
-        retries=cfg.tool_retries,
+    return build_agent(
         system_prompt=_system_prompt(plugins),
+        read_tools=list(_READ_TOOLS) + plugin_reads,
+        write_tools=plugin_writes,
         output_type=(str, DeferredToolRequests),
+        model_settings=model_settings,
+        ollama_settings=ollama_settings,
+        agent_settings=agent_settings,
     )
-
-    # A plugin-contributed write tool is gated the same way the Execution
-    # agent's own write tool is: the CLI previews it and runs it on the main
-    # thread only after the user approves (ADR-08).
-    for fn in plugin_writes:
-        agent.tool_plain(requires_approval=True)(fn)
-    return agent

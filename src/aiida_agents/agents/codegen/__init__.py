@@ -31,11 +31,9 @@ from importlib.resources import files
 from typing import Any
 
 from pydantic_ai import Agent
-from pydantic_ai.toolsets import FunctionToolset
 
 from aiida_agents._settings import AgentSettings, ModelSettings, OllamaSettings
-from aiida_agents.agents._errors import RetryOnToolError
-from aiida_agents.agents._models import get_model
+from aiida_agents.agents._builder import build_agent
 from aiida_agents.rag import search_aiida_docs, search_aiida_examples
 from aiida_agents.tools.codegen import run_python_snippet
 
@@ -75,17 +73,10 @@ def get_agent(
     Returns:
         Agent: Ready-to-use Codegen Agent instance.
     """
-    cfg = agent_settings if agent_settings is not None else AgentSettings()
-
-    # Retry-wrapped like every other read surface: a tool that fails comes back
-    # to the model as a recoverable error rather than aborting the run. That
-    # matters more here than elsewhere -- fixing its own snippet from the error
-    # is the agent's normal working loop, not an exceptional path.
-    toolset = RetryOnToolError(FunctionToolset(_TOOLS))
-
-    return Agent(
-        get_model(model_settings=model_settings, ollama_settings=ollama_settings),
-        toolsets=[toolset],
-        retries=cfg.tool_retries,
+    return build_agent(
         system_prompt=_SYSTEM_PROMPT,
+        read_tools=_TOOLS,
+        model_settings=model_settings,
+        ollama_settings=ollama_settings,
+        agent_settings=agent_settings,
     )
