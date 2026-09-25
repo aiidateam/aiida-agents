@@ -70,6 +70,52 @@ async def ask(
     return result
 
 
+async def ask_stream(
+    agent: Agent,
+    question: str,
+    message_history: list[ModelMessage] | None = None,
+) -> tuple[Any, bool]:  # pragma: no cover
+    """Run a query with token streaming, returning ``(result, streamed_text)``.
+
+    When the model produces a plain-text answer, tokens are printed to stdout
+    as they arrive — the experience ``ask`` had before #8 switched to blocking.
+    When the output is ``DeferredToolRequests`` (a write tool needing approval),
+    no text is streamed and the caller handles it the same way it did before.
+
+    Returns a tuple of the settled ``AgentRunResult`` and a flag indicating
+    whether the text was already printed (so the caller can skip its own
+    rendering pass).
+    """
+    from pydantic_ai.exceptions import UserError
+    logger.debug("agent query: %s", question)
+    streamed = False
+    async with agent.run_stream(question, message_history=message_history) as stream:
+        try:
+            async for delta in stream.stream_text(delta=True, debounce_by=None):
+                if not streamed:
+                    # Print the same "Agent:" header _print_agent uses,
+                    # before the first token arrives.
+                    console.print()
+                    console.print("Agent:", style="bold green")
+                    streamed = True
+                print(delta, end="", flush=True)
+        except UserError:
+            # The output is DeferredToolRequests, not streamable text.
+            pass
+
+        if streamed:
+            print()  # newline after the last token
+            console.print()  # blank line to match _print_agent's spacing
+
+        # Ensure the stream is fully consumed so .result is available.
+        if not stream.is_complete:
+            await stream.get_output()
+
+    result = stream.result
+    _trace_tool_calls(result.new_messages())
+    return result, streamed
+
+
 def _resolve_model_settings(provider: str | None, model: str | None) -> ModelSettings:
     """Build ``ModelSettings`` with CLI overrides taking precedence.
 

@@ -31,7 +31,7 @@ from aiida_agents.cli.agent import (
     _resolve_plan,
     _step_prompt,
     _StepResult,
-    ask,
+    ask_stream,
 )
 from aiida_agents.cli.hitl import _handle_deferred
 from aiida_agents.cli.output import (
@@ -41,6 +41,7 @@ from aiida_agents.cli.output import (
     _render_tool_calls,
     console,
 )
+from aiida_agents._logging import trace_response
 
 
 def _cap_history(messages: list[ModelMessage], max_turns: int) -> list[ModelMessage]:
@@ -174,14 +175,13 @@ def _run_turn(
     """
     start = time.monotonic()
     try:
-        with console.status("[dim]thinking...[/]", spinner="dots"):
-            result = asyncio.run(
-                ask(
-                    agent,
-                    question,
-                    _cap_history(history, repl_cfg.history_max_turns) or None,
-                )
+        result, streamed = asyncio.run(
+            ask_stream(
+                agent,
+                question,
+                _cap_history(history, repl_cfg.history_max_turns) or None,
             )
+        )
     except KeyboardInterrupt:
         click.echo("(interrupted)")
         return history, None, ()
@@ -190,9 +190,7 @@ def _run_turn(
         return history, None, ()
     elapsed = time.monotonic() - start
 
-    # Render the run's tool-call trace now that the spinner has stopped: the
-    # traces are a post-run dump, so printing them into the still-live spinner
-    # region above would fight its redraws. Debug-gated inside.
+    # Render the run's tool-call trace now that streaming has stopped.
     _render_tool_calls(result.new_messages(), console)
 
     answer: str | None = None
@@ -203,7 +201,12 @@ def _run_turn(
     if isinstance(result.output, DeferredToolRequests):
         history = _handle_deferred(agent, result, history)
     else:
-        _print_agent(result.output)
+        if streamed:
+            # Text was already printed token-by-token; just log it.
+            trace_response(result.output)
+        else:
+            # Fallback: render the full reply (should not normally happen).
+            _print_agent(result.output)
         _warn_ungrounded(result.output, result.all_messages(), question)
         history = result.all_messages()
         answer = result.output
