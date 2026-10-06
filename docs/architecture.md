@@ -98,7 +98,7 @@ The language layer is thin on purpose. Everything a wrong answer could damage is
 
 **MCP server** (`mcp/`): exposes the read-only tools over the Model Context Protocol, so any MCP client reaches the same functions the agents do. The write tools are deliberately not registered: they go only through the approval-gated agents. See [ADR-02](/docs/adr/02-mcp-tools-wrap-aiida-restapi.md).
 
-**Grounding check** (`grounding.py`): extracts every quantity carrying a unit, written as a percentage, or bound to a named simulation parameter from an answer, and reports any that appear in no tool output. A percentage is grounded by its fraction, so a `success_rate` of 0.67 supports "67%".
+**Grounding check** (`grounding/`): checks generated code imports and numeric claims against tool output. Percentages are generic; units and parameter names come from installed plugins through `grounding_vocabulary()`, keeping atomistic terms out of the core. A percentage is grounded by its fraction, so a `success_rate` of 0.67 supports "67%".
 
 **CLI** (`cli/`): `chat` for a conversation, `ask` for one shot, plus `doctor`, `rag` and `config`. It owns the plan loop and the approval prompt.
 

@@ -42,8 +42,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from aiida_agents.grounding import quantities_in as quantities_in  # re-exported
+from aiida_agents.grounding import quantities_in as _quantities_in
 from aiida_agents.grounding import ungrounded_quantities as _ungrounded
+from aiida_agents.plugins import GroundingVocabulary
 from pydantic_ai import Agent, capture_run_messages
 from pydantic_ai.messages import (
     ModelMessage,
@@ -53,6 +54,32 @@ from pydantic_ai.messages import (
     ToolCallPart,
     ToolReturnPart,
 )
+
+# Evals describe Quantum ESPRESSO answers, so inject the vocabulary that the
+# QE plugin contributes in a normal installation.
+_QE_VOCABULARY = GroundingVocabulary(
+    units=("Ry", "Rydberg", "eV", "Bohr", "Å", "Å⁻¹", "A-1", "1/A"),
+    parameters=(
+        "ecutwfc",
+        "ecutrho",
+        "conv_thr",
+        "degauss",
+        "kpoints_distance",
+        "mixing_beta",
+        "smearing",
+        "etot_conv_thr",
+        "forc_conv_thr",
+        "press_conv_thr",
+        "nbnd",
+        "electron_maxstep",
+        "cutoff",
+    ),
+)
+
+
+def quantities_in(text: str) -> set[str]:
+    """Run the core quantity matcher with the QE plugin's test vocabulary."""
+    return _quantities_in(text, _QE_VOCABULARY)
 
 
 def project_env_file() -> Path:
@@ -217,7 +244,9 @@ def ungrounded_quantities(trace: RunTrace, prompt: str = "") -> set[str]:
         Normalised numeric literals with no source. Empty means every physics
         number in the answer is traceable.
     """
-    return _ungrounded(trace.answer, trace.all_output, prompt)
+    return _ungrounded(
+        trace.answer, trace.all_output, prompt, vocabulary=_QE_VOCABULARY
+    )
 
 
 def assert_grounded_quantities(trace: RunTrace, prompt: str = "") -> None:

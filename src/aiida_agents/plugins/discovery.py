@@ -11,17 +11,19 @@ from __future__ import annotations
 import logging
 import typing as t
 from dataclasses import dataclass
+from functools import lru_cache
 from importlib.metadata import entry_points
 
 from aiida_agents.plugins.spec import (
     PLUGIN_ENTRY_POINT_GROUP,
     AgentTool,
+    GroundingVocabulary,
     RagCorpus,
 )
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["LoadedPlugin", "discover_plugins"]
+__all__ = ["LoadedPlugin", "discover_grounding_vocabulary", "discover_plugins"]
 
 # A fragment is concatenated into the system prompt, so it costs tokens on every
 # call for every user. Truncate loudly rather than let one plugin crowd out the
@@ -37,6 +39,7 @@ class LoadedPlugin:
     tools: tuple[AgentTool, ...] = ()
     corpora: tuple[RagCorpus, ...] = ()
     prompt_fragment: str | None = None
+    grounding_vocabulary: GroundingVocabulary | None = None
 
 
 def _call_hook(plugin_name: str, provider: object, hook: str) -> t.Any:
@@ -150,6 +153,45 @@ def _read_fragment(plugin_name: str, provider: object) -> str | None:
     return fragment
 
 
+def _read_grounding_vocabulary(
+    plugin_name: str, provider: object
+) -> GroundingVocabulary | None:
+    """Read an optional vocabulary, rejecting malformed terms as one hook."""
+    raw = _call_hook(plugin_name, provider, "grounding_vocabulary")
+    if raw is None:
+        return None
+    if not isinstance(raw, GroundingVocabulary):
+        logger.warning(
+            "plugin %r: grounding_vocabulary() must return GroundingVocabulary, "
+            "got %s; ignoring",
+            plugin_name,
+            type(raw).__name__,
+        )
+        return None
+
+    for field_name, terms in (
+        ("units", raw.units),
+        ("parameters", raw.parameters),
+    ):
+        if not isinstance(terms, (tuple, list)) or any(
+            not isinstance(term, str) or not term.strip() for term in terms
+        ):
+            logger.warning(
+                "plugin %r: grounding_vocabulary().%s must contain non-empty "
+                "strings; ignoring",
+                plugin_name,
+                field_name,
+            )
+            return None
+
+    if not raw.units and not raw.parameters:
+        return None
+    return GroundingVocabulary(
+        units=tuple(dict.fromkeys(term.strip() for term in raw.units)),
+        parameters=tuple(dict.fromkeys(term.strip() for term in raw.parameters)),
+    )
+
+
 def _drop_name_collisions(plugins: list[LoadedPlugin]) -> list[LoadedPlugin]:
     """Drop tools whose name is already taken, keeping the first plugin's.
 
@@ -181,6 +223,7 @@ def _drop_name_collisions(plugins: list[LoadedPlugin]) -> list[LoadedPlugin]:
                 tools=tuple(kept),
                 corpora=plugin.corpora,
                 prompt_fragment=plugin.prompt_fragment,
+                grounding_vocabulary=plugin.grounding_vocabulary,
             )
         )
     return resolved
@@ -216,6 +259,7 @@ def discover_plugins() -> tuple[LoadedPlugin, ...]:
                 tools=_read_tools(ep.name, provider),
                 corpora=_read_corpora(ep.name, provider),
                 prompt_fragment=_read_fragment(ep.name, provider),
+                grounding_vocabulary=_read_grounding_vocabulary(ep.name, provider),
             )
         )
 
@@ -227,3 +271,38 @@ def discover_plugins() -> tuple[LoadedPlugin, ...]:
             ", ".join(p.name for p in resolved),
         )
     return tuple(resolved)
+
+
+@lru_cache(maxsize=1)
+def discover_grounding_vocabulary() -> GroundingVocabulary | None:
+    """Combine installed plugins' domain terms in stable entry-point order.
+
+    Plugin installations are static for the lifetime of a process, so cache the
+    result rather than re-importing each plugin for every agent reply.
+    """
+    try:
+        registered = sorted(
+            entry_points(group=PLUGIN_ENTRY_POINT_GROUP), key=lambda ep: ep.name
+        )
+    except Exception:
+        logger.exception("could not read the %r entry points", PLUGIN_ENTRY_POINT_GROUP)
+        return None
+
+    units: list[str] = []
+    parameters: list[str] = []
+    for ep in registered:
+        try:
+            provider = ep.load()
+        except Exception:
+            logger.exception("plugin %r: provider failed to load; skipping", ep.name)
+            continue
+        vocabulary = _read_grounding_vocabulary(ep.name, provider)
+        if vocabulary is not None:
+            units.extend(vocabulary.units)
+            parameters.extend(vocabulary.parameters)
+
+    unique_units = tuple(dict.fromkeys(units))
+    unique_parameters = tuple(dict.fromkeys(parameters))
+    if not unique_units and not unique_parameters:
+        return None
+    return GroundingVocabulary(units=unique_units, parameters=unique_parameters)

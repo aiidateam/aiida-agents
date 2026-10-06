@@ -156,10 +156,16 @@ def _warn_ungrounded(text: str, messages: list[ModelMessage], question: str) -> 
         ungrounded_quantities,
         ungrounded_symbols,
     )
+    from aiida_agents.plugins import discover_grounding_vocabulary
 
     evidence = tool_output_text(messages)
 
-    invented = ungrounded_quantities(text, evidence, question)
+    invented = ungrounded_quantities(
+        text,
+        evidence,
+        question,
+        vocabulary=discover_grounding_vocabulary(),
+    )
     if invented:
         values = ", ".join(sorted(invented))
         console.print(

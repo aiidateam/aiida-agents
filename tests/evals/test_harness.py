@@ -38,6 +38,14 @@ from tests.evals._harness import (
     ungrounded_quantities,
 )
 
+
+def _qe_ungrounded(answer: str, evidence: str) -> set[str]:
+    """Apply the product checker with the QE vocabulary used by these cases."""
+    return grounding.ungrounded_quantities(
+        answer, evidence, vocabulary=_harness._QE_VOCABULARY
+    )
+
+
 #: Stands in for a real retrieval hit. Contains 60 and 480 so an answer quoting
 #: those is grounded, and omits 0.15 so an answer quoting *that* is not.
 _DOCS_EXCERPT = (
@@ -288,20 +296,18 @@ class TestEvidenceMustPresentTheNumberAsAQuantity:
             "ecutwfc varies widely (e.g., 60 Ry for gold, 8 for the alkali metals)."
         )
 
-        assert "60.0" in grounding.ungrounded_quantities(answer, evidence)
+        assert "60.0" in _qe_ungrounded(answer, evidence)
 
     def test_a_number_the_evidence_labels_is_grounded(self) -> None:
         """The other direction, or the fix would just be "flag everything"."""
         evidence = "{'ecutwfc': 60.0, 'ecutwfc_unit': 'Ry'}"
 
-        assert (
-            grounding.ungrounded_quantities("The cutoff was 60 Ry.", evidence) == set()
-        )
+        assert _qe_ungrounded("The cutoff was 60 Ry.", evidence) == set()
 
     def test_a_unit_in_the_evidence_grounds_the_claim(self) -> None:
         evidence = "recommended cutoff is 60 Ry for this family"
 
-        assert grounding.ungrounded_quantities("Use 60 Ry.", evidence) == set()
+        assert _qe_ungrounded("Use 60 Ry.", evidence) == set()
 
     def test_a_bare_count_still_grounds_a_bare_number(self) -> None:
         """The over-fire direction.
@@ -314,7 +320,7 @@ class TestEvidenceMustPresentTheNumberAsAQuantity:
         evidence = "{'count': 3, 'ecutwfc': 60.0, 'unit': 'Ry'}"
         answer = "I checked 3 relaxations and the cutoff of 60 Ry was fine."
 
-        assert grounding.ungrounded_quantities(answer, evidence) == set()
+        assert _qe_ungrounded(answer, evidence) == set()
 
     def test_a_realistic_tool_dump_does_not_ground_everything(self) -> None:
         """The large-evidence case CI never exercised.
@@ -338,7 +344,7 @@ class TestEvidenceMustPresentTheNumberAsAQuantity:
         )
         answer = "Typical values are 40 Ry for the wavefunction and 80 Ry for the charge density."
 
-        assert grounding.ungrounded_quantities(answer, evidence) == {"40.0", "80.0"}
+        assert _qe_ungrounded(answer, evidence) == {"40.0", "80.0"}
 
     def test_units_are_matched_on_word_boundaries(self) -> None:
         """`K`, `A` and `eV` sit inside ordinary words.

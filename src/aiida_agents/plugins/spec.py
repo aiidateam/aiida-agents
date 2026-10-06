@@ -20,6 +20,7 @@ __all__ = [
     "PLUGIN_ENTRY_POINT_GROUP",
     "AgentPlugin",
     "AgentTool",
+    "GroundingVocabulary",
     "RagCorpus",
 ]
 
@@ -88,6 +89,19 @@ class AgentTool:
         return getattr(self.fn, "__name__", repr(self.fn))
 
 
+@dataclass(frozen=True)
+class GroundingVocabulary:
+    """Domain-specific terms that make numeric claims checkable.
+
+    Units make a preceding number a measured claim; parameter names make
+    unadorned numeric values in the same sentence count as claims. The core
+    package intentionally ships no simulation vocabulary of its own.
+    """
+
+    units: tuple[str, ...] = ()
+    parameters: tuple[str, ...] = ()
+
+
 @t.runtime_checkable
 class AgentPlugin(t.Protocol):
     """What a provider may offer. Every hook is optional.
@@ -112,5 +126,13 @@ class AgentPlugin(t.Protocol):
         Say what only this plugin knows (its conventions, its physics). Do not
         restate the agent's workflow: the core prompt wins on any conflict, and
         the fragment is budgeted (see ``discovery.MAX_PROMPT_FRAGMENT_CHARS``).
+        """
+        ...
+
+    def grounding_vocabulary(self) -> GroundingVocabulary | None:
+        """Terms for domain quantities this plugin can ground from evidence.
+
+        For example, an atomistic plugin may contribute units and input
+        parameter names. Keep domain terminology out of the generic core.
         """
         ...

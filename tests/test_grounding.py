@@ -8,16 +8,62 @@ so these hold the check to catching what the prompt did not.
 from __future__ import annotations
 
 import pytest
+from functools import partial
 
 from aiida_agents.grounding import (
     labelled_python_blocks,
     python_blocks,
     syntax_errors,
     ungrounded_symbols,
-    quantities_in,
+    quantities_in as _quantities_in,
     tool_output_text,
-    ungrounded_quantities,
+    ungrounded_quantities as _ungrounded_quantities,
 )
+from aiida_agents.plugins import GroundingVocabulary
+
+_TEST_QE_VOCABULARY = GroundingVocabulary(
+    units=(
+        "Ry",
+        "Rydberg",
+        "eV",
+        "meV",
+        "Ha",
+        "Hartree",
+        "Bohr",
+        "bohr",
+        "GPa",
+        "kbar",
+        "K",
+        "Å^-1",
+        "Å-1",
+        "Å⁻¹",
+        "1/Å",
+        "Å",
+        "A^-1",
+        "A-1",
+        "1/A",
+        "Ang",
+        "angstrom",
+    ),
+    parameters=(
+        "ecutwfc",
+        "ecutrho",
+        "conv_thr",
+        "degauss",
+        "kpoints_distance",
+        "k-point spacing",
+        "mixing_beta",
+        "smearing",
+        "etot_conv_thr",
+        "forc_conv_thr",
+        "press_conv_thr",
+        "nbnd",
+        "electron_maxstep",
+        "cutoff",
+    ),
+)
+quantities_in = partial(_quantities_in, vocabulary=_TEST_QE_VOCABULARY)
+ungrounded_quantities = partial(_ungrounded_quantities, vocabulary=_TEST_QE_VOCABULARY)
 
 
 class TestTheFabricationThatShipped:
@@ -88,6 +134,23 @@ class TestQuantityDetection:
         self, text: str, expected: set[str]
     ) -> None:
         assert quantities_in(text) == expected
+
+    def test_the_core_has_no_atomistic_defaults(self) -> None:
+        assert _ungrounded_quantities("use 60 Ry", evidence="") == set()
+
+    def test_plugin_terms_are_literal_and_support_punctuation(self) -> None:
+        vocabulary = GroundingVocabulary(units=("u/s",), parameters=("energy+cutoff",))
+
+        assert _quantities_in("Use energy+cutoff = 12", vocabulary) == {"12.0"}
+        assert _ungrounded_quantities(
+            "Use 3 u/s", evidence="", vocabulary=vocabulary
+        ) == {"3.0"}
+        assert (
+            _ungrounded_quantities(
+                "Use 3 u/s", evidence="speed: 3 u/s", vocabulary=vocabulary
+            )
+            == set()
+        )
 
 
 class TestEvidenceExtraction:

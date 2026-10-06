@@ -155,3 +155,32 @@ def test_print_reply_raw_flag_forces_source_on_a_terminal(
     output._print_reply("# Title", raw=True)
 
     assert "# Title" in capsys.readouterr().out
+
+
+def test_grounding_warning_uses_plugin_vocabulary(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from aiida_agents import plugins
+    from aiida_agents.cli.output import _warn_ungrounded
+    from aiida_agents.plugins import GroundingVocabulary
+
+    monkeypatch.setattr(
+        plugins,
+        "discover_grounding_vocabulary",
+        lambda: GroundingVocabulary(units=("Ry",), parameters=("ecutwfc",)),
+    )
+    messages = [
+        ModelRequest(
+            parts=[
+                ToolReturnPart(
+                    tool_name="query_run_context",
+                    content={"ecutwfc": 60.0},
+                    tool_call_id="call-1",
+                )
+            ]
+        )
+    ]
+
+    _warn_ungrounded("Use 80 Ry.", messages, "what cutoff?")
+
+    assert "80.0" in capsys.readouterr().out

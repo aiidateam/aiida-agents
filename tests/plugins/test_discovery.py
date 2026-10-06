@@ -15,7 +15,14 @@ from typing import Any
 
 import pytest
 
-from aiida_agents.plugins import AgentTool, LoadedPlugin, RagCorpus, discover_plugins
+from aiida_agents.plugins import (
+    AgentTool,
+    GroundingVocabulary,
+    LoadedPlugin,
+    RagCorpus,
+    discover_grounding_vocabulary,
+    discover_plugins,
+)
 from aiida_agents.plugins.discovery import MAX_PROMPT_FRAGMENT_CHARS
 
 
@@ -48,8 +55,16 @@ _Register = Callable[..., None]
 
 
 @pytest.fixture
-def registered(monkeypatch: pytest.MonkeyPatch) -> _Register:
+def registered(
+    monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
+) -> _Register:
     """Register fake providers under the plugin entry-point group."""
+    discover_grounding_vocabulary.cache_clear()
+
+    def clear_cache() -> None:
+        discover_grounding_vocabulary.cache_clear()
+
+    request.addfinalizer(clear_cache)
 
     def _register(*eps: _EntryPoint) -> None:
         monkeypatch.setattr(
@@ -78,6 +93,9 @@ class TestContributions:
             def prompt_fragment(self) -> str:
                 return "Use ecutrho = 8 x ecutwfc."
 
+            def grounding_vocabulary(self) -> GroundingVocabulary:
+                return GroundingVocabulary(units=("Ry", "eV"), parameters=("ecutwfc",))
+
         registered(_EntryPoint("qe", Provider()))
         (plugin,) = discover_plugins()
 
@@ -86,6 +104,9 @@ class TestContributions:
         assert [tool.writes for tool in plugin.tools] == [False, True]
         assert plugin.corpora[0].name == "qe"
         assert plugin.prompt_fragment == "Use ecutrho = 8 x ecutwfc."
+        assert plugin.grounding_vocabulary == GroundingVocabulary(
+            units=("Ry", "eV"), parameters=("ecutwfc",)
+        )
 
     def test_hooks_are_optional(self, registered: _Register) -> None:
         """A provider implementing nothing is still a valid plugin."""
@@ -159,6 +180,12 @@ class TestContainment:
             pytest.param("tools", [object()], id="tools-not-AgentTool"),
             pytest.param("rag_corpora", [object()], id="corpora-not-RagCorpus"),
             pytest.param("prompt_fragment", 42, id="fragment-not-str"),
+            pytest.param("grounding_vocabulary", "Ry", id="vocabulary-not-object"),
+            pytest.param(
+                "grounding_vocabulary",
+                GroundingVocabulary(units=("",)),
+                id="vocabulary-empty-term",
+            ),
         ],
     )
     def test_malformed_hook_output_is_dropped(
@@ -172,6 +199,36 @@ class TestContainment:
         assert plugin.tools == ()
         assert plugin.corpora == ()
         assert plugin.prompt_fragment is None
+        assert plugin.grounding_vocabulary is None
+
+    def test_vocabularies_combine_in_plugin_order_and_deduplicate(
+        self, registered: _Register
+    ) -> None:
+        class Provider:
+            def __init__(self, name: str, vocabulary: GroundingVocabulary) -> None:
+                self.name = name
+                self.vocabulary = vocabulary
+
+            def grounding_vocabulary(self) -> GroundingVocabulary:
+                return self.vocabulary
+
+        registered(
+            _EntryPoint(
+                "zeta",
+                Provider("zeta", GroundingVocabulary(units=("eV",), parameters=("k",))),
+            ),
+            _EntryPoint(
+                "alpha",
+                Provider(
+                    "alpha",
+                    GroundingVocabulary(units=("Ry", "eV"), parameters=("ecut",)),
+                ),
+            ),
+        )
+
+        assert discover_grounding_vocabulary() == GroundingVocabulary(
+            units=("Ry", "eV"), parameters=("ecut", "k")
+        )
 
     def test_corpus_without_a_source_is_dropped(self, registered: _Register) -> None:
         """A corpus naming neither text_dir nor docs_repo can't be built."""
@@ -189,6 +246,28 @@ class TestContainment:
 
 
 class TestPolicies:
+    def test_grounding_scan_does_not_call_other_hooks(
+        self, registered: _Register
+    ) -> None:
+        class Provider:
+            name = "side-effects"
+
+            def tools(self) -> Sequence[AgentTool]:
+                raise AssertionError("tools hook must not run during grounding scan")
+
+            def rag_corpora(self) -> Sequence[RagCorpus]:
+                raise AssertionError("corpora hook must not run during grounding scan")
+
+            def prompt_fragment(self) -> str:
+                raise AssertionError("prompt hook must not run during grounding scan")
+
+            def grounding_vocabulary(self) -> GroundingVocabulary:
+                return GroundingVocabulary(units=("Ry",))
+
+        registered(_EntryPoint("side-effects", Provider()))
+
+        assert discover_grounding_vocabulary() == GroundingVocabulary(units=("Ry",))
+
     def test_duplicate_tool_name_keeps_the_first_and_warns(
         self, registered: _Register, caplog: pytest.LogCaptureFixture
     ) -> None:

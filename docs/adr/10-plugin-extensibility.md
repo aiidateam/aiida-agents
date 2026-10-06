@@ -23,13 +23,14 @@ A plugin declares **one entry point** in the `aiida_agents.plugins` group, point
 quantumespresso = "my_plugin.agents:PROVIDER"
 ```
 
-The provider implements `AgentPlugin`, a structural `Protocol` with three hooks, **all optional**:
+The provider implements `AgentPlugin`, a structural `Protocol` with four hooks, **all optional**:
 
 | Hook                | Contributes                                               |
 | ------------------- | --------------------------------------------------------- |
 | `tools()`           | `AgentTool` objects registered on the agent               |
 | `rag_corpora()`     | `RagCorpus` objects indexed and cited as the plugin's own |
 | `prompt_fragment()` | Domain guidance appended to the system prompt             |
+| `grounding_vocabulary()` | Units and parameter names used to check numeric claims |
 
 ### The contract imports nothing heavy
 
@@ -67,9 +68,9 @@ A version bump resolves to a different collection and rebuilds, so an index can 
 
 - A plugin can extend the agents without this package knowing it exists, and without depending on the agent stack.
 - The write-gating guarantee holds across contributed tools, because it is applied at registration rather than requested by the contributor.
-- Discovery cost is paid at agent construction: every installed provider is read once when an agent is built.
+- Tool, corpus, and prompt discovery is paid at agent construction. Grounding vocabulary is read through its own cached, vocabulary-only pass the first time the CLI checks a reply.
 - A plugin's contributions are only as good as its docstrings: a contributed tool the model cannot understand from its signature and docstring is one it will not use correctly.
-- Three hooks is a small surface. Anything a plugin wants to contribute that is not a tool, a corpus, or prompt text needs this ADR revisited.
+- The hooks remain a small surface. Anything beyond tools, corpora, prompt guidance, and grounding vocabulary needs this ADR revisited.
 
 ## Alternatives considered
 

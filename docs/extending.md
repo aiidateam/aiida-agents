@@ -62,7 +62,7 @@ quantumespresso = "my_plugin.agents:PROVIDER"
 Every hook is optional, so implement only what you have:
 
 ```python
-from aiida_agents.plugins import AgentPlugin, AgentTool, RagCorpus
+from aiida_agents.plugins import AgentPlugin, AgentTool, GroundingVocabulary, RagCorpus
 
 
 class Provider:
@@ -88,6 +88,12 @@ class Provider:
     def prompt_fragment(self):
         return "Cutoffs for this plugin are in Ry, following Quantum ESPRESSO's own input format."
 
+    def grounding_vocabulary(self):
+        return GroundingVocabulary(
+            units=("Ry", "eV", "Bohr", "Å", "1/A"),
+            parameters=("ecutwfc", "ecutrho", "kpoints_distance"),
+        )
+
 
 PROVIDER = Provider()
 ```
@@ -100,11 +106,13 @@ Three things worth knowing:
 
 **A prompt fragment says what only you know.** Your conventions, your physics, your units. Do not restate the agent's workflow: the core prompt wins on any conflict, and the fragment has a character budget.
 
+**`grounding_vocabulary()` contributes domain terms.** Return a `GroundingVocabulary` with the units and parameter names that make your numeric claims checkable. The core package ships no atomistic vocabulary. Terms are matched literally and escaped, so regex syntax is not needed.
+
 A corpus needs exactly one source: either `text_dir` (pre-rendered text you ship) or `docs_repo` (cloned and rendered with your own `docs` extra in an isolated build).
 
 **Give `docs_url` if your documentation is published.** It is a template taking `{version}` and `{page}`, and it is what lets an answer cite your docs with a link the reader can open rather than a path they have to go and find. `{version}` is filled from your `docs_ref`, so the page linked is the one the corpus was rendered from. A citation cannot quote one release and link another. Leave it unset and passages from your corpus are still retrieved and still attributed, just unlinked; a guessed URL would be worse than none.
 
-`dev/qe_rag_stub/` in this repository is a working example of all three hooks, written because aiida-quantumespresso does not ship this entry point yet. It contributes its documentation as a corpus, a `read_scf_convergence` tool that parses pw.x's own electronic-convergence trace, and a fragment saying when that tool applies. The tool is the reason the split matters: reading a Quantum ESPRESSO output format is exactly the knowledge that belongs to the plugin and not to `aiida-agents`, and a plugin for another code contributes its own equivalent without either package learning about the other.
+`dev/qe_rag_stub/` in this repository is a working example of the hooks, written because aiida-quantumespresso does not ship this entry point yet. It contributes its documentation as a corpus, a `read_scf_convergence` tool that parses pw.x's own electronic-convergence trace, a fragment saying when that tool applies, and the corresponding units and parameters for grounding. The tool is the reason the split matters: reading a Quantum ESPRESSO output format is exactly the knowledge that belongs to the plugin and not to `aiida-agents`, and a plugin for another code contributes its own equivalent without either package learning about the other.
 
 One limit to know: plugin tools are registered on the **Analysis agent only**. A tool that belongs on the Execution agent has nowhere to go today.
 

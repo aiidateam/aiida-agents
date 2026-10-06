@@ -21,7 +21,7 @@ real integration.
 
 from __future__ import annotations
 
-from aiida_agents.plugins import AgentTool, RagCorpus
+from aiida_agents.plugins import AgentTool, GroundingVocabulary, RagCorpus
 
 from qe_rag_stub.convergence import read_scf_convergence
 
@@ -74,6 +74,52 @@ class _QuantumEspressoStub:
 
     def prompt_fragment(self) -> str:
         return _PROMPT_FRAGMENT
+
+    def grounding_vocabulary(self) -> GroundingVocabulary:
+        return GroundingVocabulary(
+            units=(
+                "Ry",
+                "Rydberg",
+                "eV",
+                "meV",
+                "Ha",
+                "Hartree",
+                "Bohr",
+                "bohr",
+                "GPa",
+                "kbar",
+                "K",
+                "Å^-1",
+                "Å-1",
+                "Å⁻¹",
+                "1/Å",
+                "Å",
+                "A^-1",
+                "A-1",
+                "1/A",
+                "Ang",
+                "angstrom",
+            ),
+            parameters=(
+                "ecutwfc",
+                "ecutrho",
+                "conv_thr",
+                "degauss",
+                "kpoint_distance",
+                "kpoints_distance",
+                "k-point spacing",
+                "kpoint spacing",
+                "k point spacing",
+                "mixing_beta",
+                "smearing",
+                "etot_conv_thr",
+                "forc_conv_thr",
+                "press_conv_thr",
+                "nbnd",
+                "electron_maxstep",
+                "cutoff",
+            ),
+        )
 
 
 PROVIDER = _QuantumEspressoStub()

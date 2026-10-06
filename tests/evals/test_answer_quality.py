@@ -157,11 +157,15 @@ def _grounded_evaluator() -> t.Any:
             self, ctx: EvaluatorContext[str, _Answered, dict[str, t.Any]]
         ) -> bool:
             from aiida_agents.grounding import ungrounded_quantities
+            from aiida_agents.plugins import discover_grounding_vocabulary
 
             if ctx.output is None:
                 return False
             invented = ungrounded_quantities(
-                ctx.output.answer, ctx.output.evidence, ctx.inputs
+                ctx.output.answer,
+                ctx.output.evidence,
+                ctx.inputs,
+                vocabulary=discover_grounding_vocabulary(),
             )
             if invented:
                 logger.warning("ungrounded in %s: %s", ctx.name, sorted(invented))
