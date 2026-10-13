@@ -18,6 +18,8 @@ from fastmcp.exceptions import ToolError
 from aiida_agents import tools
 from aiida_agents.mcp.server import mcp
 from aiida_agents.mcp.tools import register_tool
+from aiida_agents.plugins import discover_plugins
+from aiida_agents.rag import search_aiida_docs
 
 
 # The tools that reach the database. Kept off the MCP server (see the test
@@ -85,7 +87,19 @@ def test_server_registers_read_tools_only() -> None:
     # ...but never exposed on the server.
     assert not (_WRITE_TOOLS & registered)
     assert not (_UNEXPORTED_READ_TOOLS & registered)
-    assert registered == discovered - _WRITE_TOOLS - _UNEXPORTED_READ_TOOLS
+    expected = discovered - _WRITE_TOOLS - _UNEXPORTED_READ_TOOLS
+    expected.add(search_aiida_docs.__name__)
+
+    plugin_read_tools = {
+        tool.fn.__name__
+        for plugin in discover_plugins()
+        for tool in plugin.tools
+        if not tool.writes
+    }
+
+    expected.update(plugin_read_tools)
+
+    assert registered == expected
 
 
 def test_register_tool_surfaces_tool_error() -> None:
@@ -176,3 +190,36 @@ def test_a_storage_that_cannot_be_opened_is_reported_before_the_traceback(
         .getMessage()
         .startswith("cannot open the profile storage: Database schema version")
     )
+
+
+def test_register_all_exposes_plugin_reads_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Register plugin read tools but never plugin write tools"""
+    from types import SimpleNamespace
+
+    from aiida_agents.mcp import tools as mcp_tools
+
+    def plugin_reader() -> str:
+        return "read result"
+
+    def plugin_writer() -> str:
+        return "write result"
+
+    plugin = SimpleNamespace(
+        tools=(
+            SimpleNamespace(fn=plugin_reader, writes=False),
+            SimpleNamespace(fn=plugin_writer, writes=True),
+        )
+    )
+    monkeypatch.setattr(
+        mcp_tools,
+        "discover_plugins",
+        lambda: (plugin,),
+    )
+
+    server = FastMCP(name="plugin-test")
+    mcp_tools.register_all(server)
+    registered = {tool.name for tool in asyncio.run(server.list_tools())}
+    assert "plugin_reader" in registered
+    assert "plugin_writer" not in registered

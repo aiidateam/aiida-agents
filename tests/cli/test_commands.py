@@ -18,6 +18,14 @@ def test_cli_exposes_expected_commands() -> None:
         assert command in result.output
 
 
+def test_mcp_serve_accepts_stdio_transport() -> None:
+    """The MCP CLI exposes stdio without starting the actual server."""
+    result = CliRunner().invoke(cli, ["mcp", "serve", "--help"])
+    assert result.exit_code == 0
+    assert "streamable-http" in result.output
+    assert "stdio" in result.output
+
+
 @pytest.mark.parametrize(
     "args",
     [

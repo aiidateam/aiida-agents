@@ -7,7 +7,8 @@ cannot reach the client with an uncaught ``AiidaException``.
 from __future__ import annotations
 
 from collections.abc import Callable
-
+from aiida_agents.rag import search_aiida_docs
+from aiida_agents.plugins import discover_plugins
 from fastmcp import FastMCP
 
 from aiida_agents.mcp._errors import to_mcp_tool_error
@@ -53,24 +54,46 @@ def register_tool(mcp: FastMCP, func: Callable[..., object]) -> None:
 def register_all(mcp: FastMCP) -> None:
     """Register the read-only tools on the MCP server."""
     # Analysis tools
-    register_tool(mcp, get_process_status)
-    register_tool(mcp, get_process_report)
-    register_tool(mcp, diagnose_process_failure)
-    register_tool(mcp, get_daemon_status)
-    register_tool(mcp, list_recent_processes)
-    register_tool(mcp, list_retrieved_files)
-    register_tool(mcp, get_retrieved_file)
-    register_tool(mcp, get_node_inputs)
-    register_tool(mcp, get_node_outputs)
-    register_tool(mcp, query_nodes)
-    register_tool(mcp, search_structures)
-    # Execution tools (read-only half: discovery and input building)
-    register_tool(mcp, list_process_entry_points)
-    register_tool(mcp, describe_process)
-    register_tool(mcp, build_process_inputs)
-    register_tool(mcp, draft_process_inputs)
-    register_tool(mcp, check_cutoffs_against_pseudos)
-    register_tool(mcp, build_resubmission_spec)
-    register_tool(mcp, list_codes)
-    register_tool(mcp, query_run_context)
-    register_tool(mcp, wait_for_process)
+
+    builtin_tools = (
+        # Analysis tools
+        get_process_status,
+        get_process_report,
+        diagnose_process_failure,
+        get_daemon_status,
+        list_recent_processes,
+        list_retrieved_files,
+        get_retrieved_file,
+        get_node_inputs,
+        get_node_outputs,
+        query_nodes,
+        search_structures,
+        # Execution tools (read-only half: discovery and input building)
+        list_process_entry_points,
+        describe_process,
+        build_process_inputs,
+        draft_process_inputs,
+        check_cutoffs_against_pseudos,
+        build_resubmission_spec,
+        list_codes,
+        query_run_context,
+        wait_for_process,
+        # Documentation search (RAG)
+        search_aiida_docs,
+    )
+    for func in builtin_tools:
+        register_tool(mcp, func)
+    # Keep built-in tools authoritative if a plugin uses the same name.
+    registered_names = {func.__name__ for func in builtin_tools}
+    # Register plugin-contributed read-only tools.
+    for plugin in discover_plugins():
+        for tool in plugin.tools:
+            if tool.writes:
+                continue
+
+            name = tool.fn.__name__
+            if name in registered_names:
+                continue
+
+            register_tool(mcp, tool.fn)
+            registered_names.add(name)
