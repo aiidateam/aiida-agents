@@ -305,6 +305,7 @@ venv = ".venv"
 reportUnusedFunction = "none"
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 markers = [
     # Grounding evals in tests/evals. They hit a real model provider and need a
     # built RAG index, so they are gated on AIIDA_AGENTS_EVAL=1 as well and are
